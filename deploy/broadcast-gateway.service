@@ -1,0 +1,15 @@
+[Unit]
+Description=SDI-to-SRT Gateway Webinterface
+After=network.target
+
+[Service]
+Environment=PHP_CLI_SERVER_WORKERS=4
+Type=simple
+User=carlo
+WorkingDirectory=/opt/broadcast-gateway/public
+ExecStart=/usr/bin/php -S 0.0.0.0:8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
