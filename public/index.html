@@ -374,7 +374,7 @@
           </template>
 
           <div>
-            <label>SRT Port</label>
+            <label x-text="srtPortLabel(tileForms[n].srt_mode)"></label>
             <input type="number" x-model.number="tileForms[n].srt_port">
           </div>
 
@@ -413,7 +413,7 @@
 
               <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                 <input type="checkbox" x-model="tileForms[n].video_scale_enabled" style="width: auto;">
-                <span>Auflösung herunterskalieren (spart Bandbreite gegenüber nativer SDI-Auflösung)</span>
+                <span>Auflösung herunterskalieren</span>
               </label>
               <div x-show="tileForms[n].video_scale_enabled" style="margin-top: 0.5rem;">
                 <label>Ziel-Auflösung</label>
@@ -622,7 +622,7 @@
           </select>
         </div>
         <div>
-          <label>SRT Port</label>
+          <label x-text="srtPortLabel(form.srt_mode)"></label>
           <input type="number" x-model.number="form.srt_port">
         </div>
       </div>
@@ -678,7 +678,7 @@
 
       <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
         <input type="checkbox" x-model="form.video_scale_enabled" style="width: auto;">
-        <span>Auflösung herunterskalieren (spart Bandbreite gegenüber der Datei-Auflösung)</span>
+        <span>Auflösung herunterskalieren</span>
       </label>
       <div x-show="form.video_scale_enabled" style="margin-top: 0.5rem;">
         <label>Ziel-Auflösung</label>
@@ -718,7 +718,7 @@
     </div>
 
     <div x-show="form.source_type === 'file'">
-      <label>SRT Port</label>
+      <label x-text="srtPortLabel(form.srt_mode)"></label>
       <input type="number" x-model.number="form.srt_port">
     </div>
 
@@ -1209,6 +1209,11 @@ function app() {
       // Die Adresse, über die das Webinterface gerade aufgerufen wird - passt sich automatisch an
       // (VPN-IP jetzt, später ggf. eine andere Adresse), statt eine IP hart zu codieren.
       return window.location.hostname;
+    },
+
+    srtPortLabel(mode) {
+      // Bei Caller ist der Port der des Ziel-Rechners, bei Listener der eigene lokale Port
+      return mode === 'caller' ? 'Ziel-Port (beim Empfänger)' : 'Lokaler SRT Port';
     },
 
     cpuDisplay(stat) {
