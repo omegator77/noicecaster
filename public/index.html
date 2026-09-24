@@ -373,11 +373,6 @@
             </div>
           </template>
 
-          <div>
-            <label x-text="srtPortLabel(tileForms[n].srt_mode)"></label>
-            <input type="number" x-model.number="tileForms[n].srt_port">
-          </div>
-
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
             <div>
               <div>
@@ -463,17 +458,21 @@
             </div>
           </template>
 
-          <div class="form-row" style="margin-top: 0.75rem;">
-            <div>
-              <label>Verbindungsmodus</label>
-              <select x-model="tileForms[n].srt_mode">
-                <option value="listener">Listener (wartet auf Verbindung)</option>
-                <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
-              </select>
-            </div>
+          <div style="margin-top: 0.75rem;">
+            <label>Verbindungsmodus</label>
+            <select x-model="tileForms[n].srt_mode">
+              <option value="listener">Listener (wartet auf Verbindung)</option>
+              <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin-top: 0.5rem;">
             <div x-show="tileForms[n].srt_mode === 'caller'">
               <label>Ziel-Adresse (IP oder Hostname)</label>
               <input type="text" x-model="tileForms[n].srt_target_host" placeholder="z.B. 203.0.113.10">
+            </div>
+            <div>
+              <label x-text="srtPortLabel(tileForms[n].srt_mode)"></label>
+              <input type="number" x-model.number="tileForms[n].srt_port">
             </div>
           </div>
           <div style="margin-top: 0.5rem;">
@@ -610,21 +609,15 @@
     </label>
 
     <div x-show="form.source_type === 'videotestsrc'">
-      <div class="form-row">
-        <div>
-          <label>Test-Pattern</label>
-          <select x-model="form.source_pattern">
-            <option value="smpte">SMPTE Farbbalken</option>
-            <option value="ball">Ball (bewegt)</option>
-            <option value="snow">Rauschen</option>
-            <option value="checkers-8">Schachbrett</option>
-            <option value="zone-plate">Zone Plate</option>
-          </select>
-        </div>
-        <div>
-          <label x-text="srtPortLabel(form.srt_mode)"></label>
-          <input type="number" x-model.number="form.srt_port">
-        </div>
+      <div>
+        <label>Test-Pattern</label>
+        <select x-model="form.source_pattern">
+          <option value="smpte">SMPTE Farbbalken</option>
+          <option value="ball">Ball (bewegt)</option>
+          <option value="snow">Rauschen</option>
+          <option value="checkers-8">Schachbrett</option>
+          <option value="zone-plate">Zone Plate</option>
+        </select>
       </div>
 
       <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">Audio (immer mit übertragen)</h2>
@@ -717,11 +710,6 @@
       </div>
     </div>
 
-    <div x-show="form.source_type === 'file'">
-      <label x-text="srtPortLabel(form.srt_mode)"></label>
-      <input type="number" x-model.number="form.srt_port">
-    </div>
-
     <div x-show="form.source_type === 'videotestsrc'">
       <label>Auflösung</label>
       <select :value="form.width + 'x' + form.height" @change="setResolution($event.target.value)">
@@ -743,17 +731,21 @@
       </div>
     </div>
 
-    <div class="form-row">
-      <div>
-        <label>Verbindungsmodus</label>
-        <select x-model="form.srt_mode">
-          <option value="listener">Listener (wartet auf Verbindung)</option>
-          <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
-        </select>
-      </div>
+    <div>
+      <label>Verbindungsmodus</label>
+      <select x-model="form.srt_mode">
+        <option value="listener">Listener (wartet auf Verbindung)</option>
+        <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
+      </select>
+    </div>
+    <div class="form-row" style="margin-top: 0.5rem;">
       <div x-show="form.srt_mode === 'caller'">
         <label>Ziel-Adresse (IP oder Hostname)</label>
         <input type="text" x-model="form.srt_target_host" placeholder="z.B. 203.0.113.10">
+      </div>
+      <div>
+        <label x-text="srtPortLabel(form.srt_mode)"></label>
+        <input type="number" x-model.number="form.srt_port">
       </div>
     </div>
 
