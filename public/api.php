@@ -3,6 +3,7 @@
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/PipelineManager.php';
 require_once __DIR__ . '/../src/DecklinkPortManager.php';
+require_once __DIR__ . '/../src/SystemStats.php';
 
 header('Content-Type: application/json');
 
@@ -76,6 +77,10 @@ try {
         case 'stats':
             $id = (int)($_GET['id'] ?? 0);
             echo json_encode($manager->getStats($id));
+            break;
+
+        case 'system_stats':
+            echo json_encode(SystemStats::collect());
             break;
 
         case 'decklink_probe':

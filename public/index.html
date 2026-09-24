@@ -57,6 +57,26 @@
     50% { filter: drop-shadow(3px 3px 0 #000) drop-shadow(-1px -1px 0 #4c1d95) brightness(1.25); }
   }
   h2 { font-size: 1.1rem; margin: 2rem 0 1rem; color: #cbd5e1; }
+  .sys-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    align-items: center;
+    justify-content: center;
+    background: #14171d;
+    border: 1px solid #2a2e37;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    margin-bottom: 1.75rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    color: #9ca3af;
+  }
+  .sys-status .sys-label { color: #6b7280; margin-right: 0.3rem; }
+  .sys-status .sys-value { color: #e4e6eb; font-weight: 600; }
+  .sys-value.temp-ok { color: #86efac; }
+  .sys-value.temp-warn { color: #fdba74; }
+  .sys-value.temp-hot { color: #fca5a5; }
   .card {
     background: #1a1d24;
     border: 1px solid #2a2e37;
@@ -190,10 +210,18 @@
 </style>
 </head>
 <body>
-<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); })">
   <div class="retro-banner">
     <div class="retro-logo">NOICECASTER</div>
     <div class="retro-sub">*** SDI ⇄ SRT GATEWAY ***</div>
+  </div>
+
+  <div class="sys-status" x-show="systemStats">
+    <span><span class="sys-label">HOST</span><span class="sys-value" x-text="srtHost()"></span></span>
+    <span><span class="sys-label">CPU</span><span class="sys-value" x-text="(systemStats?.cpu_percent ?? '–') + '%'"></span></span>
+    <span><span class="sys-label">RAM</span><span class="sys-value" x-text="formatBytes((systemStats?.mem_used_kb ?? 0) * 1024) + ' / ' + formatBytes((systemStats?.mem_total_kb ?? 0) * 1024)"></span></span>
+    <span><span class="sys-label">TEMP</span><span class="sys-value" :class="tempClass(systemStats?.temp_c)" x-text="(systemStats?.temp_c ?? '–') + '°C'"></span></span>
+    <span><span class="sys-label">LOAD</span><span class="sys-value" x-text="systemStats?.load ? systemStats.load.map(l => l.toFixed(2)).join(' / ') : '–'"></span></span>
   </div>
 
   <template x-if="errorMsg">
@@ -324,7 +352,7 @@
         <div style="margin-top: 0.75rem;">
           <div class="meta" style="margin-bottom: 0.75rem;">
             Modus: <span x-text="portMode(n)"></span> &middot;
-            SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://10.1.1.11:' + tileForms[n].srt_port)"></span>
+            SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span>
             <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running'"> &middot; PID <span x-text="tilePipelineFor(n).pid"></span></template>
           </div>
 
@@ -336,7 +364,7 @@
               </span>
               <span class="stat-item">
                 <span class="stat-label">CPU</span>
-                <span class="stat-value" x-text="(stats[tilePipelineFor(n).id].cpu_percent ?? '–') + '%'"></span>
+                <span class="stat-value" x-text="cpuDisplay(stats[tilePipelineFor(n).id])"></span>
               </span>
               <span class="stat-item">
                 <span class="stat-label">RAM</span>
@@ -509,7 +537,7 @@
         </span>
         <br>
         Modus: <span x-text="p.srt_mode === 'caller' ? 'Caller' : 'Listener'"></span><br>
-        SRT: <span class="srt-url" x-text="p.srt_mode === 'caller' ? ('srt://' + p.srt_target_host + ':' + p.srt_port) : ('srt://10.1.1.11:' + p.srt_port)"></span>
+        SRT: <span class="srt-url" x-text="p.srt_mode === 'caller' ? ('srt://' + p.srt_target_host + ':' + p.srt_port) : ('srt://' + srtHost() + ':' + p.srt_port)"></span>
         <template x-if="p.status === 'running'"> &middot; PID <span x-text="p.pid"></span></template>
       </div>
       <template x-if="p.status === 'running' && stats[p.id]">
@@ -520,7 +548,7 @@
           </span>
           <span class="stat-item">
             <span class="stat-label">CPU</span>
-            <span class="stat-value" x-text="(stats[p.id].cpu_percent ?? '–') + '%'"></span>
+            <span class="stat-value" x-text="cpuDisplay(stats[p.id])"></span>
           </span>
           <span class="stat-item">
             <span class="stat-label">RAM</span>
@@ -767,6 +795,7 @@ function app() {
     })(),
     pollBackoff: 15000,
     pollTimer: null,
+    systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
     savingTile: { 0: false, 1: false, 2: false, 3: false },
     tileCollapsed: (() => {
@@ -1067,6 +1096,25 @@ function app() {
       this.pollPortSignals();
     },
 
+    async pollSystemStats() {
+      if (!document.hidden) {
+        try {
+          const res = await fetch('api.php?action=system_stats');
+          this.systemStats = await res.json();
+        } catch (e) {
+          // ignorieren, naechster Versuch in 10s
+        }
+      }
+      setTimeout(() => this.pollSystemStats(), 10000);
+    },
+
+    tempClass(temp) {
+      if (temp === null || temp === undefined) return '';
+      if (temp >= 85) return 'temp-hot';
+      if (temp >= 70) return 'temp-warn';
+      return 'temp-ok';
+    },
+
     async uploadFile() {
       const input = this.$refs.fileInput;
       if (!input.files || input.files.length === 0) {
@@ -1114,6 +1162,19 @@ function app() {
       if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
       if (m > 0) return m + 'm ' + s + 's';
       return s + 's';
+    },
+
+    srtHost() {
+      // Die Adresse, über die das Webinterface gerade aufgerufen wird - passt sich automatisch an
+      // (VPN-IP jetzt, später ggf. eine andere Adresse), statt eine IP hart zu codieren.
+      return window.location.hostname;
+    },
+
+    cpuDisplay(stat) {
+      if (!stat || stat.cpu_percent === null || stat.cpu_percent === undefined) return '–';
+      const cores = stat.cpu_cores || 1;
+      const overall = Math.round(stat.cpu_percent / cores);
+      return Math.round(stat.cpu_percent) + '% (≈' + overall + '% von ' + cores + ' Kernen)';
     },
 
     edit(p) {

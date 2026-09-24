@@ -4,6 +4,7 @@ class PipelineManager
 {
     private PDO $db;
     private DecklinkPortManager $ports;
+    private static ?int $cpuCoreCount = null;
 
     private const DECKLINK_CONNECTIONS = ['auto', 'sdi', 'optical-sdi'];
     private const DECKLINK_PROFILES = [
@@ -620,6 +621,7 @@ class PipelineManager
         $result = [
             'uptime_seconds' => null,
             'cpu_percent' => null,
+            'cpu_cores' => $this->getCpuCoreCount(),
             'memory_kb' => null,
             'client_connected' => false,
             'log_tail' => '',
@@ -652,6 +654,15 @@ class PipelineManager
         }
 
         return $result;
+    }
+
+    private function getCpuCoreCount(): int
+    {
+        if (self::$cpuCoreCount === null) {
+            $nproc = (int)trim((string)shell_exec('nproc'));
+            self::$cpuCoreCount = $nproc > 0 ? $nproc : 1;
+        }
+        return self::$cpuCoreCount;
     }
 
     public function probeDecklinkSignal(int $deviceNumber, string $connection): array
