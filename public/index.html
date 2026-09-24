@@ -373,20 +373,9 @@
             </div>
           </template>
 
-          <div class="form-row">
-            <div>
-              <label>Profil (Duplex-Modus)</label>
-              <select x-model="tileForms[n].decklink_profile">
-                <option value="default">Standard (nicht ändern)</option>
-                <option value="two-sub-devices-full">2 Anschlüsse, volle Bandbreite</option>
-                <option value="one-sub-device-full">1 Anschluss, volle Bandbreite</option>
-                <option value="four-sub-devices-half">4 Anschlüsse, halbe Bandbreite</option>
-              </select>
-            </div>
-            <div>
-              <label>SRT Port</label>
-              <input type="number" x-model.number="tileForms[n].srt_port">
-            </div>
+          <div>
+            <label>SRT Port</label>
+            <input type="number" x-model.number="tileForms[n].srt_port">
           </div>
 
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
@@ -416,6 +405,11 @@
                 <label>Bitrate (kbit/s)</label>
                 <input type="number" x-model.number="tileForms[n].bitrate">
               </div>
+
+              <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" x-model="tileForms[n].clock_overlay_enabled" style="width: auto;">
+                <span>Uhrzeit ins Bild einblenden</span>
+              </label>
 
               <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                 <input type="checkbox" x-model="tileForms[n].video_scale_enabled" style="width: auto;">
@@ -457,7 +451,7 @@
                     <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
                     <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
                     <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
-                    <option value="opus">Opus (inoffiziell in MPEG-TS)</option>
+                    <option value="opus">Opus (nicht alle Player unterstützen Opus in MPEG-TS)</option>
                     <option value="pcm">PCM / SMPTE 302M (unkomprimiert)</option>
                   </select>
                 </div>
@@ -610,20 +604,62 @@
       </div>
     </div>
 
-    <div class="form-row" x-show="form.source_type === 'videotestsrc'">
-      <div>
-        <label>Test-Pattern</label>
-        <select x-model="form.source_pattern">
-          <option value="smpte">SMPTE Farbbalken</option>
-          <option value="ball">Ball (bewegt)</option>
-          <option value="snow">Rauschen</option>
-          <option value="checkers-8">Schachbrett</option>
-          <option value="zone-plate">Zone Plate</option>
-        </select>
+    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+      <input type="checkbox" x-model="form.clock_overlay_enabled" style="width: auto;">
+      <span>Uhrzeit ins Bild einblenden</span>
+    </label>
+
+    <div x-show="form.source_type === 'videotestsrc'">
+      <div class="form-row">
+        <div>
+          <label>Test-Pattern</label>
+          <select x-model="form.source_pattern">
+            <option value="smpte">SMPTE Farbbalken</option>
+            <option value="ball">Ball (bewegt)</option>
+            <option value="snow">Rauschen</option>
+            <option value="checkers-8">Schachbrett</option>
+            <option value="zone-plate">Zone Plate</option>
+          </select>
+        </div>
+        <div>
+          <label>SRT Port</label>
+          <input type="number" x-model.number="form.srt_port">
+        </div>
       </div>
-      <div>
-        <label>SRT Port</label>
-        <input type="number" x-model.number="form.srt_port">
+
+      <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">Audio (immer mit übertragen)</h2>
+      <div class="form-row">
+        <div>
+          <label>Audio-Testsignal</label>
+          <select x-model="form.audio_test_wave">
+            <option value="sine">Sinuston (1 kHz)</option>
+            <option value="silence">Stille</option>
+          </select>
+        </div>
+        <div>
+          <label>Audio-Codec</label>
+          <select x-model="form.audio_codec">
+            <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
+            <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
+            <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
+            <option value="opus">Opus (nicht alle Player unterstützen Opus in MPEG-TS)</option>
+            <option value="pcm">PCM / SMPTE 302M (unkomprimiert, kein Bitrate-Limit)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" style="margin-top: 0.5rem;">
+        <div>
+          <label>Ausgabe-Kanäle</label>
+          <select x-model.number="form.audio_output_channels">
+            <option value="1">1 (Mono)</option>
+            <option value="2">2 (Stereo)</option>
+            <option value="6">6 (5.1)</option>
+          </select>
+        </div>
+        <div>
+          <label>Audio-Bitrate (kbit/s)</label>
+          <input type="number" x-model.number="form.audio_bitrate">
+        </div>
       </div>
     </div>
 
@@ -662,7 +698,7 @@
             <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
             <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
             <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
-            <option value="opus">Opus (inoffiziell in MPEG-TS, ggf. Player-Kompatibilitätsprobleme)</option>
+            <option value="opus">Opus (nicht alle Player unterstützen Opus in MPEG-TS)</option>
             <option value="pcm">PCM / SMPTE 302M (unkomprimiert, kein Bitrate-Limit)</option>
           </select>
         </div>
@@ -761,6 +797,7 @@ function defaultTileForm(deviceNumber) {
     video_codec: 'h264',
     video_keyframe_interval: 0,
     video_rate_control: 'cbr',
+    clock_overlay_enabled: false,
     decklink_profile: 'default',
     bitrate: 2000,
     video_scale_enabled: false,
@@ -822,10 +859,12 @@ function app() {
       audio_codec: 'aac',
       audio_output_channels: 2,
       audio_bitrate: 192,
+      audio_test_wave: 'sine',
       video_codec: 'h264',
       video_keyframe_interval: 0,
       video_rate_control: 'cbr',
       video_scale_enabled: false,
+      clock_overlay_enabled: false,
       srt_passphrase: '',
       srt_pbkeylen: 16,
       srt_streamid: ''
@@ -949,6 +988,7 @@ function app() {
           video_codec: p.video_codec || 'h264',
           video_keyframe_interval: p.video_keyframe_interval ?? 0,
           video_rate_control: p.video_rate_control || 'cbr',
+          clock_overlay_enabled: !!(p.clock_overlay_enabled && p.clock_overlay_enabled != 0),
           decklink_profile: p.decklink_profile || 'default',
           bitrate: p.bitrate ?? 2000,
           video_scale_enabled: !!(p.video_scale_enabled && p.video_scale_enabled != 0),
@@ -998,6 +1038,7 @@ function app() {
         video_codec: tf.video_codec,
         video_keyframe_interval: tf.video_keyframe_interval,
         video_rate_control: tf.video_rate_control,
+        clock_overlay_enabled: tf.clock_overlay_enabled,
         bitrate: tf.bitrate,
         video_scale_enabled: tf.video_scale_enabled,
         width: tf.width,
@@ -1200,10 +1241,12 @@ function app() {
         audio_codec: p.audio_codec || 'aac',
         audio_output_channels: p.audio_output_channels ?? 2,
         audio_bitrate: p.audio_bitrate ?? 192,
+        audio_test_wave: p.audio_test_wave || 'sine',
         video_codec: p.video_codec || 'h264',
         video_keyframe_interval: p.video_keyframe_interval ?? 0,
         video_rate_control: p.video_rate_control || 'cbr',
         video_scale_enabled: !!(p.video_scale_enabled && p.video_scale_enabled != 0),
+        clock_overlay_enabled: !!(p.clock_overlay_enabled && p.clock_overlay_enabled != 0),
         srt_passphrase: p.srt_passphrase || '',
         srt_pbkeylen: p.srt_pbkeylen || 16,
         srt_streamid: p.srt_streamid || ''
@@ -1237,10 +1280,12 @@ function app() {
         audio_codec: 'aac',
         audio_output_channels: 2,
         audio_bitrate: 192,
+        audio_test_wave: 'sine',
         video_codec: 'h264',
         video_keyframe_interval: 0,
         video_rate_control: 'cbr',
         video_scale_enabled: false,
+        clock_overlay_enabled: false,
         srt_passphrase: '',
         srt_pbkeylen: 16,
         srt_streamid: ''

@@ -4,11 +4,12 @@ class SystemStats
 {
     public static function collect(): array
     {
+        $mem = self::memInfo();
         return [
             'cpu_percent' => self::sampleCpuPercent(),
             'cpu_cores' => self::coreCount(),
-            'mem_total_kb' => self::memInfo()['total'],
-            'mem_used_kb' => self::memInfo()['used'],
+            'mem_total_kb' => $mem['total'],
+            'mem_used_kb' => $mem['used'],
             'temp_c' => self::cpuTemp(),
             'load' => sys_getloadavg(),
         ];

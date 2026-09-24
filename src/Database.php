@@ -55,6 +55,8 @@ class Database
             'srt_passphrase' => "TEXT DEFAULT NULL",
             'srt_pbkeylen' => "INTEGER DEFAULT 0",
             'srt_streamid' => "TEXT DEFAULT NULL",
+            'clock_overlay_enabled' => "INTEGER DEFAULT 0",
+            'audio_test_wave' => "TEXT DEFAULT 'sine'",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {
