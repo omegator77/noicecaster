@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SDI-to-SRT Gateway</title>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115;
+    color: #e4e6eb;
+    margin: 0;
+    padding: 2rem;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #fff; }
+  h2 { font-size: 1.1rem; margin: 2rem 0 1rem; color: #cbd5e1; }
+  .card {
+    background: #1a1d24;
+    border: 1px solid #2a2e37;
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .pipeline-name { font-weight: 600; font-size: 1.05rem; }
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .badge.running { background: #14532d; color: #86efac; }
+  .badge.stopped { background: #3f3f46; color: #a1a1aa; }
+  .meta { font-size: 0.85rem; color: #9ca3af; line-height: 1.6; }
+  .actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+  button {
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-start { background: #16a34a; color: white; }
+  .btn-stop { background: #dc2626; color: white; }
+  .btn-delete { background: #3f3f46; color: #e4e6eb; }
+  .btn-primary { background: #2563eb; color: white; }
+  .btn-secondary { background: #334155; color: #e4e6eb; }
+  form.card { display: grid; gap: 0.75rem; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  label { font-size: 0.8rem; color: #9ca3af; display: block; margin-bottom: 0.25rem; }
+  .hint { font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem; }
+  input, select {
+    width: 100%;
+    padding: 0.5rem;
+    background: #0f1115;
+    border: 1px solid #2a2e37;
+    border-radius: 6px;
+    color: #e4e6eb;
+    font-size: 0.9rem;
+  }
+  .empty { color: #6b7280; font-style: italic; padding: 1rem 0; }
+  .srt-url {
+    font-family: monospace;
+    background: #0f1115;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #7dd3fc;
+  }
+  .stats-row {
+    display: flex;
+    gap: 1.25rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #2a2e37;
+  }
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: #6b7280;
+    letter-spacing: 0.02em;
+  }
+  .stat-value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #e4e6eb;
+  }
+  .stat-disabled { opacity: 0.4; }
+  .stat-disabled .stat-value { font-style: italic; font-weight: 400; font-size: 0.8rem; }
+  .error-msg {
+    background: #450a0a;
+    color: #fca5a5;
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+  }
+  .signal-box {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    background: #0f1115;
+    border: 1px solid #2a2e37;
+  }
+  .signal-box.ok { border-color: #14532d; color: #86efac; }
+  .signal-box.no-signal { border-color: #7c2d12; color: #fdba74; }
+  .signal-box.checking { color: #9ca3af; }
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 2rem 0 1rem;
+  }
+  .section-header h2 { margin: 0; }
+  .section-header-title { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
+  .led {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #52525b;
+    flex-shrink: 0;
+  }
+  .led-green { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+  .led-red { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
+  .led-gray { background: #52525b; }
+  .led-blue { background: #3b82f6; box-shadow: 0 0 5px #3b82f6; }
+</style>
+</head>
+<body>
+<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); })">
+  <h1>SDI-to-SRT Gateway</h1>
+
+  <template x-if="errorMsg">
+    <div class="error-msg" x-text="errorMsg"></div>
+  </template>
+
+  <div class="section-header">
+    <div class="section-header-title">
+      <h2>SDI-Anschlüsse</h2>
+      <template x-for="port in decklinkPorts.filter(p => p.role === 'input')" :key="port.device_number">
+        <span class="led" :class="ledClass(port)" :title="'Anschluss ' + port.device_number + (port.label ? ' (' + port.label + ')' : '') + ': ' + ledTitle(port)"></span>
+      </template>
+    </div>
+    <button type="button" class="btn-secondary" @click="togglePortsCollapsed()" x-text="portsCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+  </div>
+  <div class="card" x-show="!portsCollapsed">
+    <div class="hint" style="margin-bottom: 0.75rem;">Legt fest, welcher der 4 physischen SDI-Anschlüsse als Eingang bzw. Ausgang genutzt werden darf, inkl. Video-Modus. Nur passend konfigurierte Anschlüsse stehen unten in den Pipeline-Formularen zur Auswahl. Die LEDs zeigen dauerhaft (alle 15s aktualisiert), ob an einem Eingang ein Signal anliegt.</div>
+    <template x-for="port in decklinkPorts" :key="port.device_number">
+      <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #2a2e37;">
+        <div class="form-row" style="grid-template-columns: 100px 1fr 1fr 1fr;">
+          <div style="align-self: center; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+            <template x-if="port.role === 'input'">
+              <span class="led" :class="ledClass(port)" :title="ledTitle(port)"></span>
+            </template>
+            <span>Anschluss <span x-text="port.device_number"></span></span>
+          </div>
+          <div>
+            <select x-model="port.role" @change="if (port.role === 'output' && port.mode === 'auto') port.mode = '1080i50'">
+              <option value="unused">Nicht verwendet</option>
+              <option value="input">Eingang (SDI → SRT)</option>
+              <option value="output">Ausgang (SRT → SDI)</option>
+            </select>
+          </div>
+          <div>
+            <input type="text" x-model="port.label" placeholder="Bezeichnung, z.B. Kamera 1">
+          </div>
+          <div x-show="port.role !== 'unused'">
+            <select x-model="port.mode">
+              <option value="auto" :disabled="port.role === 'output'">Auto (Signal erkennen)</option>
+              <option value="1080i50">1080i50 (Standard)</option>
+              <option value="720p50">720p50 (Standard)</option>
+              <option value="1080i5994">1080i59.94</option>
+              <option value="1080i60">1080i60</option>
+              <option value="1080p2398">1080p23.98</option>
+              <option value="1080p24">1080p24</option>
+              <option value="1080p25">1080p25</option>
+              <option value="1080p2997">1080p29.97</option>
+              <option value="1080p30">1080p30</option>
+              <option value="1080p50">1080p50</option>
+              <option value="1080p5994">1080p59.94</option>
+              <option value="1080p60">1080p60</option>
+              <option value="720p5994">720p59.94</option>
+              <option value="720p60">720p60</option>
+              <option value="pal">PAL SD 50i</option>
+              <option value="ntsc">NTSC SD 60i</option>
+            </select>
+          </div>
+        </div>
+        <div class="hint" x-show="port.role === 'output'">Ausgang: Modus muss fest gewählt werden – die Karte kann beim Ausgeben nicht automatisch erkennen, welches Format erzeugt werden soll.</div>
+        <div class="hint" x-show="port.role === 'input' && port.mode === 'auto'">"Auto" erkennt Auflösung/Framerate automatisch anhand des anliegenden Signals.</div>
+
+        <div x-show="port.role === 'input'" style="margin-top: 0.5rem;">
+          <button type="button" class="btn-secondary" @click="checkPortSignal(port)" :disabled="port.checking">
+            <span x-text="port.checking ? 'Prüfe...' : 'Signal prüfen'"></span>
+          </button>
+          <template x-if="port.signalResult">
+            <span class="signal-box" :class="port.signalResult?.error ? 'no-signal' : (port.signalResult?.signal ? 'ok' : 'no-signal')" style="display: inline-block; margin-top: 0.4rem; margin-left: 0.5rem; vertical-align: middle;">
+              <template x-if="port.signalResult?.error">
+                <span>Prüfung fehlgeschlagen: <span x-text="port.signalResult?.error"></span></span>
+              </template>
+              <template x-if="port.signalResult && !port.signalResult.error">
+                <span>
+                  Signal: <strong x-text="port.signalResult?.signal ? 'vorhanden' : 'kein Signal erkannt'"></strong>
+                  <template x-if="port.signalResult?.width && port.signalResult?.height">
+                    <span> &middot; erkannt: <span x-text="port.signalResult?.width"></span>x<span x-text="port.signalResult?.height"></span>
+                      <template x-if="port.signalResult?.framerate"> @ <span x-text="port.signalResult?.framerate"></span></template>
+                    </span>
+                  </template>
+                </span>
+              </template>
+            </span>
+          </template>
+          <div class="hint">Prüft für ein paar Sekunden, ob am Anschluss ein Signal anliegt. Hinweis: Das Referenz-/Genlock-Signal (separater REF-IN) kann darüber nicht ausgelesen werden.</div>
+        </div>
+      </div>
+    </template>
+    <div class="actions">
+      <button type="button" class="btn-primary" @click="savePorts()" :disabled="savingPorts" x-text="savingPorts ? 'Speichert...' : 'Anschlüsse speichern'"></button>
+    </div>
+  </div>
+
+  <h2 style="margin: 2rem 0 1rem;">SDI-Anschluss-Pipelines</h2>
+  <div class="hint" style="margin-bottom: 0.75rem;">Jeder der 4 Anschlüsse hat eine feste, zugehörige Pipeline. Richtung ergibt sich automatisch aus der oben gewählten Rolle.</div>
+
+  <template x-for="n in [0, 1, 2, 3]" :key="'tile-' + n">
+    <div class="card">
+      <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
+        <span style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+          <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
+            <span class="led" :class="ledClass(portFor(n))" :title="ledTitle(portFor(n))"></span>
+          </template>
+          <span class="pipeline-name">
+            Anschluss <span x-text="n"></span><template x-if="portFor(n) && portFor(n).label"><span> – <span x-text="portFor(n).label"></span></span></template>
+          </span>
+          <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'sdi_to_srt'">Eingang</span>
+          <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'srt_to_sdi'">Ausgang</span>
+          <span class="badge" style="background:#3f3f46; color:#a1a1aa;" x-show="!tileDirection(portFor(n))">Nicht verwendet</span>
+          <template x-if="tilePipelineFor(n)">
+            <span class="badge" :class="tilePipelineFor(n).status" x-text="tilePipelineFor(n).status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+          </template>
+        </span>
+        <span style="display: flex; gap: 0.5rem; align-items: center;">
+          <template x-if="tilePipelineFor(n)">
+            <span>
+              <button class="btn-start" x-show="tilePipelineFor(n).status !== 'running'" @click="start(tileForms[n].id)">Start</button>
+              <button class="btn-stop" x-show="tilePipelineFor(n).status === 'running'" @click="stop(tileForms[n].id)">Stop</button>
+            </span>
+          </template>
+          <button type="button" class="btn-secondary" @click="toggleTileCollapsed(n)" x-text="tileCollapsed[n] ? 'Aufklappen' : 'Einklappen'"></button>
+        </span>
+      </div>
+
+      <template x-if="!tileDirection(portFor(n))">
+        <div class="hint">Anschluss ist als "Nicht verwendet" konfiguriert. Rolle oben unter "SDI-Anschlüsse" auf Eingang oder Ausgang setzen, um hier eine Pipeline einzurichten.</div>
+      </template>
+
+      <template x-if="tileDirection(portFor(n)) && !tileCollapsed[n]">
+        <div style="margin-top: 0.75rem;">
+          <div class="meta" style="margin-bottom: 0.75rem;">
+            Modus: <span x-text="portMode(n)"></span> &middot;
+            SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://10.1.1.11:' + tileForms[n].srt_port)"></span>
+            <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running'"> &middot; PID <span x-text="tilePipelineFor(n).pid"></span></template>
+          </div>
+
+          <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running' && stats[tilePipelineFor(n).id]">
+            <div class="stats-row" style="margin-top: 0; padding-top: 0; border-top: none; margin-bottom: 0.75rem;">
+              <span class="stat-item">
+                <span class="stat-label">Laufzeit</span>
+                <span class="stat-value" x-text="formatUptime(stats[tilePipelineFor(n).id].uptime_seconds)"></span>
+              </span>
+              <span class="stat-item">
+                <span class="stat-label">CPU</span>
+                <span class="stat-value" x-text="(stats[tilePipelineFor(n).id].cpu_percent ?? '–') + '%'"></span>
+              </span>
+              <span class="stat-item">
+                <span class="stat-label">RAM</span>
+                <span class="stat-value" x-text="stats[tilePipelineFor(n).id].memory_kb ? Math.round(stats[tilePipelineFor(n).id].memory_kb / 1024) + ' MB' : '–'"></span>
+              </span>
+            </div>
+          </template>
+
+          <div class="form-row">
+            <div>
+              <label>Profil (Duplex-Modus)</label>
+              <select x-model="tileForms[n].decklink_profile">
+                <option value="default">Standard (nicht ändern)</option>
+                <option value="two-sub-devices-full">2 Anschlüsse, volle Bandbreite</option>
+                <option value="one-sub-device-full">1 Anschluss, volle Bandbreite</option>
+                <option value="four-sub-devices-half">4 Anschlüsse, halbe Bandbreite</option>
+              </select>
+            </div>
+            <div>
+              <label>SRT Port</label>
+              <input type="number" x-model.number="tileForms[n].srt_port">
+            </div>
+          </div>
+
+          <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
+            <div>
+              <div>
+                <label>Video-Codec</label>
+                <select x-model="tileForms[n].video_codec">
+                  <option value="h264">H.264 (empfohlen, breite Kompatibilität)</option>
+                  <option value="h265">H.265 / HEVC (bessere Kompression, mehr CPU-Last)</option>
+                  <option value="mpeg2">MPEG-2 (klassischer Broadcast-Standard)</option>
+                </select>
+              </div>
+              <div class="form-row" style="margin-top: 0.5rem;">
+                <div>
+                  <label>Keyframe-Intervall (Bilder)</label>
+                  <input type="number" x-model.number="tileForms[n].video_keyframe_interval" placeholder="0 = automatisch (1s)">
+                </div>
+                <div>
+                  <label>Rate-Control</label>
+                  <select x-model="tileForms[n].video_rate_control">
+                    <option value="cbr">CBR (feste Bitrate)</option>
+                    <option value="vbr">VBR (variabel um Ziel-Bitrate)</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-top: 0.5rem;">
+                <label>Bitrate (kbit/s)</label>
+                <input type="number" x-model.number="tileForms[n].bitrate">
+              </div>
+
+              <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" x-model="tileForms[n].video_scale_enabled" style="width: auto;">
+                <span>Auflösung herunterskalieren (spart Bandbreite gegenüber nativer SDI-Auflösung)</span>
+              </label>
+              <div x-show="tileForms[n].video_scale_enabled" style="margin-top: 0.5rem;">
+                <label>Ziel-Auflösung</label>
+                <select x-model.number="tileForms[n].height" @change="setTileResolution(n, $event.target.value)">
+                  <option value="1080">1920x1080</option>
+                  <option value="720">1280x720</option>
+                  <option value="540">960x540</option>
+                  <option value="360">640x360</option>
+                </select>
+              </div>
+
+              <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">Audio (eingebettetes SDI-Audio, immer mit übertragen)</h2>
+              <div class="form-row">
+                <div>
+                  <label>SDI-Erfassungskanäle</label>
+                  <select x-model.number="tileForms[n].decklink_audio_channels">
+                    <option value="2">2 (Stereo)</option>
+                    <option value="8">8</option>
+                    <option value="16">16</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Ausgabe-Kanäle (für Encoding)</label>
+                  <select x-model.number="tileForms[n].audio_output_channels">
+                    <option value="1">1 (Mono)</option>
+                    <option value="2">2 (Stereo)</option>
+                    <option value="6">6 (5.1)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row" style="margin-top: 0.5rem;">
+                <div>
+                  <label>Audio-Codec</label>
+                  <select x-model="tileForms[n].audio_codec">
+                    <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
+                    <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
+                    <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
+                    <option value="opus">Opus (inoffiziell in MPEG-TS)</option>
+                    <option value="pcm">PCM / SMPTE 302M (unkomprimiert)</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Audio-Bitrate (kbit/s)</label>
+                  <input type="number" x-model.number="tileForms[n].audio_bitrate">
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div class="form-row" style="margin-top: 0.75rem;">
+            <div>
+              <label>Verbindungsmodus</label>
+              <select x-model="tileForms[n].srt_mode">
+                <option value="listener">Listener (wartet auf Verbindung)</option>
+                <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
+              </select>
+            </div>
+            <div x-show="tileForms[n].srt_mode === 'caller'">
+              <label>Ziel-Adresse (IP oder Hostname)</label>
+              <input type="text" x-model="tileForms[n].srt_target_host" placeholder="z.B. 203.0.113.10">
+            </div>
+          </div>
+          <div style="margin-top: 0.5rem;">
+            <label>SRT Latenz (ms)</label>
+            <input type="number" x-model.number="tileForms[n].srt_latency">
+          </div>
+
+          <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">SRT-Sicherheit (optional)</h2>
+          <div class="form-row">
+            <div>
+              <label>Passphrase (Verschlüsselung)</label>
+              <input type="text" x-model="tileForms[n].srt_passphrase" placeholder="leer = keine Verschlüsselung">
+              <div class="hint">10–79 Zeichen, auf Sender und Empfänger identisch.</div>
+            </div>
+            <div>
+              <label>Schlüssellänge</label>
+              <select x-model.number="tileForms[n].srt_pbkeylen" :disabled="!tileForms[n].srt_passphrase">
+                <option value="16">AES-128</option>
+                <option value="24">AES-192</option>
+                <option value="32">AES-256</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top: 0.5rem;">
+            <label>Stream ID</label>
+            <input type="text" x-model="tileForms[n].srt_streamid" placeholder="leer = keine">
+          </div>
+
+          <div class="actions">
+            <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="savingTile[n]" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <h2 style="margin: 2rem 0 1rem;">Weitere Pipelines (Test-Pattern / Datei)</h2>
+  <div class="hint" style="margin-bottom: 0.75rem;">Unabhängig von den SDI-Anschlüssen – für Testsignale oder das Streamen einer Videodatei.</div>
+
+  <template x-if="otherPipelines().length === 0">
+    <div class="empty">Noch keine Pipelines angelegt.</div>
+  </template>
+
+  <template x-for="p in otherPipelines()" :key="p.id">
+    <div class="card">
+      <div class="card-header">
+        <span class="pipeline-name" x-text="p.name"></span>
+        <span class="badge" :class="p.status" x-text="p.status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+      </div>
+      <div class="meta">
+        <span>
+          Quelle: <span x-text="p.source_type"></span> (<span x-text="p.source_pattern"></span>) &middot;
+          <span x-text="p.width"></span>x<span x-text="p.height"></span>@<span x-text="p.framerate"></span>fps &middot;
+          <span x-text="p.bitrate"></span> kbit/s &middot; Latenz <span x-text="p.srt_latency"></span>ms
+        </span>
+        <br>
+        Modus: <span x-text="p.srt_mode === 'caller' ? 'Caller' : 'Listener'"></span><br>
+        SRT: <span class="srt-url" x-text="p.srt_mode === 'caller' ? ('srt://' + p.srt_target_host + ':' + p.srt_port) : ('srt://10.1.1.11:' + p.srt_port)"></span>
+        <template x-if="p.status === 'running'"> &middot; PID <span x-text="p.pid"></span></template>
+      </div>
+      <template x-if="p.status === 'running' && stats[p.id]">
+        <div class="stats-row">
+          <span class="stat-item">
+            <span class="stat-label">Laufzeit</span>
+            <span class="stat-value" x-text="formatUptime(stats[p.id].uptime_seconds)"></span>
+          </span>
+          <span class="stat-item">
+            <span class="stat-label">CPU</span>
+            <span class="stat-value" x-text="(stats[p.id].cpu_percent ?? '–') + '%'"></span>
+          </span>
+          <span class="stat-item">
+            <span class="stat-label">RAM</span>
+            <span class="stat-value" x-text="stats[p.id].memory_kb ? Math.round(stats[p.id].memory_kb / 1024) + ' MB' : '–'"></span>
+          </span>
+          <span class="stat-item stat-disabled" title="Verbindungserkennung noch nicht verlässlich implementiert">
+            <span class="stat-label">Client verbunden</span>
+            <span class="stat-value">inoperabel</span>
+          </span>
+        </div>
+      </template>
+      <div class="actions">
+        <button class="btn-start" x-show="p.status !== 'running'" @click="start(p.id)">Start</button>
+        <button class="btn-stop" x-show="p.status === 'running'" @click="stop(p.id)">Stop</button>
+        <button class="btn-primary" @click="edit(p)" x-bind:disabled="p.status === 'running'">Bearbeiten</button>
+        <button class="btn-delete" @click="remove(p.id)" x-bind:disabled="p.status === 'running'">Löschen</button>
+      </div>
+    </div>
+  </template>
+
+  <h2 x-text="editingId ? 'Pipeline bearbeiten' : 'Neue Pipeline'"></h2>
+
+  <form class="card" @submit.prevent="save()">
+    <div>
+      <label>Name</label>
+      <input type="text" x-model="form.name" required placeholder="z.B. Kamera 1 Gateway">
+    </div>
+
+    <div>
+      <label>Quellentyp</label>
+      <select x-model="form.source_type">
+        <option value="videotestsrc">Test-Pattern (synthetisch)</option>
+        <option value="file">Videodatei</option>
+      </select>
+      <div class="hint">SDI-Eingänge werden über die festen Anschluss-Pipelines oben verwaltet.</div>
+    </div>
+
+    <div>
+      <label>Video-Codec</label>
+      <select x-model="form.video_codec">
+        <option value="h264">H.264 (empfohlen, breite Kompatibilität)</option>
+        <option value="h265">H.265 / HEVC (bessere Kompression, mehr CPU-Last)</option>
+        <option value="mpeg2">MPEG-2 (klassischer Broadcast-Standard)</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label>Keyframe-Intervall (Bilder)</label>
+        <input type="number" x-model.number="form.video_keyframe_interval" placeholder="0 = automatisch (1s)">
+        <div class="hint">0 = automatisch, entspricht 1 Sekunde GOP bei der gewählten Framerate.</div>
+      </div>
+      <div>
+        <label>Rate-Control</label>
+        <select x-model="form.video_rate_control">
+          <option value="cbr">CBR (feste Bitrate, für Legacy-Hardware/strikte Pfade)</option>
+          <option value="vbr">VBR (variabel um Ziel-Bitrate, bessere Qualität)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row" x-show="form.source_type === 'videotestsrc'">
+      <div>
+        <label>Test-Pattern</label>
+        <select x-model="form.source_pattern">
+          <option value="smpte">SMPTE Farbbalken</option>
+          <option value="ball">Ball (bewegt)</option>
+          <option value="snow">Rauschen</option>
+          <option value="checkers-8">Schachbrett</option>
+          <option value="zone-plate">Zone Plate</option>
+        </select>
+      </div>
+      <div>
+        <label>SRT Port</label>
+        <input type="number" x-model.number="form.srt_port">
+      </div>
+    </div>
+
+    <div x-show="form.source_type === 'file'">
+      <label>Videodatei</label>
+      <select x-model="form.source_file">
+        <option value="">-- auswählen --</option>
+        <template x-for="f in uploadedFiles" :key="f.path">
+          <option :value="f.path" x-text="f.name + ' (' + formatBytes(f.size) + ')'"></option>
+        </template>
+      </select>
+      <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+        <input type="file" x-ref="fileInput" accept="video/*" style="flex: 1;">
+        <button type="button" class="btn-primary" @click="uploadFile()" :disabled="uploading" x-text="uploading ? 'Lädt hoch...' : 'Hochladen'"></button>
+      </div>
+
+      <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+        <input type="checkbox" x-model="form.video_scale_enabled" style="width: auto;">
+        <span>Auflösung herunterskalieren (spart Bandbreite gegenüber der Datei-Auflösung)</span>
+      </label>
+      <div x-show="form.video_scale_enabled" style="margin-top: 0.5rem;">
+        <label>Ziel-Auflösung</label>
+        <select :value="form.width + 'x' + form.height" @change="setResolution($event.target.value)">
+          <option value="1920x1080">1920x1080</option>
+          <option value="1280x720">1280x720</option>
+          <option value="960x540">960x540</option>
+          <option value="640x360">640x360</option>
+        </select>
+      </div>
+
+      <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">Audio (immer mit übertragen)</h2>
+      <div class="form-row">
+        <div>
+          <label>Audio-Codec</label>
+          <select x-model="form.audio_codec">
+            <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
+            <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
+            <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
+            <option value="opus">Opus (inoffiziell in MPEG-TS, ggf. Player-Kompatibilitätsprobleme)</option>
+            <option value="pcm">PCM / SMPTE 302M (unkomprimiert, kein Bitrate-Limit)</option>
+          </select>
+        </div>
+        <div>
+          <label>Ausgabe-Kanäle</label>
+          <select x-model.number="form.audio_output_channels">
+            <option value="1">1 (Mono)</option>
+            <option value="2">2 (Stereo)</option>
+            <option value="6">6 (5.1, falls Quelle es hergibt)</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top: 0.5rem;">
+        <label>Audio-Bitrate (kbit/s)</label>
+        <input type="number" x-model.number="form.audio_bitrate">
+      </div>
+    </div>
+
+    <div x-show="form.source_type === 'file'">
+      <label>SRT Port</label>
+      <input type="number" x-model.number="form.srt_port">
+    </div>
+
+    <div x-show="form.source_type === 'videotestsrc'">
+      <label>Auflösung</label>
+      <select :value="form.width + 'x' + form.height" @change="setResolution($event.target.value)">
+        <option value="1920x1080">1920x1080</option>
+        <option value="1280x720">1280x720</option>
+        <option value="960x540">960x540</option>
+        <option value="640x360">640x360</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label>Framerate</label>
+        <input type="number" x-model.number="form.framerate">
+      </div>
+      <div>
+        <label>Bitrate (kbit/s)</label>
+        <input type="number" x-model.number="form.bitrate">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label>Verbindungsmodus</label>
+        <select x-model="form.srt_mode">
+          <option value="listener">Listener (wartet auf Verbindung)</option>
+          <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
+        </select>
+      </div>
+      <div x-show="form.srt_mode === 'caller'">
+        <label>Ziel-Adresse (IP oder Hostname)</label>
+        <input type="text" x-model="form.srt_target_host" placeholder="z.B. 203.0.113.10">
+      </div>
+    </div>
+
+    <div>
+      <label>SRT Latenz (ms)</label>
+      <input type="number" x-model.number="form.srt_latency">
+    </div>
+
+    <h2 style="margin: 1.5rem 0 0.5rem; font-size: 1rem;">SRT-Sicherheit (optional)</h2>
+    <div class="form-row">
+      <div>
+        <label>Passphrase (Verschlüsselung)</label>
+        <input type="text" x-model="form.srt_passphrase" placeholder="leer = keine Verschlüsselung">
+        <div class="hint">10–79 Zeichen. Muss auf Sender und Empfänger identisch sein.</div>
+      </div>
+      <div>
+        <label>Schlüssellänge</label>
+        <select x-model.number="form.srt_pbkeylen" :disabled="!form.srt_passphrase">
+          <option value="16">AES-128</option>
+          <option value="24">AES-192</option>
+          <option value="32">AES-256</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top: 0.5rem;">
+      <label>Stream ID</label>
+      <input type="text" x-model="form.srt_streamid" placeholder="leer = keine, für Auth bei manchen SRT-Empfängern/CDNs">
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="btn-primary" x-text="editingId ? 'Speichern' : 'Pipeline anlegen'"></button>
+      <button type="button" class="btn-delete" x-show="editingId" @click="cancelEdit()">Abbrechen</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function defaultTileForm(deviceNumber) {
+  return {
+    id: null,
+    video_codec: 'h264',
+    video_keyframe_interval: 0,
+    video_rate_control: 'cbr',
+    decklink_profile: 'default',
+    bitrate: 2000,
+    video_scale_enabled: false,
+    width: 1280,
+    height: 720,
+    decklink_audio_channels: 2,
+    audio_codec: 'aac',
+    audio_output_channels: 2,
+    audio_bitrate: 192,
+    srt_port: 9000 + deviceNumber,
+    srt_mode: 'listener',
+    srt_target_host: '',
+    srt_latency: 120,
+    srt_passphrase: '',
+    srt_pbkeylen: 16,
+    srt_streamid: ''
+  };
+}
+
+function app() {
+  return {
+    pipelines: [],
+    errorMsg: '',
+    editingId: null,
+    stats: {},
+    uploadedFiles: [],
+    uploading: false,
+    decklinkPorts: [],
+    savingPorts: false,
+    portsCollapsed: (() => {
+      try { return localStorage.getItem('portsCollapsed') === '1'; } catch (e) { return false; }
+    })(),
+    pollBackoff: 15000,
+    pollTimer: null,
+    tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
+    savingTile: { 0: false, 1: false, 2: false, 3: false },
+    tileCollapsed: (() => {
+      try { const raw = localStorage.getItem('tileCollapsed'); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
+    })(),
+    form: {
+      name: '',
+      pipeline_direction: 'sdi_to_srt',
+      source_type: 'videotestsrc',
+      source_pattern: 'smpte',
+      source_file: '',
+      width: 1280,
+      height: 720,
+      framerate: 25,
+      bitrate: 2000,
+      srt_port: 8888,
+      srt_latency: 120,
+      srt_mode: 'listener',
+      srt_target_host: '',
+      decklink_device_number: 0,
+      decklink_connection: 'auto',
+      decklink_profile: 'default',
+      decklink_audio_channels: 2,
+      audio_codec: 'aac',
+      audio_output_channels: 2,
+      audio_bitrate: 192,
+      video_codec: 'h264',
+      video_keyframe_interval: 0,
+      video_rate_control: 'cbr',
+      video_scale_enabled: false,
+      srt_passphrase: '',
+      srt_pbkeylen: 16,
+      srt_streamid: ''
+    },
+
+    async load() {
+      try {
+        const res = await fetch('api.php?action=list');
+        this.pipelines = await res.json();
+        await this.loadStats();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Laden: ' + e.message;
+      }
+      // Alle 3 Sekunden Status aktualisieren
+      setTimeout(() => this.load(), 3000);
+    },
+
+    async loadStats() {
+      const running = this.pipelines.filter(p => p.status === 'running');
+      for (const p of running) {
+        try {
+          const res = await fetch('api.php?action=stats&id=' + p.id);
+          this.stats[p.id] = await res.json();
+        } catch (e) {
+          // Stats-Fehler ignorieren, nicht kritisch
+        }
+      }
+    },
+
+    async loadFiles() {
+      try {
+        const res = await fetch('api.php?action=list_files');
+        this.uploadedFiles = await res.json();
+      } catch (e) {
+        // ignorieren, nicht kritisch
+      }
+    },
+
+    async loadPorts() {
+      try {
+        const res = await fetch('api.php?action=decklink_ports_list');
+        const data = await res.json();
+        this.decklinkPorts = data.map(p => ({ ...p, checking: false, signalResult: null }));
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Laden der Anschlusskonfiguration: ' + e.message;
+      }
+    },
+
+    togglePortsCollapsed() {
+      this.portsCollapsed = !this.portsCollapsed;
+      try { localStorage.setItem('portsCollapsed', this.portsCollapsed ? '1' : '0'); } catch (e) {}
+    },
+
+    async savePorts() {
+      this.savingPorts = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=decklink_ports_update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ports: this.decklinkPorts })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.loadPorts();
+        this.initTiles();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Speichern der Anschlüsse: ' + e.message;
+      } finally {
+        this.savingPorts = false;
+      }
+    },
+
+    setResolution(value) {
+      const [w, h] = value.split('x').map(Number);
+      this.form.width = w;
+      this.form.height = h;
+    },
+
+    portMode(deviceNumber) {
+      const port = this.decklinkPorts.find(p => p.device_number === deviceNumber);
+      return port ? port.mode : '–';
+    },
+
+    portFor(deviceNumber) {
+      return this.decklinkPorts.find(p => p.device_number === deviceNumber) || null;
+    },
+
+    otherPipelines() {
+      // Alles, was nicht über eine der 4 festen Anschluss-Kacheln verwaltet wird
+      return this.pipelines.filter(p => p.source_type !== 'decklink' && p.pipeline_direction !== 'srt_to_sdi');
+    },
+
+    tileDirection(port) {
+      if (!port || port.role === 'unused') return null;
+      return port.role === 'output' ? 'srt_to_sdi' : 'sdi_to_srt';
+    },
+
+    tilePipeline(deviceNumber, direction) {
+      if (!direction) return null;
+      return this.pipelines.find(p => p.decklink_device_number === deviceNumber && p.pipeline_direction === direction &&
+        (direction === 'sdi_to_srt' ? p.source_type === 'decklink' : true)) || null;
+    },
+
+    tilePipelineFor(deviceNumber) {
+      return this.tilePipeline(deviceNumber, this.tileDirection(this.portFor(deviceNumber)));
+    },
+
+    initTiles(onlyDevice = null) {
+      // onlyDevice gesetzt: nur diese eine Kachel neu aus Serverdaten aufbauen, damit unsavte
+      // Änderungen in anderen, gerade offenen Kacheln nicht überschrieben werden
+      const devices = onlyDevice === null ? [0, 1, 2, 3] : [onlyDevice];
+      for (const n of devices) {
+        const p = this.tilePipelineFor(n);
+        if (!p) {
+          this.tileForms[n] = defaultTileForm(n);
+          continue;
+        }
+        this.tileForms[n] = {
+          id: p.id,
+          video_codec: p.video_codec || 'h264',
+          video_keyframe_interval: p.video_keyframe_interval ?? 0,
+          video_rate_control: p.video_rate_control || 'cbr',
+          decklink_profile: p.decklink_profile || 'default',
+          bitrate: p.bitrate ?? 2000,
+          video_scale_enabled: !!(p.video_scale_enabled && p.video_scale_enabled != 0),
+          width: p.width ?? 1280,
+          height: p.height ?? 720,
+          decklink_audio_channels: p.decklink_audio_channels ?? 2,
+          audio_codec: p.audio_codec || 'aac',
+          audio_output_channels: p.audio_output_channels ?? 2,
+          audio_bitrate: p.audio_bitrate ?? 192,
+          srt_port: p.srt_port ?? (9000 + n),
+          srt_mode: p.srt_mode || 'listener',
+          srt_target_host: p.srt_target_host || '',
+          srt_latency: p.srt_latency ?? 120,
+          srt_passphrase: p.srt_passphrase || '',
+          srt_pbkeylen: p.srt_pbkeylen || 16,
+          srt_streamid: p.srt_streamid || ''
+        };
+      }
+    },
+
+    toggleTileCollapsed(n) {
+      this.tileCollapsed[n] = !this.tileCollapsed[n];
+      try { localStorage.setItem('tileCollapsed', JSON.stringify(this.tileCollapsed)); } catch (e) {}
+    },
+
+    setTileResolution(n, heightValue) {
+      const widthByHeight = { '1080': 1920, '720': 1280, '540': 960, '360': 640 };
+      this.tileForms[n].height = Number(heightValue);
+      this.tileForms[n].width = widthByHeight[heightValue] || 1280;
+    },
+
+    async saveTile(n) {
+      const port = this.portFor(n);
+      const direction = this.tileDirection(port);
+      if (!direction) return;
+      const tf = this.tileForms[n];
+      this.savingTile[n] = true;
+      this.errorMsg = '';
+      const payload = {
+        name: 'Anschluss ' + n + (port.label ? ' – ' + port.label : ''),
+        pipeline_direction: direction,
+        source_type: direction === 'sdi_to_srt' ? 'decklink' : 'videotestsrc',
+        decklink_device_number: n,
+        decklink_connection: 'auto',
+        decklink_profile: tf.decklink_profile,
+        decklink_audio_channels: tf.decklink_audio_channels,
+        video_codec: tf.video_codec,
+        video_keyframe_interval: tf.video_keyframe_interval,
+        video_rate_control: tf.video_rate_control,
+        bitrate: tf.bitrate,
+        video_scale_enabled: tf.video_scale_enabled,
+        width: tf.width,
+        height: tf.height,
+        audio_codec: tf.audio_codec,
+        audio_output_channels: tf.audio_output_channels,
+        audio_bitrate: tf.audio_bitrate,
+        srt_port: tf.srt_port,
+        srt_mode: tf.srt_mode,
+        srt_target_host: tf.srt_target_host,
+        srt_latency: tf.srt_latency,
+        srt_passphrase: tf.srt_passphrase,
+        srt_pbkeylen: tf.srt_pbkeylen,
+        srt_streamid: tf.srt_streamid
+      };
+      try {
+        const url = tf.id ? ('api.php?action=update&id=' + tf.id) : 'api.php?action=create';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.load();
+        this.initTiles(n);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Speichern (Anschluss ' + n + '): ' + e.message;
+      } finally {
+        this.savingTile[n] = false;
+      }
+    },
+
+    async checkPortSignal(port) {
+      port.checking = true;
+      port.signalResult = null;
+      this.errorMsg = '';
+      try {
+        const params = new URLSearchParams({ device: port.device_number, connection: 'auto' });
+        const res = await fetch('api.php?action=decklink_probe&' + params.toString());
+        port.signalResult = await res.json();
+      } catch (e) {
+        port.signalResult = { error: e.message };
+      } finally {
+        port.checking = false;
+      }
+    },
+
+    isPortBusy(port) {
+      // Ein laufender Capture-Prozess belegt die Karte - parallel per Probe-Skript draufzugreifen könnte den Stream stören
+      return this.pipelines.some(p => p.status === 'running' && p.source_type === 'decklink' &&
+        p.pipeline_direction !== 'srt_to_sdi' && p.decklink_device_number === port.device_number);
+    },
+
+    ledClass(port) {
+      if (this.isPortBusy(port)) return 'led-blue';
+      if (port.checking || !port.signalResult || port.signalResult.error) return 'led-gray';
+      return port.signalResult.signal ? 'led-green' : 'led-red';
+    },
+
+    ledTitle(port) {
+      if (this.isPortBusy(port)) return 'wird von laufender Pipeline genutzt, keine Live-Prüfung';
+      if (port.checking) return 'prüft...';
+      if (!port.signalResult) return 'noch nicht geprüft';
+      if (port.signalResult.error) return 'Prüfung fehlgeschlagen: ' + port.signalResult.error;
+      if (!port.signalResult.signal) return 'kein Signal erkannt';
+      return 'Signal vorhanden' + (port.signalResult.width ? (' (' + port.signalResult.width + 'x' + port.signalResult.height + ')') : '');
+    },
+
+    async pollPortSignals() {
+      if (document.hidden) {
+        // Tab im Hintergrund: niemand sieht die LEDs, also keine Probe-Prozesse starten
+        this.pollTimer = setTimeout(() => this.pollPortSignals(), this.pollBackoff);
+        return;
+      }
+      let anyError = false;
+      for (const port of this.decklinkPorts) {
+        if (port.role === 'input' && !port.checking && !this.isPortBusy(port)) {
+          await this.checkPortSignal(port);
+          if (port.signalResult && port.signalResult.error) anyError = true;
+        }
+      }
+      // Bei anhaltenden Fehlern (z.B. defekte Karte) seltener pruefen statt stur alle 15s in den Timeout zu laufen
+      this.pollBackoff = anyError ? Math.min(this.pollBackoff * 2, 120000) : 15000;
+      this.pollTimer = setTimeout(() => this.pollPortSignals(), this.pollBackoff);
+    },
+
+    initSignalPolling() {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          clearTimeout(this.pollTimer);
+          this.pollBackoff = 15000;
+          this.pollPortSignals();
+        }
+      });
+      this.pollPortSignals();
+    },
+
+    async uploadFile() {
+      const input = this.$refs.fileInput;
+      if (!input.files || input.files.length === 0) {
+        this.errorMsg = 'Bitte zuerst eine Datei auswählen';
+        return;
+      }
+      this.uploading = true;
+      this.errorMsg = '';
+      const formData = new FormData();
+      formData.append('file', input.files[0]);
+      try {
+        const res = await fetch('api.php?action=upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.loadFiles();
+        this.form.source_file = data.path;
+        input.value = '';
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Upload: ' + e.message;
+      } finally {
+        this.uploading = false;
+      }
+    },
+
+    formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let i = 0;
+      let n = bytes;
+      while (n >= 1024 && i < units.length - 1) {
+        n /= 1024;
+        i++;
+      }
+      return n.toFixed(1) + ' ' + units[i];
+    },
+
+        formatUptime(seconds) {
+      if (seconds === null || seconds === undefined) return '–';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (h > 0) return h + 'h ' + m + 'm ' + s + 's';
+      if (m > 0) return m + 'm ' + s + 's';
+      return s + 's';
+    },
+
+    edit(p) {
+      this.editingId = p.id;
+      this.form = {
+        name: p.name,
+        pipeline_direction: p.pipeline_direction || 'sdi_to_srt',
+        source_type: p.source_type || 'videotestsrc',
+        source_pattern: p.source_pattern,
+        source_file: p.source_file || '',
+        width: p.width,
+        height: p.height,
+        framerate: p.framerate,
+        bitrate: p.bitrate,
+        srt_port: p.srt_port,
+        srt_latency: p.srt_latency,
+        srt_mode: p.srt_mode || 'listener',
+        srt_target_host: p.srt_target_host || '',
+        decklink_device_number: p.decklink_device_number ?? 0,
+        decklink_connection: p.decklink_connection || 'auto',
+        decklink_profile: p.decklink_profile || 'default',
+        decklink_audio_channels: p.decklink_audio_channels ?? 2,
+        audio_codec: p.audio_codec || 'aac',
+        audio_output_channels: p.audio_output_channels ?? 2,
+        audio_bitrate: p.audio_bitrate ?? 192,
+        video_codec: p.video_codec || 'h264',
+        video_keyframe_interval: p.video_keyframe_interval ?? 0,
+        video_rate_control: p.video_rate_control || 'cbr',
+        video_scale_enabled: !!(p.video_scale_enabled && p.video_scale_enabled != 0),
+        srt_passphrase: p.srt_passphrase || '',
+        srt_pbkeylen: p.srt_pbkeylen || 16,
+        srt_streamid: p.srt_streamid || ''
+      };
+    },
+
+    cancelEdit() {
+      this.editingId = null;
+      this.resetForm();
+    },
+
+    resetForm() {
+      this.form = {
+        name: '',
+        pipeline_direction: 'sdi_to_srt',
+        source_type: 'videotestsrc',
+        source_pattern: 'smpte',
+        source_file: '',
+        width: 1280,
+        height: 720,
+        framerate: 25,
+        bitrate: 2000,
+        srt_port: 8888,
+        srt_latency: 120,
+        srt_mode: 'listener',
+        srt_target_host: '',
+        decklink_device_number: 0,
+        decklink_connection: 'auto',
+        decklink_profile: 'default',
+        decklink_audio_channels: 2,
+        audio_codec: 'aac',
+        audio_output_channels: 2,
+        audio_bitrate: 192,
+        video_codec: 'h264',
+        video_keyframe_interval: 0,
+        video_rate_control: 'cbr',
+        video_scale_enabled: false,
+        srt_passphrase: '',
+        srt_pbkeylen: 16,
+        srt_streamid: ''
+      };
+    },
+
+    async save() {
+      this.errorMsg = '';
+      const isEdit = this.editingId !== null;
+      const url = isEdit
+        ? 'api.php?action=update&id=' + this.editingId
+        : 'api.php?action=create';
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.form)
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        this.editingId = null;
+        this.resetForm();
+        await this.load();
+      } catch (e) {
+        this.errorMsg = (isEdit ? 'Fehler beim Speichern: ' : 'Fehler beim Anlegen: ') + e.message;
+      }
+    },
+
+    async start(id) {
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=start&id=' + id);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.load();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Starten: ' + e.message;
+      }
+    },
+
+    async stop(id) {
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=stop&id=' + id);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.load();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Stoppen: ' + e.message;
+      }
+    },
+
+    async remove(id) {
+      if (!confirm('Pipeline wirklich löschen?')) return;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=delete&id=' + id);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.load();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Löschen: ' + e.message;
+      }
+    }
+  }
+}
+</script>
+</body>
+</html>
