@@ -43,5 +43,9 @@ awk_check=$(echo "$daemon_cpu" | awk '{print ($1+0 > 15) ? "1" : "0"}' 2>/dev/nu
 
 echo "$TS daemon_cpu=${daemon_cpu}% dev0=$dev0 dev1=$dev1${flag:+  <<< $flag}" >> "$LOG"
 
-# Log-Datei begrenzen, damit sie nicht unbegrenzt waechst
-tail -n 20000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
+# Log-Datei begrenzen, damit sie nicht unbegrenzt waechst - aber nur bei
+# tatsaechlichem Bedarf trimmen, sonst ersetzt mv bei jedem Lauf die Datei
+# und "tail -f" verliert staendig die Datei ("has been replaced").
+if [ "$(wc -l < "$LOG")" -gt 20000 ]; then
+  tail -n 10000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
+fi
