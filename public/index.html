@@ -459,6 +459,14 @@
           </template>
 
           <div style="margin-top: 0.75rem;">
+            <label>SRT-Link einfügen (z.B. von einem Test-/Zieldienst)</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" x-model="tileSrtLinkInput[n]" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
+              <button type="button" class="btn-primary" @click="applySrtLinkToTile(n)">Übernehmen</button>
+            </div>
+            <div class="hint" x-show="tileSrtLinkMessage[n]" x-text="tileSrtLinkMessage[n]"></div>
+          </div>
+          <div style="margin-top: 0.75rem;">
             <label>Verbindungsmodus</label>
             <select x-model="tileForms[n].srt_mode">
               <option value="listener">Listener (wartet auf Verbindung)</option>
@@ -732,6 +740,15 @@
     </div>
 
     <div>
+      <label>SRT-Link einfügen (z.B. von einem Test-/Zieldienst)</label>
+      <div style="display: flex; gap: 0.5rem;">
+        <input type="text" x-model="srtLinkInput" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
+        <button type="button" class="btn-primary" @click="applySrtLinkToForm()">Übernehmen</button>
+      </div>
+      <div class="hint" x-show="srtLinkMessage" x-text="srtLinkMessage"></div>
+    </div>
+
+    <div>
       <label>Verbindungsmodus</label>
       <select x-model="form.srt_mode">
         <option value="listener">Listener (wartet auf Verbindung)</option>
@@ -827,6 +844,10 @@ function app() {
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
     savingTile: { 0: false, 1: false, 2: false, 3: false },
+    srtLinkInput: '',
+    srtLinkMessage: '',
+    tileSrtLinkInput: { 0: '', 1: '', 2: '', 3: '' },
+    tileSrtLinkMessage: { 0: '', 1: '', 2: '', 3: '' },
     tileCollapsed: (() => {
       try { const raw = localStorage.getItem('tileCollapsed'); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
     })(),
@@ -1206,6 +1227,86 @@ function app() {
     srtPortLabel(mode) {
       // Bei Caller ist der Port der des Ziel-Rechners, bei Listener der eigene lokale Port
       return mode === 'caller' ? 'Ziel-Port (beim Empfänger)' : 'Lokaler SRT Port';
+    },
+
+    parseSrtLink(raw) {
+      raw = (raw || '').trim();
+      if (!raw) return { error: 'Bitte einen Link einfügen.' };
+      let url;
+      try {
+        url = new URL(raw);
+      } catch (e) {
+        return { error: 'Kein gültiger Link.' };
+      }
+      if (url.protocol !== 'srt:') {
+        return { error: 'Kein SRT-Link (muss mit srt:// beginnen).' };
+      }
+      if (!url.hostname || !url.port) {
+        return { error: 'Host oder Port fehlen im Link.' };
+      }
+      const params = url.searchParams;
+      const notes = [];
+      const linkMode = params.get('mode') || 'caller';
+      if (linkMode !== 'caller') {
+        notes.push(`Modus im Link war "${linkMode}", hier trotzdem als Caller übernommen`);
+      }
+      const result = {
+        host: url.hostname,
+        port: parseInt(url.port, 10),
+        streamid: params.get('streamid') || '',
+        passphrase: params.get('passphrase') || '',
+        notes,
+      };
+      const pbkeylenParam = params.get('pbkeylen');
+      if (pbkeylenParam) {
+        result.pbkeylen = parseInt(pbkeylenParam, 10);
+      } else if (result.passphrase) {
+        result.pbkeylen = 16;
+      }
+      const latencyParam = params.get('latency');
+      if (latencyParam) {
+        let lat = parseInt(latencyParam, 10);
+        if (lat > 10000) {
+          // Realistische SRT-Latenzen liegen im ms-Bereich bis ca. 8000 - groessere
+          // Werte sind vermutlich Mikrosekunden (manche Tools geben es so aus)
+          notes.push(`Latenz ${lat} sieht nach Mikrosekunden aus, als ${Math.round(lat / 1000)}ms übernommen`);
+          lat = Math.round(lat / 1000);
+        }
+        result.latency = lat;
+      }
+      return result;
+    },
+
+    applySrtLinkToForm() {
+      const parsed = this.parseSrtLink(this.srtLinkInput);
+      if (parsed.error) {
+        this.srtLinkMessage = parsed.error;
+        return;
+      }
+      this.form.srt_mode = 'caller';
+      this.form.srt_target_host = parsed.host;
+      this.form.srt_port = parsed.port;
+      if (parsed.streamid) this.form.srt_streamid = parsed.streamid;
+      if (parsed.passphrase) this.form.srt_passphrase = parsed.passphrase;
+      if (parsed.pbkeylen) this.form.srt_pbkeylen = parsed.pbkeylen;
+      if (parsed.latency) this.form.srt_latency = parsed.latency;
+      this.srtLinkMessage = `Übernommen: ${parsed.host}:${parsed.port}` + (parsed.notes.length ? ' — ' + parsed.notes.join('; ') : '');
+    },
+
+    applySrtLinkToTile(n) {
+      const parsed = this.parseSrtLink(this.tileSrtLinkInput[n]);
+      if (parsed.error) {
+        this.tileSrtLinkMessage[n] = parsed.error;
+        return;
+      }
+      this.tileForms[n].srt_mode = 'caller';
+      this.tileForms[n].srt_target_host = parsed.host;
+      this.tileForms[n].srt_port = parsed.port;
+      if (parsed.streamid) this.tileForms[n].srt_streamid = parsed.streamid;
+      if (parsed.passphrase) this.tileForms[n].srt_passphrase = parsed.passphrase;
+      if (parsed.pbkeylen) this.tileForms[n].srt_pbkeylen = parsed.pbkeylen;
+      if (parsed.latency) this.tileForms[n].srt_latency = parsed.latency;
+      this.tileSrtLinkMessage[n] = `Übernommen: ${parsed.host}:${parsed.port}` + (parsed.notes.length ? ' — ' + parsed.notes.join('; ') : '');
     },
 
     cpuDisplay(stat) {
