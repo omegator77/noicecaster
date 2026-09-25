@@ -8,6 +8,10 @@ class Database
     {
         $this->pdo = new PDO('sqlite:' . $path);
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        // Seit PHP_CLI_SERVER_WORKERS>1 koennen mehrere Requests gleichzeitig schreiben wollen -
+        // ohne busy_timeout wirft SQLite dann sofort "database is locked" statt kurz zu warten.
+        $this->pdo->exec('PRAGMA busy_timeout = 5000');
+        $this->pdo->exec('PRAGMA journal_mode = WAL');
         $this->initSchema();
     }
 
