@@ -297,7 +297,7 @@
                   Signal: <strong x-text="port.signalResult?.signal ? 'vorhanden' : 'kein Signal erkannt'"></strong>
                   <template x-if="port.signalResult?.width && port.signalResult?.height">
                     <span> &middot; erkannt: <span x-text="port.signalResult?.width"></span>x<span x-text="port.signalResult?.height"></span>
-                      <template x-if="port.signalResult?.framerate"> @ <span x-text="port.signalResult?.framerate"></span></template>
+                      <template x-if="port.signalResult?.framerate"> @ <span x-text="formatFramerate(port.signalResult?.framerate)"></span></template>
                     </span>
                   </template>
                 </span>
@@ -1238,6 +1238,18 @@ function app() {
     srtPortLabel(mode) {
       // Bei Caller ist der Port der des Ziel-Rechners, bei Listener der eigene lokale Port
       return mode === 'caller' ? 'Ziel-Port (beim Empfänger)' : 'Lokaler SRT Port';
+    },
+
+    formatFramerate(fr) {
+      // GStreamer liefert Framerate als Bruch ("30000/1001") - fuer Techniker reicht die
+      // gerundete Dezimalzahl ("29,97"), ohne unnoetige Nullen
+      if (!fr) return '';
+      const parts = String(fr).split('/');
+      const num = parseFloat(parts[0]);
+      const den = parts.length > 1 ? parseFloat(parts[1]) : 1;
+      if (!den) return fr;
+      const text = (num / den).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+      return text.replace('.', ',');
     },
 
     audioChannelOptions(codec) {
