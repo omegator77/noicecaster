@@ -340,9 +340,8 @@ class PipelineManager
 
         $pid = (int)shell_exec($fullCmd);
 
-        $this->updateStatus($id, 'running', $pid);
-        $stmt = $this->db->prepare("UPDATE pipelines SET started_at = CURRENT_TIMESTAMP WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = $this->db->prepare("UPDATE pipelines SET status = 'running', pid = :pid, started_at = CURRENT_TIMESTAMP WHERE id = :id");
+        $stmt->execute([':pid' => $pid, ':id' => $id]);
     }
 
     public function stop(int $id): void
@@ -360,8 +359,7 @@ class PipelineManager
             }
         }
 
-        $this->updateStatus($id, 'stopped', null);
-        $stmt = $this->db->prepare("UPDATE pipelines SET started_at = NULL WHERE id = :id");
+        $stmt = $this->db->prepare("UPDATE pipelines SET status = 'stopped', pid = NULL, started_at = NULL WHERE id = :id");
         $stmt->execute([':id' => $id]);
     }
 

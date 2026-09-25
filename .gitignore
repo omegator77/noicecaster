@@ -1,5 +1,7 @@
 # Laufzeitdaten - nicht versionieren
 data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
 data/*.log
 data/uploads/*
 !data/uploads/.gitkeep
