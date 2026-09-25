@@ -18,7 +18,16 @@ class PipelineManager
     private const DECKLINK_AUDIO_CHANNELS = [2, 8, 16, 0];
     private const DIRECTIONS = ['sdi_to_srt', 'srt_to_sdi'];
     private const AUDIO_CODECS = ['aac', 'mp2', 'ac3', 'opus', 'pcm'];
-    private const AUDIO_OUTPUT_CHANNELS = [1, 2, 6];
+    private const AUDIO_OUTPUT_CHANNELS = [2, 4, 8, 16];
+    // Kanalzahlen, die der jeweilige Encoder tatsaechlich unterstuetzt (Codec-Spezifikation) -
+    // z.B. akzeptiert avenc_mp2 nur Mono/Stereo, avenc_s302m (PCM) max. 8 Kanaele.
+    private const AUDIO_CODEC_CHANNELS = [
+        'aac' => [2, 4, 8, 16],
+        'opus' => [2, 4, 8, 16],
+        'pcm' => [2, 4, 8],
+        'ac3' => [2, 4],
+        'mp2' => [2],
+    ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
     private const VIDEO_RATE_CONTROLS = ['cbr', 'vbr'];
     private const SRT_PBKEYLEN = [0, 16, 24, 32];
@@ -169,9 +178,10 @@ class PipelineManager
             $codec = 'aac';
         }
 
+        $allowedChannels = self::AUDIO_CODEC_CHANNELS[$codec] ?? self::AUDIO_OUTPUT_CHANNELS;
         $channels = (int)($data['audio_output_channels'] ?? 2);
-        if (!in_array($channels, self::AUDIO_OUTPUT_CHANNELS, true)) {
-            $channels = 2;
+        if (!in_array($channels, $allowedChannels, true)) {
+            $channels = $allowedChannels[0];
         }
 
         $bitrate = (int)($data['audio_bitrate'] ?? 192);
@@ -289,6 +299,21 @@ class PipelineManager
             $extra .= ' streamid=' . escapeshellarg($security['streamid']);
         }
         return $extra;
+    }
+
+    private function buildAudioChannelSelectElement(int $captureChannels, int $outputChannels): string
+    {
+        if ($captureChannels <= $outputChannels) {
+            // Nicht mehr aufgenommene als gewuenschte Kanaele - audioconvert kann das direkt
+            return "";
+        }
+        // Eingebettetes SDI-Mehrkanalaudio (8/16 Kanaele) hat in GStreamer keine Standard-Kanalbelegung
+        // (channel-mask=0, "positionless") - audioconvert kann solche Layouts nicht automatisch auf
+        // weniger Kanaele downmixen und die Pipeline stirbt sofort mit "not-negotiated". audiomixmatrix
+        // im first-channels-Modus greift stattdessen explizit die ersten N Kanaele heraus und setzt
+        // dabei eine gueltige Standard-Kanalbelegung (channel-mask=-1 = automatisch), die z.B.
+        // avenc_s302m fuer PCM/SMPTE-302M zwingend braucht.
+        return "audiomixmatrix mode=first-channels channel-mask=-1 ! audio/x-raw,channels={$outputChannels} ! ";
     }
 
     private function buildAudioEncoderChain(array $audio): string
@@ -438,8 +463,9 @@ class PipelineManager
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
 
             $audio = $this->sanitizeAudio($p);
+            $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
             $audioBranch = "decklinkaudiosrc device-number={$decklink['device_number']} channels={$decklink['audio_channels']} ! " .
-                "audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($audio);
+                "{$channelSelect}audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($audio);
 
             return $prefix . $videoBranch . $audioBranch;
         }

@@ -433,16 +433,16 @@
                 <div>
                   <label>Ausgabe-Kanäle (für Encoding)</label>
                   <select x-model.number="tileForms[n].audio_output_channels">
-                    <option value="1">1 (Mono)</option>
-                    <option value="2">2 (Stereo)</option>
-                    <option value="6">6 (5.1)</option>
+                    <template x-for="ch in audioChannelOptions(tileForms[n].audio_codec)" :key="ch">
+                      <option :value="ch" x-text="ch"></option>
+                    </template>
                   </select>
                 </div>
               </div>
               <div class="form-row" style="margin-top: 0.5rem;">
                 <div>
                   <label>Audio-Codec</label>
-                  <select x-model="tileForms[n].audio_codec">
+                  <select x-model="tileForms[n].audio_codec" @change="clampAudioChannels(tileForms[n])">
                     <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
                     <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
                     <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
@@ -570,9 +570,12 @@
     </div>
   </template>
 
-  <h2 x-text="editingId ? 'Pipeline bearbeiten' : 'Neue Pipeline'"></h2>
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h2 x-text="editingId ? 'Pipeline bearbeiten' : 'Neue Pipeline'"></h2>
+    <button type="button" class="btn-secondary" @click="toggleNewFormCollapsed()" x-text="newFormCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+  </div>
 
-  <form class="card" @submit.prevent="save()">
+  <form class="card" x-show="!newFormCollapsed" @submit.prevent="save()">
     <div>
       <label>Name</label>
       <input type="text" x-model="form.name" required placeholder="z.B. Kamera 1 Gateway">
@@ -639,7 +642,7 @@
         </div>
         <div>
           <label>Audio-Codec</label>
-          <select x-model="form.audio_codec">
+          <select x-model="form.audio_codec" @change="clampAudioChannels(form)">
             <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
             <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
             <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
@@ -652,9 +655,9 @@
         <div>
           <label>Ausgabe-Kanäle</label>
           <select x-model.number="form.audio_output_channels">
-            <option value="1">1 (Mono)</option>
-            <option value="2">2 (Stereo)</option>
-            <option value="6">6 (5.1)</option>
+            <template x-for="ch in audioChannelOptions(form.audio_codec)" :key="ch">
+              <option :value="ch" x-text="ch"></option>
+            </template>
           </select>
         </div>
         <div>
@@ -695,7 +698,7 @@
       <div class="form-row">
         <div>
           <label>Audio-Codec</label>
-          <select x-model="form.audio_codec">
+          <select x-model="form.audio_codec" @change="clampAudioChannels(form)">
             <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
             <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
             <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
@@ -706,9 +709,9 @@
         <div>
           <label>Ausgabe-Kanäle</label>
           <select x-model.number="form.audio_output_channels">
-            <option value="1">1 (Mono)</option>
-            <option value="2">2 (Stereo)</option>
-            <option value="6">6 (5.1, falls Quelle es hergibt)</option>
+            <template x-for="ch in audioChannelOptions(form.audio_codec)" :key="ch">
+              <option :value="ch" x-text="ch"></option>
+            </template>
           </select>
         </div>
       </div>
@@ -839,6 +842,9 @@ function app() {
     portsCollapsed: (() => {
       try { return localStorage.getItem('portsCollapsed') === '1'; } catch (e) { return false; }
     })(),
+    newFormCollapsed: (() => {
+      try { const v = localStorage.getItem('newFormCollapsed'); return v === null ? true : v === '1'; } catch (e) { return true; }
+    })(),
     pollBackoff: 15000,
     pollTimer: null,
     systemStats: null,
@@ -929,6 +935,11 @@ function app() {
     togglePortsCollapsed() {
       this.portsCollapsed = !this.portsCollapsed;
       try { localStorage.setItem('portsCollapsed', this.portsCollapsed ? '1' : '0'); } catch (e) {}
+    },
+
+    toggleNewFormCollapsed() {
+      this.newFormCollapsed = !this.newFormCollapsed;
+      try { localStorage.setItem('newFormCollapsed', this.newFormCollapsed ? '1' : '0'); } catch (e) {}
     },
 
     async savePorts() {
@@ -1229,6 +1240,20 @@ function app() {
       return mode === 'caller' ? 'Ziel-Port (beim Empfänger)' : 'Lokaler SRT Port';
     },
 
+    audioChannelOptions(codec) {
+      // Kanalzahlen, die der jeweilige Encoder tatsaechlich hergibt (Codec-Spezifikation,
+      // nicht frei waehlbar) - MP2 z.B. nur Mono/Stereo, PCM/SMPTE-302M max. 8 Kanaele.
+      const byCodec = { aac: [2, 4, 8, 16], opus: [2, 4, 8, 16], pcm: [2, 4, 8], ac3: [2, 4], mp2: [2] };
+      return byCodec[codec] || [2];
+    },
+
+    clampAudioChannels(target) {
+      const allowed = this.audioChannelOptions(target.audio_codec);
+      if (!allowed.includes(target.audio_output_channels)) {
+        target.audio_output_channels = allowed[0];
+      }
+    },
+
     parseSrtLink(raw) {
       raw = (raw || '').trim();
       if (!raw) return { error: 'Bitte einen Link einfügen.' };
@@ -1318,6 +1343,7 @@ function app() {
 
     edit(p) {
       this.editingId = p.id;
+      this.newFormCollapsed = false;
       this.form = {
         name: p.name,
         pipeline_direction: p.pipeline_direction || 'sdi_to_srt',
