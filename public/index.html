@@ -1243,7 +1243,7 @@ function app() {
     audioChannelOptions(codec) {
       // Kanalzahlen, die der jeweilige Encoder tatsaechlich hergibt (Codec-Spezifikation,
       // nicht frei waehlbar) - MP2 z.B. nur Mono/Stereo, PCM/SMPTE-302M max. 8 Kanaele.
-      const byCodec = { aac: [2, 4, 8, 16], opus: [2, 4, 8, 16], pcm: [2, 4, 8], ac3: [2, 4], mp2: [2] };
+      const byCodec = { aac: [2, 4, 8, 16], opus: [2, 4, 8, 16], pcm: [2, 4, 6, 8], ac3: [2, 4, 6], mp2: [2] };
       return byCodec[codec] || [2];
     },
 

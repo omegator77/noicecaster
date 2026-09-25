@@ -24,8 +24,8 @@ class PipelineManager
     private const AUDIO_CODEC_CHANNELS = [
         'aac' => [2, 4, 8, 16],
         'opus' => [2, 4, 8, 16],
-        'pcm' => [2, 4, 8],
-        'ac3' => [2, 4],
+        'pcm' => [2, 4, 6, 8],
+        'ac3' => [2, 4, 6],
         'mp2' => [2],
     ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
@@ -303,16 +303,16 @@ class PipelineManager
 
     private function buildAudioChannelSelectElement(int $captureChannels, int $outputChannels): string
     {
-        if ($captureChannels <= $outputChannels) {
-            // Nicht mehr aufgenommene als gewuenschte Kanaele - audioconvert kann das direkt
+        if ($captureChannels <= 2) {
+            // decklinkaudiosrc liefert bei 2 aufgenommenen Kanaelen bereits eine gueltige
+            // Standard-Kanalbelegung - hier ist nichts zu reparieren
             return "";
         }
-        // Eingebettetes SDI-Mehrkanalaudio (8/16 Kanaele) hat in GStreamer keine Standard-Kanalbelegung
-        // (channel-mask=0, "positionless") - audioconvert kann solche Layouts nicht automatisch auf
-        // weniger Kanaele downmixen und die Pipeline stirbt sofort mit "not-negotiated". audiomixmatrix
-        // im first-channels-Modus greift stattdessen explizit die ersten N Kanaele heraus und setzt
-        // dabei eine gueltige Standard-Kanalbelegung (channel-mask=-1 = automatisch), die z.B.
-        // avenc_s302m fuer PCM/SMPTE-302M zwingend braucht.
+        // Eingebettetes SDI-Mehrkanalaudio (8/16 Kanaele) ist in GStreamer IMMER "positionless"
+        // (channel-mask=0), auch wenn Aufnahme- und Ausgabekanalzahl gleich sind. Viele Encoder
+        // (avenc_aac, avenc_s302m, ...) lehnen das trotz passender Kanalzahl ab. audiomixmatrix im
+        // first-channels-Modus greift die ersten N Kanaele heraus (bei Gleichstand quasi alle) und
+        // setzt dabei eine gueltige Standard-Kanalbelegung (channel-mask=-1 = automatisch).
         return "audiomixmatrix mode=first-channels channel-mask=-1 ! audio/x-raw,channels={$outputChannels} ! ";
     }
 
