@@ -45,7 +45,7 @@ class Database
             'decklink_device_number' => "INTEGER DEFAULT 0",
             'decklink_connection' => "TEXT DEFAULT 'auto'",
             'decklink_mode' => "TEXT DEFAULT 'auto'",
-            'decklink_profile' => "TEXT DEFAULT 'default'",
+            'decklink_profile' => "TEXT DEFAULT 'two-sub-devices-half'",
             'decklink_audio_channels' => "INTEGER DEFAULT 2",
             'pipeline_direction' => "TEXT DEFAULT 'sdi_to_srt'",
             'audio_codec' => "TEXT DEFAULT 'aac'",
@@ -61,6 +61,7 @@ class Database
             'srt_streamid' => "TEXT DEFAULT NULL",
             'clock_overlay_enabled' => "INTEGER DEFAULT 0",
             'audio_test_wave' => "TEXT DEFAULT 'sine'",
+            'preview_enabled' => "INTEGER DEFAULT 0",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {

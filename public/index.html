@@ -210,7 +210,7 @@
 </style>
 </head>
 <body>
-<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); initPreviewTicker(); })">
   <div class="retro-banner">
     <div class="retro-logo">NOICECASTER</div>
     <div class="retro-sub">*** SDI ⇄ SRT GATEWAY ***</div>
@@ -373,6 +373,12 @@
             </div>
           </template>
 
+          <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running' && tileForms[n].preview_enabled">
+            <img :src="'api.php?action=preview_image&id=' + tilePipelineFor(n).id + '&t=' + previewTick"
+                 style="width: 100%; max-width: 320px; border-radius: 4px; margin-bottom: 0.75rem; display: block;"
+                 @error="$event.target.style.display='none'" @load="$event.target.style.display='block'">
+          </template>
+
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
             <div>
               <div>
@@ -404,6 +410,11 @@
               <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                 <input type="checkbox" x-model="tileForms[n].clock_overlay_enabled" style="width: auto;">
                 <span>Uhrzeit ins Bild einblenden</span>
+              </label>
+
+              <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" x-model="tileForms[n].preview_enabled" style="width: auto;">
+                <span>Bildvorschau (aktualisierendes Standbild, alle 3s)</span>
               </label>
 
               <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
@@ -810,7 +821,8 @@ function defaultTileForm(deviceNumber) {
     video_keyframe_interval: 0,
     video_rate_control: 'cbr',
     clock_overlay_enabled: false,
-    decklink_profile: 'default',
+    preview_enabled: false,
+    decklink_profile: 'two-sub-devices-half',
     bitrate: 2000,
     video_scale_enabled: false,
     width: 1280,
@@ -847,6 +859,7 @@ function app() {
     })(),
     pollBackoff: 15000,
     pollTimer: null,
+    previewTick: 0,
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
     savingTile: { 0: false, 1: false, 2: false, 3: false },
@@ -873,7 +886,7 @@ function app() {
       srt_target_host: '',
       decklink_device_number: 0,
       decklink_connection: 'auto',
-      decklink_profile: 'default',
+      decklink_profile: 'two-sub-devices-half',
       decklink_audio_channels: 2,
       audio_codec: 'aac',
       audio_output_channels: 2,
@@ -1013,7 +1026,8 @@ function app() {
           video_keyframe_interval: p.video_keyframe_interval ?? 0,
           video_rate_control: p.video_rate_control || 'cbr',
           clock_overlay_enabled: !!(p.clock_overlay_enabled && p.clock_overlay_enabled != 0),
-          decklink_profile: p.decklink_profile || 'default',
+          preview_enabled: !!(p.preview_enabled && p.preview_enabled != 0),
+          decklink_profile: (p.decklink_profile && p.decklink_profile !== 'default') ? p.decklink_profile : 'two-sub-devices-half',
           bitrate: p.bitrate ?? 2000,
           video_scale_enabled: !!(p.video_scale_enabled && p.video_scale_enabled != 0),
           width: p.width ?? 1280,
@@ -1063,6 +1077,7 @@ function app() {
         video_keyframe_interval: tf.video_keyframe_interval,
         video_rate_control: tf.video_rate_control,
         clock_overlay_enabled: tf.clock_overlay_enabled,
+        preview_enabled: tf.preview_enabled,
         bitrate: tf.bitrate,
         video_scale_enabled: tf.video_scale_enabled,
         width: tf.width,
@@ -1240,6 +1255,14 @@ function app() {
       return mode === 'caller' ? 'Ziel-Port (beim Empfänger)' : 'Lokaler SRT Port';
     },
 
+    initPreviewTicker() {
+      // Laesst das Vorschaubild alle 3s neu laden (passend zum Server-seitigen Aktualisierungsintervall),
+      // aber nur solange der Tab sichtbar ist - spart Bandbreite/Anfragen im Hintergrund
+      setInterval(() => {
+        if (!document.hidden) this.previewTick++;
+      }, 3000);
+    },
+
     formatFramerate(fr) {
       // GStreamer liefert Framerate als Bruch ("30000/1001") - fuer Techniker reicht die
       // gerundete Dezimalzahl ("29,97"), ohne unnoetige Nullen
@@ -1372,7 +1395,7 @@ function app() {
         srt_target_host: p.srt_target_host || '',
         decklink_device_number: p.decklink_device_number ?? 0,
         decklink_connection: p.decklink_connection || 'auto',
-        decklink_profile: p.decklink_profile || 'default',
+        decklink_profile: (p.decklink_profile && p.decklink_profile !== 'default') ? p.decklink_profile : 'two-sub-devices-half',
         decklink_audio_channels: p.decklink_audio_channels ?? 2,
         audio_codec: p.audio_codec || 'aac',
         audio_output_channels: p.audio_output_channels ?? 2,
@@ -1411,7 +1434,7 @@ function app() {
         srt_target_host: '',
         decklink_device_number: 0,
         decklink_connection: 'auto',
-        decklink_profile: 'default',
+        decklink_profile: 'two-sub-devices-half',
         decklink_audio_channels: 2,
         audio_codec: 'aac',
         audio_output_channels: 2,

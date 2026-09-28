@@ -3,6 +3,7 @@ data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm
 data/*.log
+data/*.jpg
 data/uploads/*
 !data/uploads/.gitkeep
 

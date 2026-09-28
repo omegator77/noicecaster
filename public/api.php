@@ -83,6 +83,20 @@ try {
             echo json_encode(SystemStats::collect());
             break;
 
+        case 'preview_image':
+            $id = (int)($_GET['id'] ?? 0);
+            $path = PipelineManager::previewImagePath($id);
+            if (!file_exists($path)) {
+                http_response_code(404);
+                header('Content-Type: application/json');
+                echo json_encode(['error' => 'Keine Vorschau vorhanden']);
+                break;
+            }
+            header('Content-Type: image/jpeg');
+            header('Cache-Control: no-store');
+            readfile($path);
+            break;
+
         case 'decklink_probe':
             $device = (int)($_GET['device'] ?? 0);
             $connection = $_GET['connection'] ?? 'auto';

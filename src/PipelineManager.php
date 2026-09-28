@@ -98,8 +98,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -131,6 +131,7 @@ class PipelineManager
             ':srt_streamid' => $srtSecurity['streamid'],
             ':clock_overlay_enabled' => (int)($data['clock_overlay_enabled'] ?? 0) === 1 ? 1 : 0,
             ':audio_test_wave' => $this->sanitizeAudioTestWave($data),
+            ':preview_enabled' => (int)($data['preview_enabled'] ?? 0) === 1 ? 1 : 0,
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -153,9 +154,16 @@ class PipelineManager
             $connection = 'auto';
         }
 
-        $profile = $data['decklink_profile'] ?? 'default';
-        if (!in_array($profile, self::DECKLINK_PROFILES, true)) {
-            $profile = 'default';
+        // Werkseinstellung der Duo 2 gruppiert die Anschluesse (SDI 1&2), was unabhaengige
+        // In-/Out-Nutzung blockiert (siehe [[project-noicecaster-decklink-hardware]] fuer die
+        // Diagnose) - two-sub-devices-half entkoppelt die Anschluesse, wie von Blackmagic/Softron
+        // fuer diesen Anwendungsfall empfohlen.
+        $profile = $data['decklink_profile'] ?? 'two-sub-devices-half';
+        // "default" ist der alte, inzwischen als fehlerhaft erkannte Wert - auch bereits in der DB
+        // gespeicherte Pipelines (die noch woertlich 'default' stehen haben) auf den funktionierenden
+        // Wert ummuenzen, nicht nur wenn das Feld komplett fehlt.
+        if ($profile === 'default' || !in_array($profile, self::DECKLINK_PROFILES, true)) {
+            $profile = 'two-sub-devices-half';
         }
 
         $audioChannels = (int)($data['decklink_audio_channels'] ?? 2);
@@ -228,6 +236,28 @@ class PipelineManager
     {
         $wave = $data['audio_test_wave'] ?? 'sine';
         return in_array($wave, self::AUDIO_TEST_WAVES, true) ? $wave : 'sine';
+    }
+
+    public static function previewImagePath(int $id): string
+    {
+        return __DIR__ . "/../data/preview_{$id}.jpg";
+    }
+
+    private function buildPreviewElement(array $p): string
+    {
+        $enabled = (int)($p['preview_enabled'] ?? 0) === 1;
+        if (!$enabled) {
+            return "";
+        }
+        // Ressourcenschonende Vorschau: zweigt die schon decodierten Frames per tee ab,
+        // auf 1 Bild alle 3s heruntergebremst und klein skaliert, statt eines echten
+        // Live-Streams. leaky=downstream verwirft Frames im Vorschau-Zweig lieber, statt
+        // je den Haupt-Encoder-Pfad zu blockieren.
+        $path = escapeshellarg(self::previewImagePath((int)($p['id'] ?? 0)));
+        return "tee name=vtee " .
+            "vtee. ! queue leaky=downstream max-size-buffers=1 ! videorate ! video/x-raw,framerate=1/3 ! " .
+            "videoscale ! video/x-raw,width=320,height=180 ! jpegenc ! multifilesink location={$path} sync=false " .
+            "vtee. ! queue ! ";
     }
 
     private function buildClockOverlayElement(array $data): string
@@ -423,6 +453,7 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($p);
         $srtSecurityProps = $this->buildSrtSecurityProps($srtSecurity);
         $clockOverlayElement = $this->buildClockOverlayElement($p);
+        $previewElement = $this->buildPreviewElement($p);
         $scaleEnabled = (int)($p['video_scale_enabled'] ?? 0) === 1;
         if ($scaleEnabled) {
             $scaleElement = "videoscale ! ";
@@ -457,7 +488,7 @@ class PipelineManager
 
             $videoBranch = "decklinkvideosrc device-number={$decklink['device_number']} " .
                 "connection={$decklink['connection']} mode={$decklinkMode} profile={$decklink['profile']} ! " .
-                "videoconvert ! {$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
+                "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
                 "mpegtsmux name=mux ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
@@ -620,7 +651,8 @@ class PipelineManager
                 srt_pbkeylen = :srt_pbkeylen,
                 srt_streamid = :srt_streamid,
                 clock_overlay_enabled = :clock_overlay_enabled,
-                audio_test_wave = :audio_test_wave
+                audio_test_wave = :audio_test_wave,
+                preview_enabled = :preview_enabled
             WHERE id = :id
         ");
         $stmt->execute([
@@ -654,6 +686,7 @@ class PipelineManager
             ':srt_streamid' => $srtSecurity['streamid'],
             ':clock_overlay_enabled' => (int)($data['clock_overlay_enabled'] ?? 0) === 1 ? 1 : 0,
             ':audio_test_wave' => $this->sanitizeAudioTestWave($data),
+            ':preview_enabled' => (int)($data['preview_enabled'] ?? 0) === 1 ? 1 : 0,
         ]);
     }
 
