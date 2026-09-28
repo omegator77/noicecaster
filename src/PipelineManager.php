@@ -98,8 +98,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -132,6 +132,7 @@ class PipelineManager
             ':clock_overlay_enabled' => (int)($data['clock_overlay_enabled'] ?? 0) === 1 ? 1 : 0,
             ':audio_test_wave' => $this->sanitizeAudioTestWave($data),
             ':preview_enabled' => (int)($data['preview_enabled'] ?? 0) === 1 ? 1 : 0,
+            ':test_pattern_enabled' => (int)($data['test_pattern_enabled'] ?? 0) === 1 ? 1 : 0,
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -266,6 +267,7 @@ class PipelineManager
         // Zeigt die Wanduhrzeit ins Bild ein - zum visuellen Vergleich der Latenz beim Empfänger
         return $enabled ? "clockoverlay time-format=\"%H:%M:%S\" halignment=right valignment=bottom shaded-background=true ! " : "";
     }
+
 
     private function buildVideoEncoder(string $codec, int $bitrate, int $keyframeInterval, string $rateControl): string
     {
@@ -432,6 +434,14 @@ class PipelineManager
 
     private function buildCommand(array $p): string
     {
+        // Testbild-Haekchen ueberschreibt alles andere: statt SRT zu empfangen/senden gibt die
+        // Pipeline nur noch ein lokales Testmuster auf ihrem konfigurierten Decklink-Ausgang aus -
+        // fuer schnelle Hardware-/Monitor-Checks ohne echten Signalweg. Ersetzt die zuvor manuell
+        // auf dem Server laufenden gst-launch-Prozesse (siehe [[project-noicecaster-srt-to-sdi]]).
+        if ((int)($p['test_pattern_enabled'] ?? 0) === 1) {
+            return $this->buildTestPatternCommand($p);
+        }
+
         $direction = $p['pipeline_direction'] ?? 'sdi_to_srt';
         if ($direction === 'srt_to_sdi') {
             return $this->buildReceiveCommand($p);
@@ -486,8 +496,15 @@ class PipelineManager
             $this->ports->assertRole($decklink['device_number'], 'input');
             $decklinkMode = $this->ports->getMode($decklink['device_number']);
 
+            // decklinkvideosrc taggt HD-SDI-Signale faelschlich als colorimetry=bt2020 (bestaetigt per
+            // Monitor-Test 2026-09-28 - siehe [[project-noicecaster-decklink-hardware]]), obwohl alle
+            // hier unterstuetzten Modi (720p/1080i/1080p) immer BT.709 sind. capssetter ueberschreibt
+            // nur das Caps-Feld (reines Relabeling, keine echte Farbraum-Umrechnung) - ein einfacher
+            // capsfilter scheitert hier an der Negotiation, weil decklinkvideosrc bt2020 als fixen Wert
+            // meldet.
             $videoBranch = "decklinkvideosrc device-number={$decklink['device_number']} " .
                 "connection={$decklink['connection']} mode={$decklinkMode} profile={$decklink['profile']} ! " .
+                "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
                 "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
                 "mpegtsmux name=mux ! " .
@@ -538,6 +555,38 @@ class PipelineManager
         return $prefix . $videoBranch . $audioBranch;
     }
 
+    private function buildTestPatternCommand(array $p): string
+    {
+        $decklink = $this->sanitizeDecklink([
+            'decklink_device_number' => $p['decklink_device_number'] ?? 0,
+            'decklink_connection' => $p['decklink_connection'] ?? 'auto',
+            'decklink_profile' => $p['decklink_profile'] ?? 'default',
+            'decklink_audio_channels' => $p['decklink_audio_channels'] ?? 2,
+        ]);
+        $this->ports->assertRole($decklink['device_number'], 'output');
+        $outputMode = $this->ports->getMode($decklink['device_number']);
+        if ($outputMode === 'auto') {
+            $outputMode = DecklinkPortManager::DEFAULT_OUTPUT_MODE;
+        }
+
+        // Nur unkritische Zeichen zulassen - der Text landet direkt (nicht ueber escapeshellarg) in
+        // der gst-launch-Kommandozeile, siehe Escaping-Hinweis unten.
+        $label = preg_replace('/[^a-zA-Z0-9 .:_-]/', '', $p['name'] ?? 'Testbild');
+        if (trim($label) === '') {
+            $label = 'Testbild';
+        }
+        // gst-launch fuegt am Ende alle argv wieder mit Leerzeichen zusammen, bevor es seine eigene
+        // Pipeline-Beschreibung parst - Shell-Quotierung allein wuerde dabei verlorengehen (die
+        // Anfuehrungszeichen werden schon von der Shell konsumiert, bevor gst-launch sie sieht).
+        // Die literalen \"-Zeichen ueberleben das Zusammenfuegen und werden von gst-launch selbst
+        // als Quotierung erkannt - reproduziert und verifiziert 2026-09-28.
+        $textOverlay = 'textoverlay text=\"' . $label . '\" halignment=center valignment=top font-desc=\"Sans Bold 36\" ! ';
+
+        return "gst-launch-1.0 -v videotestsrc pattern=smpte is-live=true ! {$textOverlay}" .
+            "decklinkvideosink device-number={$decklink['device_number']} mode={$outputMode} profile={$decklink['profile']} " .
+            "audiotestsrc wave=sine freq=1000 is-live=true ! decklinkaudiosink device-number={$decklink['device_number']}";
+    }
+
     private function buildReceiveCommand(array $p): string
     {
         $port = (int)$p['srt_port'];
@@ -572,12 +621,28 @@ class PipelineManager
 
         $prefix = "env GST_DEBUG=srtsrc:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
 
+        // tsdemux legt seine Video-/Audio-Pads erst zur Laufzeit an (dynamische "Sometimes"-Pads) -
+        // ohne Caps-Filter direkt danach kann gst-launch die beiden gleich aussehenden "demux."-
+        // Verweise nicht dem richtigen Zweig zuordnen (queue hat caps=ANY, die Zuordnung waere rein
+        // von der Pad-Erstellungsreihenfolge des Demuxers abhaengig) - das fuehrte dazu, dass Audio
+        // im Video-Zweig landete und umgekehrt, abhaengig davon welcher PID zuerst erkannt wurde.
+        // Reproduziert und mit gst-inspect verifiziert am 2026-09-28, siehe [[project-noicecaster-repo]].
+        //
+        // Bekannte, noch offene Einschraenkung (siehe [[project-noicecaster-repo]]): verbindet sich
+        // diese Pipeline zu einer bereits laufenden sdi_to_srt-Sender-Pipeline (Ausgang wird spaeter
+        // gestartet/neugestartet als der zugehoerige Eingang), sendet tsdemux beim Verbindungsaufbau
+        // ein kurzes "stream removed"-EOS auf dem betroffenen Pad - Ursache liegt in tsdemux selbst
+        // (vermutlich PCR-/Continuity-Sprung beim Late-Join), nicht im decodebin unten. Workaround:
+        // Eingang und Ausgang gemeinsam (neu) starten, dann funktioniert der Empfang zuverlaessig.
+        $videoCapsFilter = 'capsfilter caps="video/x-h264; video/x-h265; video/mpeg"';
+        $audioCapsFilter = 'capsfilter caps="audio/mpeg; audio/x-ac3; audio/x-eac3; audio/ac3; audio/x-private1-ac3; audio/x-opus"';
+
         // decodebin statt festem Codec, da der eingehende SRT-Stream H.264, H.265 oder MPEG-2 enthalten kann
-        $videoBranch = "demux. ! queue ! decodebin ! videoconvert ! videoscale ! videorate ! " .
+        $videoBranch = "demux. ! queue ! {$videoCapsFilter} ! decodebin ! videoconvert ! videoscale ! videorate ! " .
             "decklinkvideosink device-number={$decklink['device_number']} mode={$outputMode} profile={$decklink['profile']}";
 
         // decodebin statt festem Codec, da der eingehende SRT-Stream AAC, MP2 oder AC3 enthalten kann
-        $audioBranch = " demux. ! queue ! decodebin ! audioconvert ! audioresample ! " .
+        $audioBranch = " demux. ! queue ! {$audioCapsFilter} ! decodebin ! audioconvert ! audioresample ! " .
             "decklinkaudiosink device-number={$decklink['device_number']}";
 
         // keep-listening=true: bei Trennung des Senders auf einen Reconnect warten statt die Pipeline
@@ -652,7 +717,8 @@ class PipelineManager
                 srt_streamid = :srt_streamid,
                 clock_overlay_enabled = :clock_overlay_enabled,
                 audio_test_wave = :audio_test_wave,
-                preview_enabled = :preview_enabled
+                preview_enabled = :preview_enabled,
+                test_pattern_enabled = :test_pattern_enabled
             WHERE id = :id
         ");
         $stmt->execute([
@@ -687,6 +753,7 @@ class PipelineManager
             ':clock_overlay_enabled' => (int)($data['clock_overlay_enabled'] ?? 0) === 1 ? 1 : 0,
             ':audio_test_wave' => $this->sanitizeAudioTestWave($data),
             ':preview_enabled' => (int)($data['preview_enabled'] ?? 0) === 1 ? 1 : 0,
+            ':test_pattern_enabled' => (int)($data['test_pattern_enabled'] ?? 0) === 1 ? 1 : 0,
         ]);
     }
 

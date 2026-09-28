@@ -62,6 +62,7 @@ class Database
             'clock_overlay_enabled' => "INTEGER DEFAULT 0",
             'audio_test_wave' => "TEXT DEFAULT 'sine'",
             'preview_enabled' => "INTEGER DEFAULT 0",
+            'test_pattern_enabled' => "INTEGER DEFAULT 0",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {

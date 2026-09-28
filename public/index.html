@@ -469,56 +469,67 @@
             </div>
           </template>
 
-          <div style="margin-top: 0.75rem;">
-            <label>SRT-Link einfügen</label>
-            <div style="display: flex; gap: 0.5rem;">
-              <input type="text" x-model="tileSrtLinkInput[n]" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
-              <button type="button" class="btn-primary" @click="applySrtLinkToTile(n)">Übernehmen</button>
-            </div>
-            <div class="hint" x-show="tileSrtLinkMessage[n]" x-text="tileSrtLinkMessage[n]"></div>
-          </div>
-          <div style="margin-top: 0.75rem;">
-            <label>Verbindungsmodus</label>
-            <select x-model="tileForms[n].srt_mode">
-              <option value="listener">Listener (wartet auf Verbindung)</option>
-              <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
-            </select>
-          </div>
-          <div class="form-row" style="margin-top: 0.5rem;">
-            <div x-show="tileForms[n].srt_mode === 'caller'">
-              <label>Ziel-Adresse (IP oder Hostname)</label>
-              <input type="text" x-model="tileForms[n].srt_target_host" placeholder="z.B. 203.0.113.10">
-            </div>
-            <div>
-              <label x-text="srtPortLabel(tileForms[n].srt_mode)"></label>
-              <input type="number" x-model.number="tileForms[n].srt_port">
-            </div>
-          </div>
-          <div style="margin-top: 0.5rem;">
-            <label>SRT Latenz (ms)</label>
-            <input type="number" x-model.number="tileForms[n].srt_latency">
-          </div>
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi'">
+            <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="checkbox" x-model="tileForms[n].test_pattern_enabled" style="width: auto;">
+              <span>Testbild ausgeben (ignoriert SRT-Empfang, alle anderen Einstellungen unten inaktiv)</span>
+            </label>
+          </template>
 
-          <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">SRT-Sicherheit (optional)</h2>
-          <div class="form-row">
+          <template x-if="!(tileDirection(portFor(n)) === 'srt_to_sdi' && tileForms[n].test_pattern_enabled)">
             <div>
-              <label>Passphrase (Verschlüsselung)</label>
-              <input type="text" x-model="tileForms[n].srt_passphrase" placeholder="leer = keine Verschlüsselung">
-              <div class="hint">10–79 Zeichen, auf Sender und Empfänger identisch.</div>
+              <div style="margin-top: 0.75rem;">
+                <label>SRT-Link einfügen</label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <input type="text" x-model="tileSrtLinkInput[n]" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
+                  <button type="button" class="btn-primary" @click="applySrtLinkToTile(n)">Übernehmen</button>
+                </div>
+                <div class="hint" x-show="tileSrtLinkMessage[n]" x-text="tileSrtLinkMessage[n]"></div>
+              </div>
+              <div style="margin-top: 0.75rem;">
+                <label>Verbindungsmodus</label>
+                <select x-model="tileForms[n].srt_mode">
+                  <option value="listener">Listener (wartet auf Verbindung)</option>
+                  <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
+                </select>
+              </div>
+              <div class="form-row" style="margin-top: 0.5rem;">
+                <div x-show="tileForms[n].srt_mode === 'caller'">
+                  <label>Ziel-Adresse (IP oder Hostname)</label>
+                  <input type="text" x-model="tileForms[n].srt_target_host" placeholder="z.B. 203.0.113.10">
+                </div>
+                <div>
+                  <label x-text="srtPortLabel(tileForms[n].srt_mode)"></label>
+                  <input type="number" x-model.number="tileForms[n].srt_port">
+                </div>
+              </div>
+              <div style="margin-top: 0.5rem;">
+                <label>SRT Latenz (ms)</label>
+                <input type="number" x-model.number="tileForms[n].srt_latency">
+              </div>
+
+              <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">SRT-Sicherheit (optional)</h2>
+              <div class="form-row">
+                <div>
+                  <label>Passphrase (Verschlüsselung)</label>
+                  <input type="text" x-model="tileForms[n].srt_passphrase" placeholder="leer = keine Verschlüsselung">
+                  <div class="hint">10–79 Zeichen, auf Sender und Empfänger identisch.</div>
+                </div>
+                <div>
+                  <label>Schlüssellänge</label>
+                  <select x-model.number="tileForms[n].srt_pbkeylen" :disabled="!tileForms[n].srt_passphrase">
+                    <option value="16">AES-128</option>
+                    <option value="24">AES-192</option>
+                    <option value="32">AES-256</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-top: 0.5rem;">
+                <label>Stream ID</label>
+                <input type="text" x-model="tileForms[n].srt_streamid" placeholder="leer = keine">
+              </div>
             </div>
-            <div>
-              <label>Schlüssellänge</label>
-              <select x-model.number="tileForms[n].srt_pbkeylen" :disabled="!tileForms[n].srt_passphrase">
-                <option value="16">AES-128</option>
-                <option value="24">AES-192</option>
-                <option value="32">AES-256</option>
-              </select>
-            </div>
-          </div>
-          <div style="margin-top: 0.5rem;">
-            <label>Stream ID</label>
-            <input type="text" x-model="tileForms[n].srt_streamid" placeholder="leer = keine">
-          </div>
+          </template>
 
           <div class="actions">
             <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="savingTile[n]" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
@@ -837,7 +848,8 @@ function defaultTileForm(deviceNumber) {
     srt_latency: 120,
     srt_passphrase: '',
     srt_pbkeylen: 16,
-    srt_streamid: ''
+    srt_streamid: '',
+    test_pattern_enabled: false
   };
 }
 
@@ -1042,7 +1054,8 @@ function app() {
           srt_latency: p.srt_latency ?? 120,
           srt_passphrase: p.srt_passphrase || '',
           srt_pbkeylen: p.srt_pbkeylen || 16,
-          srt_streamid: p.srt_streamid || ''
+          srt_streamid: p.srt_streamid || '',
+          test_pattern_enabled: !!(p.test_pattern_enabled && p.test_pattern_enabled != 0)
         };
       }
     },
@@ -1091,7 +1104,8 @@ function app() {
         srt_latency: tf.srt_latency,
         srt_passphrase: tf.srt_passphrase,
         srt_pbkeylen: tf.srt_pbkeylen,
-        srt_streamid: tf.srt_streamid
+        srt_streamid: tf.srt_streamid,
+        test_pattern_enabled: direction === 'srt_to_sdi' ? tf.test_pattern_enabled : false
       };
       try {
         const url = tf.id ? ('api.php?action=update&id=' + tf.id) : 'api.php?action=create';
