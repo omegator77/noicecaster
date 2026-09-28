@@ -126,7 +126,7 @@ try {
                     $isBoundToDevice = ($direction === 'srt_to_sdi' || $runningPipeline['source_type'] === 'decklink')
                         && (int)$runningPipeline['decklink_device_number'] === $deviceNumber;
                     if ($isBoundToDevice) {
-                        throw new RuntimeException("Anschluss {$deviceNumber} hat eine laufende Pipeline - bitte zuerst stoppen, bevor die Rolle geändert wird.");
+                        throw new RuntimeException("Anschluss " . ($deviceNumber + 1) . " hat eine laufende Pipeline - bitte zuerst stoppen, bevor die Rolle geändert wird.");
                     }
                 }
             }

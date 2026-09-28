@@ -82,7 +82,9 @@ class DecklinkPortManager
             $expectedLabel = $roleLabels[$expectedRole] ?? $expectedRole;
             $actualLabel = $roleLabels[$role] ?? $role;
             throw new RuntimeException(
-                "SDI-Anschluss {$deviceNumber} ist als \"{$actualLabel}\" konfiguriert, wird hier aber als \"{$expectedLabel}\" benötigt. " .
+                // +1: intern 0-indiziert (device_number), dem Menschen gegenueber zaehlen wir die
+                // Anschluesse konsistent ab 1 - in der UI, im Testbild-Label und in Fehlermeldungen.
+                "SDI-Anschluss " . ($deviceNumber + 1) . " ist als \"{$actualLabel}\" konfiguriert, wird hier aber als \"{$expectedLabel}\" benötigt. " .
                 "Bitte zuerst unter \"SDI-Anschlüsse\" die Rolle anpassen."
             );
         }

@@ -81,7 +81,7 @@ class PipelineManager
             $stmt = $this->db->prepare($sql);
             $stmt->execute($params);
             if ($stmt->fetchColumn() !== false) {
-                throw new RuntimeException("Für Anschluss {$decklink['device_number']} existiert in dieser Richtung bereits eine Pipeline.");
+                throw new RuntimeException("Für Anschluss " . ($decklink['device_number'] + 1) . " existiert in dieser Richtung bereits eine Pipeline.");
             }
         }
     }

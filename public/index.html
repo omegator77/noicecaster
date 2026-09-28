@@ -232,7 +232,7 @@
     <div class="section-header-title">
       <h2>SDI-Anschlüsse</h2>
       <template x-for="port in decklinkPorts.filter(p => p.role === 'input')" :key="port.device_number">
-        <span class="led" :class="ledClass(port)" :title="'Anschluss ' + port.device_number + (port.label ? ' (' + port.label + ')' : '') + ': ' + ledTitle(port)"></span>
+        <span class="led" :class="ledClass(port)" :title="'Anschluss ' + (port.device_number + 1) + (port.label ? ' (' + port.label + ')' : '') + ': ' + ledTitle(port)"></span>
       </template>
     </div>
     <button type="button" class="btn-secondary" @click="togglePortsCollapsed()" x-text="portsCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
@@ -246,7 +246,7 @@
             <template x-if="port.role === 'input'">
               <span class="led" :class="ledClass(port)" :title="ledTitle(port)"></span>
             </template>
-            <span>Anschluss <span x-text="port.device_number"></span></span>
+            <span>Anschluss <span x-text="port.device_number + 1"></span></span>
           </div>
           <div>
             <select x-model="port.role" @change="if (port.role === 'output' && port.mode === 'auto') port.mode = '1080i50'">
@@ -324,7 +324,7 @@
             <span class="led" :class="ledClass(portFor(n))" :title="ledTitle(portFor(n))"></span>
           </template>
           <span class="pipeline-name">
-            Anschluss <span x-text="n"></span><template x-if="portFor(n) && portFor(n).label"><span> – <span x-text="portFor(n).label"></span></span></template>
+            Anschluss <span x-text="n + 1"></span><template x-if="portFor(n) && portFor(n).label"><span> – <span x-text="portFor(n).label"></span></span></template>
           </span>
           <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'sdi_to_srt'">Eingang</span>
           <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'srt_to_sdi'">Ausgang</span>
@@ -1079,7 +1079,7 @@ function app() {
       this.savingTile[n] = true;
       this.errorMsg = '';
       const payload = {
-        name: 'Anschluss ' + n + (port.label ? ' – ' + port.label : ''),
+        name: 'Anschluss ' + (n + 1) + (port.label ? ' – ' + port.label : ''),
         pipeline_direction: direction,
         source_type: direction === 'sdi_to_srt' ? 'decklink' : 'videotestsrc',
         decklink_device_number: n,
@@ -1119,7 +1119,7 @@ function app() {
         await this.load();
         this.initTiles(n);
       } catch (e) {
-        this.errorMsg = 'Fehler beim Speichern (Anschluss ' + n + '): ' + e.message;
+        this.errorMsg = 'Fehler beim Speichern (Anschluss ' + (n + 1) + '): ' + e.message;
       } finally {
         this.savingTile[n] = false;
       }
