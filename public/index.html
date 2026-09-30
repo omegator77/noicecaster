@@ -534,6 +534,172 @@
           <div class="actions">
             <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="savingTile[n]" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
           </div>
+
+          <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
+            <div style="margin-top: 1rem; border-top: 1px solid #2a2e37; padding-top: 0.75rem;">
+              <button type="button" class="btn-secondary" @click="toggleAdvanced(n)" x-text="advancedOpen[n] ? 'Advanced einklappen' : 'Advanced: weitere SRT-Ziele'"></button>
+
+              <div x-show="advancedOpen[n]" style="margin-top: 0.75rem;">
+                <div class="hint" style="margin-bottom: 0.75rem;">
+                  Zusätzliche, unabhängige SRT-Ziele für denselben SDI-Eingang - jedes mit eigenem Codec/Bitrate/SRT-Ziel, einzeln start-/stoppbar.
+                  Nur für feste HD-Modi (720p/1080i/1080p), nicht für "Auto" oder SD-Modi.
+                </div>
+
+                <template x-for="target in (targets[tilePipelineFor(n)?.id] || [])" :key="target.id">
+                  <div class="card" style="margin-bottom: 0.75rem;">
+                    <div class="card-header">
+                      <input type="text" x-model="target.name" style="max-width: 220px;" placeholder="Name des Ziels">
+                      <span class="badge" :class="target.status" x-text="target.status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+                    </div>
+
+                    <template x-if="target.status === 'running'">
+                      <div class="meta">
+                        SRT: <span class="srt-url" x-text="target.srt_mode === 'caller' ? ('srt://' + target.srt_target_host + ':' + target.srt_port) : ('srt://' + srtHost() + ':' + target.srt_port)"></span>
+                        &middot; PID <span x-text="target.pid"></span>
+                      </div>
+                    </template>
+                    <template x-if="target.status === 'running' && targetStats[target.id]">
+                      <div class="stats-row">
+                        <span class="stat-item">
+                          <span class="stat-label">Laufzeit</span>
+                          <span class="stat-value" x-text="formatUptime(targetStats[target.id].uptime_seconds)"></span>
+                        </span>
+                        <span class="stat-item">
+                          <span class="stat-label">CPU</span>
+                          <span class="stat-value" x-text="cpuDisplay(targetStats[target.id])"></span>
+                        </span>
+                        <span class="stat-item">
+                          <span class="stat-label">RAM</span>
+                          <span class="stat-value" x-text="targetStats[target.id].memory_kb ? Math.round(targetStats[target.id].memory_kb / 1024) + ' MB' : '–'"></span>
+                        </span>
+                      </div>
+                    </template>
+
+                    <template x-if="target.status !== 'running'">
+                      <div style="margin-top: 0.5rem;">
+                        <div class="form-row">
+                          <div>
+                            <label>Video-Codec</label>
+                            <select x-model="target.video_codec">
+                              <option value="h264">H.264</option>
+                              <option value="h265">H.265 / HEVC</option>
+                              <option value="mpeg2">MPEG-2</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label>Bitrate (kbit/s)</label>
+                            <input type="number" x-model.number="target.bitrate">
+                          </div>
+                        </div>
+                        <div class="form-row" style="margin-top: 0.5rem;">
+                          <div>
+                            <label>Rate-Control</label>
+                            <select x-model="target.video_rate_control">
+                              <option value="cbr">CBR</option>
+                              <option value="vbr">VBR</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label>Keyframe-Intervall</label>
+                            <input type="number" x-model.number="target.video_keyframe_interval" placeholder="0 = automatisch">
+                          </div>
+                        </div>
+                        <label style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                          <input type="checkbox" x-model="target.video_scale_enabled" style="width: auto;">
+                          <span>Auflösung herunterskalieren</span>
+                        </label>
+                        <div class="form-row" x-show="target.video_scale_enabled" style="margin-top: 0.5rem;">
+                          <div>
+                            <label>Breite</label>
+                            <input type="number" x-model.number="target.width">
+                          </div>
+                          <div>
+                            <label>Höhe</label>
+                            <input type="number" x-model.number="target.height">
+                          </div>
+                        </div>
+
+                        <div class="form-row" style="margin-top: 0.5rem;">
+                          <div>
+                            <label>Audio-Codec</label>
+                            <select x-model="target.audio_codec" @change="clampAudioChannels(target)">
+                              <option value="aac">AAC</option>
+                              <option value="mp2">MP2</option>
+                              <option value="ac3">AC-3 / Dolby Digital</option>
+                              <option value="opus">Opus</option>
+                              <option value="pcm">PCM / SMPTE 302M</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label>Audio-Kanäle</label>
+                            <select x-model.number="target.audio_output_channels">
+                              <template x-for="ch in audioChannelOptions(target.audio_codec)" :key="ch">
+                                <option :value="ch" x-text="ch"></option>
+                              </template>
+                            </select>
+                          </div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                          <label>Audio-Bitrate (kbit/s)</label>
+                          <input type="number" x-model.number="target.audio_bitrate">
+                        </div>
+
+                        <div style="margin-top: 0.5rem;">
+                          <label>Verbindungsmodus</label>
+                          <select x-model="target.srt_mode">
+                            <option value="listener">Listener (wartet auf Verbindung)</option>
+                            <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
+                          </select>
+                        </div>
+                        <div class="form-row" style="margin-top: 0.5rem;">
+                          <div x-show="target.srt_mode === 'caller'">
+                            <label>Ziel-Adresse (IP oder Hostname)</label>
+                            <input type="text" x-model="target.srt_target_host" placeholder="z.B. 203.0.113.10">
+                          </div>
+                          <div>
+                            <label x-text="srtPortLabel(target.srt_mode)"></label>
+                            <input type="number" x-model.number="target.srt_port">
+                          </div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                          <label>SRT Latenz (ms)</label>
+                          <input type="number" x-model.number="target.srt_latency">
+                        </div>
+
+                        <div class="form-row" style="margin-top: 0.5rem;">
+                          <div>
+                            <label>Passphrase (Verschlüsselung)</label>
+                            <input type="text" x-model="target.srt_passphrase" placeholder="leer = keine Verschlüsselung">
+                          </div>
+                          <div>
+                            <label>Schlüssellänge</label>
+                            <select x-model.number="target.srt_pbkeylen" :disabled="!target.srt_passphrase">
+                              <option value="16">AES-128</option>
+                              <option value="24">AES-192</option>
+                              <option value="32">AES-256</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                          <label>Stream ID</label>
+                          <input type="text" x-model="target.srt_streamid" placeholder="leer = keine">
+                        </div>
+                      </div>
+                    </template>
+
+                    <div class="actions">
+                      <button class="btn-start" x-show="target.status !== 'running'" @click="startTarget(target)">Start</button>
+                      <button class="btn-stop" x-show="target.status === 'running'" @click="stopTarget(target)">Stop</button>
+                      <button type="button" class="btn-primary" x-show="target.status !== 'running'" @click="saveTarget(target)">Speichern</button>
+                      <button type="button" class="btn-delete" x-show="target.status !== 'running'" @click="deleteTarget(target)">Löschen</button>
+                    </div>
+                  </div>
+                </template>
+
+                <button type="button" class="btn-primary" @click="addTarget(tilePipelineFor(n).id)">+ Neues Ziel</button>
+              </div>
+            </div>
+          </template>
         </div>
       </template>
     </div>
@@ -882,6 +1048,9 @@ function app() {
     tileCollapsed: (() => {
       try { const raw = localStorage.getItem('tileCollapsed'); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
     })(),
+    advancedOpen: { 0: false, 1: false, 2: false, 3: false },
+    targets: {},
+    targetStats: {},
     form: {
       name: '',
       pipeline_direction: 'sdi_to_srt',
@@ -919,6 +1088,17 @@ function app() {
         const res = await fetch('api.php?action=list');
         this.pipelines = await res.json();
         await this.loadStats();
+        // Offene Advanced-Panels (zusaetzliche SRT-Ziele) mit aktualisieren, damit Status/Stats
+        // dort genauso live bleiben wie bei den Haupt-Pipelines. Nur neu laden, wenn dort auch
+        // wirklich etwas laeuft - sonst wuerden gerade laufende, ungespeicherte Bearbeitungen an
+        // gestoppten Zielen alle 3s durch die Server-Kopie ueberschrieben werden.
+        for (const n of [0, 1, 2, 3]) {
+          if (this.advancedOpen[n]) {
+            const p = this.tilePipelineFor(n);
+            const hasRunning = p && (this.targets[p.id] || []).some(t => t.status === 'running');
+            if (p && hasRunning) await this.loadTargets(p.id);
+          }
+        }
       } catch (e) {
         this.errorMsg = 'Fehler beim Laden: ' + e.message;
       }
@@ -1122,6 +1302,104 @@ function app() {
         this.errorMsg = 'Fehler beim Speichern (Anschluss ' + (n + 1) + '): ' + e.message;
       } finally {
         this.savingTile[n] = false;
+      }
+    },
+
+    // --- Advanced: zusaetzliche SRT-Ziele pro SDI-Eingang ---
+    toggleAdvanced(n) {
+      this.advancedOpen[n] = !this.advancedOpen[n];
+      if (this.advancedOpen[n]) {
+        const p = this.tilePipelineFor(n);
+        if (p) this.loadTargets(p.id);
+      }
+    },
+
+    async loadTargets(pipelineId) {
+      if (!pipelineId) return;
+      try {
+        const res = await fetch('api.php?action=targets_list&pipeline_id=' + pipelineId);
+        this.targets[pipelineId] = await res.json();
+        for (const target of this.targets[pipelineId]) {
+          if (target.status === 'running') {
+            try {
+              const statsRes = await fetch('api.php?action=target_stats&id=' + target.id);
+              this.targetStats[target.id] = await statsRes.json();
+            } catch (e) { /* Stats-Fehler ignorieren */ }
+          }
+        }
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Laden der Ziele: ' + e.message;
+      }
+    },
+
+    newTargetDefaults() {
+      return {
+        name: 'Ziel', srt_mode: 'listener', srt_port: 9000, srt_target_host: '', srt_latency: 120,
+        video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_keyframe_interval: 0,
+        video_scale_enabled: false, width: 1920, height: 1080,
+        audio_codec: 'aac', audio_output_channels: 2, audio_bitrate: 192,
+        srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
+      };
+    },
+
+    async addTarget(pipelineId) {
+      try {
+        const res = await fetch('api.php?action=target_create&pipeline_id=' + pipelineId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.newTargetDefaults())
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.loadTargets(pipelineId);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Anlegen des Ziels: ' + e.message;
+      }
+    },
+
+    async saveTarget(target) {
+      try {
+        const res = await fetch('api.php?action=target_update&id=' + target.id, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(target)
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Speichern des Ziels: ' + e.message;
+      }
+    },
+
+    async startTarget(target) {
+      try {
+        const res = await fetch('api.php?action=target_start&id=' + target.id, { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.loadTargets(target.pipeline_id);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Starten des Ziels: ' + e.message;
+      }
+    },
+
+    async stopTarget(target) {
+      try {
+        const res = await fetch('api.php?action=target_stop&id=' + target.id, { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.loadTargets(target.pipeline_id);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Stoppen des Ziels: ' + e.message;
+      }
+    },
+
+    async deleteTarget(target) {
+      if (!confirm('Ziel "' + target.name + '" wirklich löschen?')) return;
+      try {
+        await fetch('api.php?action=target_delete&id=' + target.id, { method: 'POST' });
+        await this.loadTargets(target.pipeline_id);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Löschen des Ziels: ' + e.message;
       }
     },
 

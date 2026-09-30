@@ -33,6 +33,30 @@ class PipelineManager
     private const SRT_PBKEYLEN = [0, 16, 24, 32];
     private const AUDIO_TEST_WAVES = ['sine', 'silence'];
 
+    // Feste Raw-Caps pro Decklink-Modus, noetig fuer den Verteiler/Ziel-Mechanismus (mehrere SRT-Ziele
+    // pro SDI-Eingang, siehe [[project-noicecaster-srt-to-sdi]]): shmsrc uebertraegt Caps NICHT
+    // automatisch vom Verteiler-Prozess - jedes Ziel muss sie explizit kennen, um sein eigenes
+    // videoconvert/encoder korrekt zu verhandeln. Verifiziert 2026-09-30 per echtem shmsink/shmsrc-Test.
+    // Nur HD-Modi abgedeckt - SD (ntsc/pal) und "auto" werden fuer mehrere Ziele bewusst nicht
+    // unterstuetzt (bei "auto" ist die tatsaechliche Aufloesung/Framerate erst zur Laufzeit bekannt,
+    // je nachdem was angeschlossen ist - das laesst sich nicht im Voraus in Caps giessen).
+    private const HD_MODE_CAPS = [
+        '720p50'    => ['width' => 1280, 'height' => 720,  'fps_num' => 50,    'fps_den' => 1,    'interlaced' => false],
+        '720p5994'  => ['width' => 1280, 'height' => 720,  'fps_num' => 60000, 'fps_den' => 1001, 'interlaced' => false],
+        '720p60'    => ['width' => 1280, 'height' => 720,  'fps_num' => 60,    'fps_den' => 1,    'interlaced' => false],
+        '1080p2398' => ['width' => 1920, 'height' => 1080, 'fps_num' => 24000, 'fps_den' => 1001, 'interlaced' => false],
+        '1080p24'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 24,    'fps_den' => 1,    'interlaced' => false],
+        '1080p25'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 25,    'fps_den' => 1,    'interlaced' => false],
+        '1080p2997' => ['width' => 1920, 'height' => 1080, 'fps_num' => 30000, 'fps_den' => 1001, 'interlaced' => false],
+        '1080p30'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 30,    'fps_den' => 1,    'interlaced' => false],
+        '1080i50'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 25,    'fps_den' => 1,    'interlaced' => true],
+        '1080i5994' => ['width' => 1920, 'height' => 1080, 'fps_num' => 30000, 'fps_den' => 1001, 'interlaced' => true],
+        '1080i60'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 30,    'fps_den' => 1,    'interlaced' => true],
+        '1080p50'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 50,    'fps_den' => 1,    'interlaced' => false],
+        '1080p5994' => ['width' => 1920, 'height' => 1080, 'fps_num' => 60000, 'fps_den' => 1001, 'interlaced' => false],
+        '1080p60'   => ['width' => 1920, 'height' => 1080, 'fps_num' => 60,    'fps_den' => 1,    'interlaced' => false],
+    ];
+
     public function __construct(PDO $db)
     {
         $this->db = $db;
@@ -46,7 +70,7 @@ class PipelineManager
 
         // Status live nachprüfen, falls ein Prozess von außen gestorben ist
         foreach ($pipelines as &$p) {
-            if ($p['status'] === 'running' && $p['pid'] && !$this->isRunning((int)$p['pid'])) {
+            if ($p['status'] === 'running' && !$this->isProcRunning($p['pid'] !== null ? (int)$p['pid'] : null)) {
                 $this->updateStatus((int)$p['id'], 'stopped', null);
                 $p['status'] = 'stopped';
                 $p['pid'] = null;
@@ -376,20 +400,438 @@ class PipelineManager
         return "audio/x-raw,channels={$channels} ! {$encoder} ! mux.";
     }
 
-    public function start(int $id): void
+    // --- Mehrere SRT-Ziele pro SDI-Eingang (Advanced-Menue) ---
+    // Architektur: ein gemeinsamer "Verteiler"-Prozess oeffnet die SDI-Buchse einmal und schreibt
+    // Rohbild/-ton in zwei shmsink-Sockets. Jedes Ziel (die Pipeline selbst als "Ziel 1", plus
+    // beliebig viele srt_targets-Zeilen) ist ein EIGENER Prozess, der per shmsrc andockt - Start/Stop
+    // eines Ziels beeinflusst keine anderen. Der Verteiler startet automatisch mit dem ersten Ziel und
+    // stoppt automatisch mit dem letzten. Siehe [[project-noicecaster-srt-to-sdi]] fuer die Herleitung
+    // und den verifizierten shmsink/shmsrc-Mehrfachleser-Test vom 2026-09-30.
+
+    private function isMultiTargetEligible(array $p): bool
+    {
+        return ($p['pipeline_direction'] ?? 'sdi_to_srt') === 'sdi_to_srt'
+            && ($p['source_type'] ?? 'videotestsrc') === 'decklink'
+            && (int)($p['test_pattern_enabled'] ?? 0) !== 1;
+    }
+
+    private function rawCapsStringForMode(string $mode): string
+    {
+        if (!isset(self::HD_MODE_CAPS[$mode])) {
+            throw new RuntimeException(
+                "Mehrere SRT-Ziele werden fuer den SDI-Modus \"{$mode}\" noch nicht unterstuetzt " .
+                "(nur feste HD-Modi: 720p/1080i/1080p, kein \"Auto\" und keine SD-Modi). Bitte unter " .
+                "\"SDI-Anschluesse\" einen passenden Modus waehlen."
+            );
+        }
+        $m = self::HD_MODE_CAPS[$mode];
+        $caps = "video/x-raw,format=UYVY,width={$m['width']},height={$m['height']},framerate={$m['fps_num']}/{$m['fps_den']}";
+        $caps .= $m['interlaced'] ? ",interlace-mode=interleaved,field-order=top-field-first" : ",interlace-mode=progressive";
+        return $caps;
+    }
+
+    private function shmVideoPath(int $pipelineId): string
+    {
+        return __DIR__ . "/../data/shm_video_{$pipelineId}.sock";
+    }
+
+    private function shmAudioPath(int $pipelineId): string
+    {
+        return __DIR__ . "/../data/shm_audio_{$pipelineId}.sock";
+    }
+
+    private function buildDistributorCommand(array $p): string
+    {
+        $decklink = $this->sanitizeDecklink([
+            'decklink_device_number' => $p['decklink_device_number'] ?? 0,
+            'decklink_connection' => $p['decklink_connection'] ?? 'auto',
+            'decklink_profile' => $p['decklink_profile'] ?? 'default',
+            'decklink_audio_channels' => $p['decklink_audio_channels'] ?? 2,
+        ]);
+        $this->ports->assertRole($decklink['device_number'], 'input');
+        $decklinkMode = $this->ports->getMode($decklink['device_number']);
+        // Wirft eine klare Fehlermeldung, falls der Modus nicht in HD_MODE_CAPS steht (z.B. "auto")
+        $this->rawCapsStringForMode($decklinkMode);
+
+        $clockOverlayElement = $this->buildClockOverlayElement($p);
+        $previewElement = $this->buildPreviewElement($p);
+        $videoShm = escapeshellarg($this->shmVideoPath((int)$p['id']));
+        $audioShm = escapeshellarg($this->shmAudioPath((int)$p['id']));
+
+        $prefix = "env TZ=Europe/Berlin gst-launch-1.0 -v ";
+
+        // decklinkvideosrc taggt HD-SDI-Signale faelschlich als colorimetry=bt2020 (bestaetigt per
+        // Monitor-Test 2026-09-28 - siehe [[project-noicecaster-decklink-hardware]]), obwohl alle
+        // hier unterstuetzten Modi immer BT.709 sind.
+        $videoBranch = "decklinkvideosrc device-number={$decklink['device_number']} " .
+            "connection={$decklink['connection']} mode={$decklinkMode} profile={$decklink['profile']} ! " .
+            "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
+            "videoconvert ! {$previewElement}{$clockOverlayElement}" .
+            "shmsink socket-path={$videoShm} shm-size=40000000 wait-for-connection=false sync=false ";
+
+        // wait-for-connection=false: der Verteiler laeuft unabhaengig davon, ob gerade ein Ziel
+        // angedockt ist - sonst wuerde er blockieren, bis das erste Ziel startet
+        $audioBranch = "decklinkaudiosrc device-number={$decklink['device_number']} channels={$decklink['audio_channels']} ! " .
+            "shmsink socket-path={$audioShm} shm-size=4000000 wait-for-connection=false sync=false";
+
+        return $prefix . $videoBranch . $audioBranch;
+    }
+
+    private function buildShmTargetCommand(array $p, array $target): string
+    {
+        $decklink = $this->sanitizeDecklink([
+            'decklink_device_number' => $p['decklink_device_number'] ?? 0,
+            'decklink_connection' => $p['decklink_connection'] ?? 'auto',
+            'decklink_profile' => $p['decklink_profile'] ?? 'default',
+            'decklink_audio_channels' => $p['decklink_audio_channels'] ?? 2,
+        ]);
+        $decklinkMode = $this->ports->getMode($decklink['device_number']);
+        $rawCaps = $this->rawCapsStringForMode($decklinkMode);
+
+        $videoCodec = $this->sanitizeVideoCodec($target);
+        $videoFormat = $this->videoFormatForCodec($videoCodec);
+        $bitrate = (int)($target['bitrate'] ?? 2000);
+        $framerate = self::HD_MODE_CAPS[$decklinkMode]['fps_num'] / self::HD_MODE_CAPS[$decklinkMode]['fps_den'];
+        $keyframeInterval = $this->sanitizeKeyframeInterval($target, (int)round($framerate));
+        $rateControl = $this->sanitizeVideoRateControl($target);
+        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl);
+
+        $audio = $this->sanitizeAudio($target);
+        $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
+
+        $scaleEnabled = (int)($target['video_scale_enabled'] ?? 0) === 1;
+        if ($scaleEnabled) {
+            $width = (int)($target['width'] ?? 1280);
+            $height = (int)($target['height'] ?? 720);
+            $scaleElement = "videoscale ! ";
+            $formatCaps = "video/x-raw,format={$videoFormat},width={$width},height={$height}";
+        } else {
+            $scaleElement = "";
+            $formatCaps = "video/x-raw,format={$videoFormat}";
+        }
+
+        $port = (int)($target['srt_port'] ?? 8888);
+        $latency = (int)($target['srt_latency'] ?? 120);
+        $mode = $target['srt_mode'] ?? 'listener';
+        if ($mode === 'caller') {
+            $host = $target['srt_target_host'] ?? '';
+            if (empty($host)) {
+                throw new RuntimeException('Caller-Modus benoetigt eine Ziel-Adresse (srt_target_host)');
+            }
+            $srtUri = "srt://{$host}:{$port}?mode=caller";
+        } else {
+            $srtUri = "srt://:{$port}?mode=listener";
+        }
+        $srtSecurity = $this->sanitizeSrtSecurity($target);
+        $srtSecurityProps = $this->buildSrtSecurityProps($srtSecurity);
+
+        $videoShm = escapeshellarg($this->shmVideoPath((int)$p['id']));
+        $audioShm = escapeshellarg($this->shmAudioPath((int)$p['id']));
+
+        $prefix = "env GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
+
+        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
+            "{$videoEncoder} ! mpegtsmux name=mux ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
+
+        // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
+        // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
+        $rawAudioCaps = "audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels={$decklink['audio_channels']}";
+        $audioBranch = "shmsrc socket-path={$audioShm} is-live=true ! {$rawAudioCaps} ! {$channelSelect}audioconvert ! audioresample ! " .
+            $this->buildAudioEncoderChain($audio);
+
+        return $prefix . $videoBranch . $audioBranch;
+    }
+
+    private function isProcRunning(?int $pid): bool
+    {
+        return $pid !== null && $pid > 0 && posix_kill($pid, 0);
+    }
+
+    private function stopProcess(?int $pid): void
+    {
+        if (!$this->isProcRunning($pid)) {
+            return;
+        }
+        posix_kill($pid, SIGTERM);
+        usleep(500000);
+        if ($this->isProcRunning($pid)) {
+            posix_kill($pid, SIGKILL);
+        }
+    }
+
+    private function ensureDistributorRunning(array $p): void
+    {
+        $stmt = $this->db->prepare("SELECT distributor_pid, distributor_status FROM pipelines WHERE id = :id");
+        $stmt->execute([':id' => $p['id']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && $row['distributor_status'] === 'running' && $this->isProcRunning((int)$row['distributor_pid'])) {
+            return; // laeuft schon - andere Ziele nicht anfassen
+        }
+
+        // Alte shm-Socket-Dateien von einem frueheren (z.B. hart abgestuerzten/gekillten) Verteiler
+        // koennen liegen bleiben, ohne dass jemand mehr dahinter lauscht - file_exists() alleine
+        // wuerde das faelschlich als "bereit" durchgehen lassen und Ziele bekaemen "Connection
+        // refused" von einem toten Socket-Pfad (reproduziert 2026-09-30). Erst aufraeumen, dann
+        // den neuen Verteiler starten, damit die Existenzpruefung unten wirklich den NEUEN Prozess meint.
+        $videoShmFile = $this->shmVideoPath((int)$p['id']);
+        $audioShmFile = $this->shmAudioPath((int)$p['id']);
+        @unlink($videoShmFile);
+        @unlink($audioShmFile);
+
+        $cmd = $this->buildDistributorCommand($p);
+        $logFile = __DIR__ . "/../data/distributor_{$p['id']}.log";
+        $fullCmd = "nohup {$cmd} > " . escapeshellarg($logFile) . " 2>&1 & echo $!";
+        $pid = (int)shell_exec($fullCmd);
+
+        $stmt = $this->db->prepare("UPDATE pipelines SET distributor_status = 'running', distributor_pid = :pid WHERE id = :id");
+        $stmt->execute([':pid' => $pid, ':id' => $p['id']]);
+
+        // Auf die shm-Sockets warten, statt blind eine feste Zeit zu schlafen - eine feste Wartezeit
+        // war zu kurz und fuehrte zu "Connection refused" beim ersten Ziel (Race Condition,
+        // beobachtet 2026-09-30). Timeout nach 5s mit klarer Fehlermeldung statt endlosem Warten.
+        $waitedMs = 0;
+        while ((!file_exists($videoShmFile) || !file_exists($audioShmFile)) && $waitedMs < 5000) {
+            usleep(100000);
+            $waitedMs += 100;
+        }
+        if (!file_exists($videoShmFile) || !file_exists($audioShmFile)) {
+            throw new RuntimeException("Verteiler-Prozess hat die Shared-Memory-Sockets nicht rechtzeitig angelegt - siehe distributor_{$p['id']}.log");
+        }
+    }
+
+    private function anyTargetRunning(int $pipelineId): bool
+    {
+        $stmt = $this->db->prepare("SELECT status, pid FROM pipelines WHERE id = :id");
+        $stmt->execute([':id' => $pipelineId]);
+        $primary = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($primary && $primary['status'] === 'running' && $this->isProcRunning((int)$primary['pid'])) {
+            return true;
+        }
+
+        $stmt = $this->db->prepare("SELECT status, pid FROM srt_targets WHERE pipeline_id = :pid");
+        $stmt->execute([':pid' => $pipelineId]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $target) {
+            if ($target['status'] === 'running' && $this->isProcRunning((int)$target['pid'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function maybeStopDistributor(int $pipelineId): void
+    {
+        if ($this->anyTargetRunning($pipelineId)) {
+            return; // noch mindestens ein Ziel aktiv - Verteiler bleibt fuer die anderen erhalten
+        }
+        $stmt = $this->db->prepare("SELECT distributor_pid FROM pipelines WHERE id = :id");
+        $stmt->execute([':id' => $pipelineId]);
+        $pid = $stmt->fetchColumn();
+        $this->stopProcess($pid !== false ? (int)$pid : null);
+
+        $stmt = $this->db->prepare("UPDATE pipelines SET distributor_status = 'stopped', distributor_pid = NULL WHERE id = :id");
+        $stmt->execute([':id' => $pipelineId]);
+    }
+
+    public function listTargets(int $pipelineId): array
+    {
+        $stmt = $this->db->prepare("SELECT * FROM srt_targets WHERE pipeline_id = :pid ORDER BY id");
+        $stmt->execute([':pid' => $pipelineId]);
+        $targets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($targets as &$t) {
+            if ($t['status'] === 'running' && !$this->isProcRunning((int)$t['pid'])) {
+                $this->db->prepare("UPDATE srt_targets SET status = 'stopped', pid = NULL WHERE id = :id")
+                    ->execute([':id' => $t['id']]);
+                $t['status'] = 'stopped';
+                $t['pid'] = null;
+            }
+        }
+        return $targets;
+    }
+
+    private function getTarget(int $targetId): array
+    {
+        $stmt = $this->db->prepare("SELECT * FROM srt_targets WHERE id = :id");
+        $stmt->execute([':id' => $targetId]);
+        $target = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$target) {
+            throw new RuntimeException("Ziel $targetId nicht gefunden");
+        }
+        return $target;
+    }
+
+    private function getPipelineOrFail(int $pipelineId): array
     {
         $stmt = $this->db->prepare("SELECT * FROM pipelines WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt->execute([':id' => $pipelineId]);
         $p = $stmt->fetch(PDO::FETCH_ASSOC);
-
         if (!$p) {
-            throw new RuntimeException("Pipeline $id nicht gefunden");
+            throw new RuntimeException("Pipeline $pipelineId nicht gefunden");
         }
-        if ($p['status'] === 'running' && $this->isRunning((int)$p['pid'])) {
+        return $p;
+    }
+
+    public function createTarget(int $pipelineId, array $data): int
+    {
+        $p = $this->getPipelineOrFail($pipelineId);
+        if (!$this->isMultiTargetEligible($p)) {
+            throw new RuntimeException("Zusaetzliche SRT-Ziele sind nur fuer SDI-Eingangs-Pipelines moeglich.");
+        }
+        $audio = $this->sanitizeAudio($data);
+        $videoCodec = $this->sanitizeVideoCodec($data);
+        $rateControl = $this->sanitizeVideoRateControl($data);
+        $srtSecurity = $this->sanitizeSrtSecurity($data);
+
+        $stmt = $this->db->prepare("
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_bitrate)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_bitrate)
+        ");
+        $stmt->execute([
+            ':pipeline_id' => $pipelineId,
+            ':name' => trim((string)($data['name'] ?? '')) !== '' ? $data['name'] : 'Ziel',
+            ':srt_mode' => ($data['srt_mode'] ?? 'listener') === 'caller' ? 'caller' : 'listener',
+            ':srt_port' => (int)($data['srt_port'] ?? 8888),
+            ':srt_target_host' => $data['srt_target_host'] ?? null,
+            ':srt_latency' => (int)($data['srt_latency'] ?? 120),
+            ':srt_passphrase' => $srtSecurity['passphrase'],
+            ':srt_pbkeylen' => $srtSecurity['pbkeylen'],
+            ':srt_streamid' => $srtSecurity['streamid'],
+            ':video_codec' => $videoCodec,
+            ':bitrate' => (int)($data['bitrate'] ?? 2000),
+            ':video_rate_control' => $rateControl,
+            ':video_keyframe_interval' => (int)($data['video_keyframe_interval'] ?? 0),
+            ':video_scale_enabled' => (int)($data['video_scale_enabled'] ?? 0) === 1 ? 1 : 0,
+            ':width' => (int)($data['width'] ?? 1920),
+            ':height' => (int)($data['height'] ?? 1080),
+            ':audio_codec' => $audio['codec'],
+            ':audio_output_channels' => $audio['channels'],
+            ':audio_bitrate' => $audio['bitrate'],
+        ]);
+        return (int)$this->db->lastInsertId();
+    }
+
+    public function updateTarget(int $targetId, array $data): void
+    {
+        $target = $this->getTarget($targetId);
+        if ($target['status'] === 'running') {
+            throw new RuntimeException("Laufendes Ziel kann nicht bearbeitet werden. Bitte zuerst stoppen.");
+        }
+        $audio = $this->sanitizeAudio($data);
+        $videoCodec = $this->sanitizeVideoCodec($data);
+        $rateControl = $this->sanitizeVideoRateControl($data);
+        $srtSecurity = $this->sanitizeSrtSecurity($data);
+
+        $stmt = $this->db->prepare("
+            UPDATE srt_targets SET
+                name = :name,
+                srt_mode = :srt_mode,
+                srt_port = :srt_port,
+                srt_target_host = :srt_target_host,
+                srt_latency = :srt_latency,
+                srt_passphrase = :srt_passphrase,
+                srt_pbkeylen = :srt_pbkeylen,
+                srt_streamid = :srt_streamid,
+                video_codec = :video_codec,
+                bitrate = :bitrate,
+                video_rate_control = :video_rate_control,
+                video_keyframe_interval = :video_keyframe_interval,
+                video_scale_enabled = :video_scale_enabled,
+                width = :width,
+                height = :height,
+                audio_codec = :audio_codec,
+                audio_output_channels = :audio_output_channels,
+                audio_bitrate = :audio_bitrate
+            WHERE id = :id
+        ");
+        $stmt->execute([
+            ':id' => $targetId,
+            ':name' => trim((string)($data['name'] ?? '')) !== '' ? $data['name'] : 'Ziel',
+            ':srt_mode' => ($data['srt_mode'] ?? 'listener') === 'caller' ? 'caller' : 'listener',
+            ':srt_port' => (int)($data['srt_port'] ?? 8888),
+            ':srt_target_host' => $data['srt_target_host'] ?? null,
+            ':srt_latency' => (int)($data['srt_latency'] ?? 120),
+            ':srt_passphrase' => $srtSecurity['passphrase'],
+            ':srt_pbkeylen' => $srtSecurity['pbkeylen'],
+            ':srt_streamid' => $srtSecurity['streamid'],
+            ':video_codec' => $videoCodec,
+            ':bitrate' => (int)($data['bitrate'] ?? 2000),
+            ':video_rate_control' => $rateControl,
+            ':video_keyframe_interval' => (int)($data['video_keyframe_interval'] ?? 0),
+            ':video_scale_enabled' => (int)($data['video_scale_enabled'] ?? 0) === 1 ? 1 : 0,
+            ':width' => (int)($data['width'] ?? 1920),
+            ':height' => (int)($data['height'] ?? 1080),
+            ':audio_codec' => $audio['codec'],
+            ':audio_output_channels' => $audio['channels'],
+            ':audio_bitrate' => $audio['bitrate'],
+        ]);
+    }
+
+    public function deleteTarget(int $targetId): void
+    {
+        try {
+            $this->stopTarget($targetId);
+        } catch (Throwable $e) {
+            // ignorieren, falls schon gestoppt
+        }
+        $stmt = $this->db->prepare("DELETE FROM srt_targets WHERE id = :id");
+        $stmt->execute([':id' => $targetId]);
+    }
+
+    public function startTarget(int $targetId): void
+    {
+        $target = $this->getTarget($targetId);
+        if ($target['status'] === 'running' && $this->isProcRunning((int)$target['pid'])) {
+            throw new RuntimeException("Ziel läuft bereits");
+        }
+        $p = $this->getPipelineOrFail((int)$target['pipeline_id']);
+
+        $this->ensureDistributorRunning($p);
+        $cmd = $this->buildShmTargetCommand($p, $target);
+
+        $logFile = __DIR__ . "/../data/target_{$targetId}.log";
+        $fullCmd = "nohup {$cmd} > " . escapeshellarg($logFile) . " 2>&1 & echo $!";
+        $pid = (int)shell_exec($fullCmd);
+
+        $stmt = $this->db->prepare("UPDATE srt_targets SET status = 'running', pid = :pid, started_at = CURRENT_TIMESTAMP WHERE id = :id");
+        $stmt->execute([':pid' => $pid, ':id' => $targetId]);
+    }
+
+    public function stopTarget(int $targetId): void
+    {
+        $target = $this->getTarget($targetId);
+        $this->stopProcess($target['pid'] !== null ? (int)$target['pid'] : null);
+
+        $stmt = $this->db->prepare("UPDATE srt_targets SET status = 'stopped', pid = NULL, started_at = NULL WHERE id = :id");
+        $stmt->execute([':id' => $targetId]);
+
+        $this->maybeStopDistributor((int)$target['pipeline_id']);
+    }
+
+    public function getTargetStats(int $targetId): array
+    {
+        $target = $this->getTarget($targetId);
+        return $this->processStats(
+            $target['status'] === 'running' ? (int)$target['pid'] : null,
+            $target['started_at'],
+            __DIR__ . "/../data/target_{$targetId}.log"
+        );
+    }
+
+    public function start(int $id): void
+    {
+        $p = $this->getPipelineOrFail($id);
+
+        if ($p['status'] === 'running' && $this->isProcRunning($p['pid'] !== null ? (int)$p['pid'] : null)) {
             throw new RuntimeException("Pipeline läuft bereits");
         }
 
-        $cmd = $this->buildCommand($p);
+        if ($this->isMultiTargetEligible($p)) {
+            // "Ziel 1" ist die Pipeline selbst - laeuft wie jedes andere Ziel per shmsrc gegen den
+            // gemeinsamen Verteiler, damit weitere Ziele jederzeit unabhaengig dazukommen koennen.
+            $this->ensureDistributorRunning($p);
+            $cmd = $this->buildShmTargetCommand($p, $p);
+        } else {
+            $cmd = $this->buildCommand($p);
+        }
 
         // Im Hintergrund starten, Ausgabe in Logdatei, PID erfassen
         $logFile = __DIR__ . "/../data/pipeline_{$id}.log";
@@ -403,26 +845,26 @@ class PipelineManager
 
     public function stop(int $id): void
     {
-        $stmt = $this->db->prepare("SELECT pid FROM pipelines WHERE id = :id");
-        $stmt->execute([':id' => $id]);
-        $pid = $stmt->fetchColumn();
-
-        if ($pid && $this->isRunning((int)$pid)) {
-            // SIGTERM an die Prozessgruppe, damit gst-launch sauber beendet
-            posix_kill((int)$pid, SIGTERM);
-            usleep(500000); // 0.5s warten
-            if ($this->isRunning((int)$pid)) {
-                posix_kill((int)$pid, SIGKILL);
-            }
-        }
+        $p = $this->getPipelineOrFail($id);
+        $this->stopProcess($p['pid'] !== null ? (int)$p['pid'] : null);
 
         $stmt = $this->db->prepare("UPDATE pipelines SET status = 'stopped', pid = NULL, started_at = NULL WHERE id = :id");
         $stmt->execute([':id' => $id]);
+
+        if ($this->isMultiTargetEligible($p)) {
+            $this->maybeStopDistributor($id);
+        }
     }
 
     public function delete(int $id): void
     {
-        // Erst stoppen, falls noch aktiv
+        // Erst zusaetzliche Ziele stoppen+loeschen, dann die Pipeline selbst ("Ziel 1")
+        $stmt = $this->db->prepare("SELECT id FROM srt_targets WHERE pipeline_id = :id");
+        $stmt->execute([':id' => $id]);
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $targetId) {
+            $this->deleteTarget((int)$targetId);
+        }
+
         try {
             $this->stop($id);
         } catch (Throwable $e) {
@@ -656,13 +1098,6 @@ class PipelineManager
         $stmt->execute([':status' => $status, ':pid' => $pid, ':id' => $id]);
     }
 
-    private function isRunning(int $pid): bool
-    {
-        if ($pid <= 0) {
-            return false;
-        }
-        return posix_kill($pid, 0);
-    }
 
     public function update(int $id, array $data): void
     {
@@ -760,14 +1195,16 @@ class PipelineManager
 
     public function getStats(int $id): array
     {
-        $stmt = $this->db->prepare("SELECT * FROM pipelines WHERE id = :id");
-        $stmt->execute([':id' => $id]);
-        $p = $stmt->fetch(PDO::FETCH_ASSOC);
+        $p = $this->getPipelineOrFail($id);
+        return $this->processStats(
+            $p['status'] === 'running' ? (int)$p['pid'] : null,
+            $p['started_at'],
+            __DIR__ . "/../data/pipeline_{$id}.log"
+        );
+    }
 
-        if (!$p) {
-            throw new RuntimeException("Pipeline $id nicht gefunden");
-        }
-
+    private function processStats(?int $pid, ?string $startedAt, string $logFile): array
+    {
         $result = [
             'uptime_seconds' => null,
             'cpu_percent' => null,
@@ -777,14 +1214,14 @@ class PipelineManager
             'log_tail' => '',
         ];
 
-        if ($p['status'] === 'running' && $p['pid'] && $this->isRunning((int)$p['pid'])) {
-            if ($p['started_at']) {
-                $started = new DateTime($p['started_at'], new DateTimeZone('UTC'));
+        if ($this->isProcRunning($pid)) {
+            if ($startedAt) {
+                $started = new DateTime($startedAt, new DateTimeZone('UTC'));
                 $now = new DateTime('now', new DateTimeZone('UTC'));
                 $result['uptime_seconds'] = $now->getTimestamp() - $started->getTimestamp();
             }
 
-            $psOutput = shell_exec("ps -o %cpu,rss --no-headers -p " . (int)$p['pid']);
+            $psOutput = shell_exec("ps -o %cpu,rss --no-headers -p " . (int)$pid);
             if ($psOutput) {
                 $parts = preg_split('/\\s+/', trim($psOutput));
                 if (count($parts) === 2) {
@@ -794,7 +1231,6 @@ class PipelineManager
             }
         }
 
-        $logFile = __DIR__ . "/../data/pipeline_{$id}.log";
         if (file_exists($logFile)) {
             $lines = shell_exec("tail -n 30 " . escapeshellarg($logFile));
             $result['log_tail'] = $lines ?? '';

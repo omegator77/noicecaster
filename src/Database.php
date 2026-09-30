@@ -63,6 +63,13 @@ class Database
             'audio_test_wave' => "TEXT DEFAULT 'sine'",
             'preview_enabled' => "INTEGER DEFAULT 0",
             'test_pattern_enabled' => "INTEGER DEFAULT 0",
+            // Fuer SDI-Eingaenge mit mehreren SRT-Zielen (siehe srt_targets-Tabelle unten): ein
+            // gemeinsamer "Verteiler"-Prozess oeffnet die Buchse einmal und speist die Rohbilder in
+            // Shared Memory (shmsink) ein. status/pid oben bleiben "Ziel 1" (das urspruengliche,
+            // einzelne SRT-Ziel dieser Pipeline) - distributor_pid/-status sind der zusaetzliche,
+            // von allen Zielen gemeinsam genutzte Aufnahme-Prozess.
+            'distributor_pid' => "INTEGER DEFAULT NULL",
+            'distributor_status' => "TEXT DEFAULT 'stopped'",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {
@@ -109,6 +116,40 @@ class Database
             // Ausgänge können nicht im Auto-Modus laufen - Sicherheitsnetz für alles, was oben nicht abgedeckt wurde
             $this->pdo->exec("UPDATE decklink_ports SET mode = '1080i50' WHERE role = 'output' AND mode = 'auto'");
         }
+
+        // Zusaetzliche SRT-Ziele fuer SDI-Eingaenge (Advanced-Menue) - "Ziel 1" bleibt weiterhin auf
+        // der pipelines-Zeile selbst (srt_mode/srt_port/video_codec/... dort, unveraendert), diese
+        // Tabelle haelt nur Ziel 2, 3, ... Jedes Ziel hat seine eigenen Codec-/Bitrate-/SRT-Einstellungen
+        // und laeuft als eigener Prozess, der sich per shmsrc an den gemeinsamen Verteiler-Prozess der
+        // Pipeline (siehe distributor_pid/-status oben) anhaengt.
+        $this->pdo->exec("
+            CREATE TABLE IF NOT EXISTS srt_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                srt_mode TEXT DEFAULT 'listener',
+                srt_port INTEGER DEFAULT 8888,
+                srt_target_host TEXT DEFAULT NULL,
+                srt_latency INTEGER DEFAULT 120,
+                srt_passphrase TEXT DEFAULT NULL,
+                srt_pbkeylen INTEGER DEFAULT 0,
+                srt_streamid TEXT DEFAULT NULL,
+                video_codec TEXT DEFAULT 'h264',
+                bitrate INTEGER DEFAULT 2000,
+                video_rate_control TEXT DEFAULT 'cbr',
+                video_keyframe_interval INTEGER DEFAULT 0,
+                video_scale_enabled INTEGER DEFAULT 0,
+                width INTEGER DEFAULT 1920,
+                height INTEGER DEFAULT 1080,
+                audio_codec TEXT DEFAULT 'aac',
+                audio_output_channels INTEGER DEFAULT 2,
+                audio_bitrate INTEGER DEFAULT 192,
+                pid INTEGER DEFAULT NULL,
+                status TEXT DEFAULT 'stopped',
+                started_at DATETIME DEFAULT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
     }
 
     public function pdo(): PDO

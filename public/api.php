@@ -114,7 +114,8 @@ try {
             foreach ($ports->list() as $currentPort) {
                 $currentRoleByDevice[(int)$currentPort['device_number']] = $currentPort['role'];
             }
-            $runningPipelines = array_filter($manager->list(), fn($p) => $p['status'] === 'running');
+            $allPipelines = $manager->list();
+            $runningPipelines = array_filter($allPipelines, fn($p) => $p['status'] === 'running' || $p['distributor_status'] === 'running');
             foreach ($newPorts as $newPort) {
                 $deviceNumber = (int)($newPort['device_number'] ?? -1);
                 $newRole = $newPort['role'] ?? 'unused';
@@ -129,6 +130,18 @@ try {
                         throw new RuntimeException("Anschluss " . ($deviceNumber + 1) . " hat eine laufende Pipeline - bitte zuerst stoppen, bevor die Rolle geändert wird.");
                     }
                 }
+                // Zusaetzliche SRT-Ziele (Advanced-Menue) laufen als eigene Prozesse, unabhaengig vom
+                // status-Feld der Pipeline selbst - auch die muessen vor einem Rollenwechsel stehen.
+                foreach ($allPipelines as $pipeline) {
+                    if ((int)$pipeline['decklink_device_number'] !== $deviceNumber) {
+                        continue;
+                    }
+                    foreach ($manager->listTargets((int)$pipeline['id']) as $target) {
+                        if ($target['status'] === 'running') {
+                            throw new RuntimeException("Anschluss " . ($deviceNumber + 1) . " hat ein laufendes SRT-Ziel (\"{$target['name']}\") - bitte zuerst stoppen, bevor die Rolle geändert wird.");
+                        }
+                    }
+                }
             }
             $ports->update($newPorts);
             echo json_encode(['success' => true]);
@@ -138,6 +151,50 @@ try {
             $id = (int)($_GET['id'] ?? 0);
             $manager->delete($id);
             echo json_encode(['success' => true]);
+            break;
+
+        // Zusaetzliche SRT-Ziele fuer SDI-Eingaenge (Advanced-Menue) - "Ziel 1" ist weiterhin die
+        // Pipeline selbst (create/update/start/stop oben), diese Aktionen betreffen nur Ziel 2, 3, ...
+        case 'targets_list':
+            $pipelineId = (int)($_GET['pipeline_id'] ?? 0);
+            echo json_encode($manager->listTargets($pipelineId));
+            break;
+
+        case 'target_create':
+            $pipelineId = (int)($_GET['pipeline_id'] ?? 0);
+            $data = json_decode(file_get_contents('php://input'), true);
+            $targetId = $manager->createTarget($pipelineId, $data);
+            echo json_encode(['id' => $targetId, 'success' => true]);
+            break;
+
+        case 'target_update':
+            $id = (int)($_GET['id'] ?? 0);
+            $data = json_decode(file_get_contents('php://input'), true);
+            $manager->updateTarget($id, $data);
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'target_delete':
+            $id = (int)($_GET['id'] ?? 0);
+            $manager->deleteTarget($id);
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'target_start':
+            $id = (int)($_GET['id'] ?? 0);
+            $manager->startTarget($id);
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'target_stop':
+            $id = (int)($_GET['id'] ?? 0);
+            $manager->stopTarget($id);
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'target_stats':
+            $id = (int)($_GET['id'] ?? 0);
+            echo json_encode($manager->getTargetStats($id));
             break;
 
         default:
