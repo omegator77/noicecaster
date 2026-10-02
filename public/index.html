@@ -210,7 +210,7 @@
 </style>
 </head>
 <body>
-<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); initPreviewTicker(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); initPreviewTicker(); })">
   <div class="retro-banner">
     <div class="retro-logo">NOICECASTER</div>
     <div class="retro-sub">*** SDI ⇄ SRT GATEWAY ***</div>
@@ -310,6 +310,66 @@
     </template>
     <div class="actions">
       <button type="button" class="btn-primary" @click="savePorts()" :disabled="savingPorts" x-text="savingPorts ? 'Speichert...' : 'Anschlüsse speichern'"></button>
+    </div>
+  </div>
+
+  <div class="section-header" style="margin-top: 2rem;">
+    <div class="section-header-title">
+      <h2>Netzwerk</h2>
+      <template x-for="nic in network.interfaces" :key="'nled-' + nic.name">
+        <span class="led" :class="nic.carrier ? 'led-green' : ''" :title="nic.name + ': ' + (nic.carrier ? 'Link aktiv' : 'kein Link')"></span>
+      </template>
+    </div>
+    <button type="button" class="btn-secondary" @click="toggleNetworkCollapsed()" x-text="networkCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+  </div>
+  <template x-if="network.pending">
+    <div class="error-msg" style="border-color: #d9a400;">
+      Netzwerk-Änderung (<span x-text="network.pending.interfaces.join(', ')"></span>) ist noch nicht bestätigt.
+      Ohne Bestätigung wird in <strong x-text="networkSecondsLeft()"></strong> s automatisch der alte Stand wiederhergestellt.
+      <div class="actions" style="margin-top: 0.5rem;">
+        <button type="button" class="btn-primary" @click="networkAction('network_confirm')">Bestätigen, Verbindung steht</button>
+        <button type="button" class="btn-secondary" @click="networkAction('network_rollback')">Sofort zurücksetzen</button>
+      </div>
+    </div>
+  </template>
+  <div class="card" x-show="!networkCollapsed">
+    <div class="hint" style="margin-bottom: 0.75rem;">IP-Einstellungen der 4 Netzwerkanschlüsse und der VPN-Schnittstelle. Nach dem Speichern bleiben 90 s Zeit, die Änderung zu bestätigen (ggf. unter der neuen Adresse); sonst wird sie automatisch zurückgenommen. Ein Standard-Gateway sollte nur an einem Anschluss eingetragen werden.</div>
+    <template x-if="!network.editable">
+      <div class="hint">Nur Anzeige: Der Netzwerk-Helfer ist nicht installiert. Einmalig auf dem Server <code>sudo /opt/broadcast-gateway/deploy/install-netconfig.sh</code> ausführen.</div>
+    </template>
+    <template x-for="nic in network.interfaces" :key="'nic-' + nic.name">
+      <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #2a2e37;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-weight: 600;">
+          <span class="led" :class="nic.carrier ? 'led-green' : ''"></span>
+          <span x-text="nic.name"></span>
+          <span class="badge" x-show="nic.is_vpn" style="font-weight: 400;">VPN</span>
+          <span class="hint" style="margin: 0; font-weight: 400;" x-text="nic.mac + (nic.carrier ? ' · Link ' + (nic.speed_mbit ? nic.speed_mbit + ' Mbit/s' : 'aktiv') : ' · kein Link') + (nic.driver ? ' · ' + nic.driver : '')"></span>
+        </div>
+        <div class="hint" style="margin: 0.3rem 0;">
+          Aktuell:
+          <strong x-text="nic.ipv4.length ? nic.ipv4.join(', ') : 'keine IPv4-Adresse'"></strong>
+          <span x-show="nic.dhcp_active"> (DHCP)</span>
+          <span x-show="nic.gateway"> · Gateway <span x-text="nic.gateway"></span></span>
+          <span x-show="nic.dns.length"> · DNS <span x-text="nic.dns.join(', ')"></span></span>
+          <span x-show="nic.ipv6.length"> · <span x-text="nic.ipv6.join(', ')"></span></span>
+        </div>
+        <div class="hint" x-show="nic.is_vpn" style="color: #d9a400;">Achtung: Wer sich gerade über das VPN verbindet, verliert bei einer Adressänderung die Verbindung und muss die Änderung unter der neuen VPN-Adresse bestätigen (oder 90 s auf den automatischen Rückfall warten).</div>
+        <template x-if="network.editable && networkEdit[nic.name]">
+          <div class="form-row" style="grid-template-columns: 140px 1.2fr 1fr 1fr;">
+            <select x-model="networkEdit[nic.name].mode">
+              <option value="dhcp">DHCP</option>
+              <option value="static">Statisch</option>
+              <option value="disabled">Keine IP</option>
+            </select>
+            <input type="text" x-model="networkEdit[nic.name].address" placeholder="192.168.1.10/24" :disabled="networkEdit[nic.name].mode !== 'static'">
+            <input type="text" x-model="networkEdit[nic.name].gateway" placeholder="Gateway (optional)" :disabled="nic.is_vpn || networkEdit[nic.name].mode !== 'static'">
+            <input type="text" x-model="networkEdit[nic.name].dns" placeholder="DNS, kommagetrennt" :disabled="networkEdit[nic.name].mode === 'disabled'">
+          </div>
+        </template>
+      </div>
+    </template>
+    <div class="actions" x-show="network.editable">
+      <button type="button" class="btn-primary" @click="saveNetwork()" :disabled="savingNetwork || !!network.pending" x-text="savingNetwork ? 'Wendet an...' : 'Netzwerk speichern & anwenden'"></button>
     </div>
   </div>
 
@@ -1104,6 +1164,13 @@ function app() {
     uploading: false,
     decklinkPorts: [],
     savingPorts: false,
+    network: { interfaces: [], editable: false, pending: null },
+    networkEdit: {},
+    savingNetwork: false,
+    networkNow: Date.now(),
+    networkCollapsed: (() => {
+      try { return localStorage.getItem('networkCollapsed') === '1'; } catch (e) { return false; }
+    })(),
     portsCollapsed: (() => {
       try { return localStorage.getItem('portsCollapsed') === '1'; } catch (e) { return false; }
     })(),
@@ -1210,6 +1277,87 @@ function app() {
         this.uploadedFiles = await res.json();
       } catch (e) {
         // ignorieren, nicht kritisch
+      }
+    },
+
+    toggleNetworkCollapsed() {
+      this.networkCollapsed = !this.networkCollapsed;
+      try { localStorage.setItem('networkCollapsed', this.networkCollapsed ? '1' : '0'); } catch (e) {}
+    },
+
+    networkSecondsLeft() {
+      return Math.max(0, Math.round((this.network.pending?.deadline ?? 0) - this.networkNow / 1000));
+    },
+
+    async loadNetwork() {
+      try {
+        const res = await fetch('api.php?action=network_list');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        this.network = data;
+        // Formularwerte nur initialisieren, nie waehrend der Eingabe ueberschreiben
+        for (const nic of data.interfaces) {
+          if (!this.networkEdit[nic.name]) {
+            const c = nic.configured || { mode: nic.dhcp_active ? 'dhcp' : 'static', address: nic.ipv4[0] || '', gateway: nic.gateway || '', dns: [] };
+            this.networkEdit[nic.name] = { mode: c.mode, address: c.address || '', gateway: c.gateway || '', dns: (c.dns || []).join(', ') };
+          }
+        }
+      } catch (e) {
+        // Netzwerkansicht ist nicht kritisch
+      }
+    },
+
+    async pollNetwork() {
+      this.networkNow = Date.now();
+      if (!this.networkCollapsed || this.network.pending) {
+        await this.loadNetwork();
+      }
+      setTimeout(() => this.pollNetwork(), this.network.pending ? 2000 : 15000);
+    },
+
+    async saveNetwork() {
+      const changed = {};
+      for (const nic of this.network.interfaces) {
+        const e = this.networkEdit[nic.name];
+        const c = nic.configured;
+        if (!c || c.mode !== e.mode || (e.mode === 'static' && (c.address !== e.address.trim() || (c.gateway || '') !== e.gateway.trim())) || (c.dns || []).join(', ') !== e.dns.trim()) {
+          changed[nic.name] = { mode: e.mode, address: e.address.trim(), gateway: e.gateway.trim(), dns: e.dns };
+        }
+      }
+      const names = Object.keys(changed);
+      if (!names.length) {
+        this.errorMsg = 'Keine Änderung am Netzwerk.';
+        return;
+      }
+      if (!confirm('Netzwerk ändern an: ' + names.join(', ') + '\n\nDie Verbindung kann dabei kurz abbrechen. Danach 90 s Zeit zum Bestätigen, sonst wird automatisch zurückgesetzt.')) return;
+      this.savingNetwork = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=network_apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interfaces: changed })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.loadNetwork();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Ändern des Netzwerks: ' + e.message;
+      } finally {
+        this.savingNetwork = false;
+      }
+    },
+
+    async networkAction(action) {
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=' + action);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        this.networkEdit = {};
+        await this.loadNetwork();
+      } catch (e) {
+        this.errorMsg = 'Fehler: ' + e.message;
       }
     },
 

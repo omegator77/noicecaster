@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Privilegierter Helfer fuer die Netzwerk-Einstellungen des Gateways.
+
+Wird per sudo vom Webinterface (PHP, laeuft als normaler Benutzer) aufgerufen
+und liegt root-eigen unter /usr/local/sbin (siehe deploy/install-netconfig.sh).
+
+Aktionen:
+  show      aktuelle Netplan-Konfiguration der physischen NICs als JSON
+  apply     JSON von stdin: {"interfaces": {"enp8s0": {"mode": "static", ...}}}
+            schreibt die Netplan-Datei, wendet sie an und startet einen
+            Rueckfall-Timer: ohne "confirm" innerhalb von TIMEOUT Sekunden wird
+            der alte Stand wiederhergestellt (Schutz vor Aussperren)
+  confirm   Aenderung bestaetigen, Rueckfall-Timer stoppen
+  rollback  alten Stand sofort wiederherstellen
+
+Verwaltet werden die physischen NICs (Eintraege in 00-installer-config.yaml)
+und die SoftEther-VPN-NIC vpn_* (Eintrag in 99-vpn-nic.yaml). match/set-name/
+optional bleiben erhalten; andere Eintraege und Dateien werden nicht angefasst.
+"""
+import ipaddress
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+import yaml
+
+NETPLAN_DIR = os.environ.get('GW_NETPLAN_DIR', '/etc/netplan')
+STATE_DIR = os.environ.get('GW_STATE_DIR', '/var/lib/gateway-netconfig')
+DRYRUN = os.environ.get('GW_DRYRUN') == '1'
+MAIN_FILE = '00-installer-config.yaml'
+VPN_FILE = '99-vpn-nic.yaml'
+FILES = [MAIN_FILE, VPN_FILE]
+PENDING_FILE = os.path.join(STATE_DIR, 'pending.json')
+TIMER_UNIT = 'gateway-netconfig-rollback'
+TIMEOUT = 90
+
+
+def fail(msg):
+    print(json.dumps({'error': msg}))
+    sys.exit(1)
+
+
+def is_vpn(name):
+    return name.startswith('vpn_')
+
+
+def physical_nics():
+    override = os.environ.get('GW_IFACES')
+    if override:
+        return override.split(',')
+    names = []
+    vpn = []
+    for name in sorted(os.listdir('/sys/class/net'), key=lambda n: (len(n), n)):
+        base = '/sys/class/net/' + name
+        if is_vpn(name):
+            vpn.append(name)
+            continue
+        if not os.path.exists(base + '/device') or os.path.exists(base + '/wireless'):
+            continue
+        if '/virtual/' in os.path.realpath(base):
+            continue
+        names.append(name)
+    return names + vpn
+
+
+def nic_mac(name):
+    try:
+        with open('/sys/class/net/%s/address' % name) as f:
+            return f.read().strip().lower()
+    except OSError:
+        return ''
+
+
+def load_file(fname):
+    path = os.path.join(NETPLAN_DIR, fname)
+    if os.path.exists(path):
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    else:
+        data = {}
+    net = data.setdefault('network', {})
+    net.setdefault('version', 2)
+    net.setdefault('ethernets', {})
+    return data
+
+
+def load_configs():
+    return {fname: load_file(fname) for fname in FILES}
+
+
+def find_entry(configs, name):
+    """(Datei, Schluessel) einer NIC: Name, set-name oder passende MAC."""
+    mac = nic_mac(name)
+    for fname in FILES:
+        for key, entry in configs[fname]['network']['ethernets'].items():
+            entry = entry or {}
+            match = entry.get('match') or {}
+            if key == name or entry.get('set-name') == name:
+                return fname, key
+            if mac and str(match.get('macaddress', '')).lower() == mac:
+                return fname, key
+    return None, None
+
+
+def describe(entry):
+    entry = entry or {}
+    addrs = [a for a in entry.get('addresses', []) if ':' not in str(a)]
+    gateway = None
+    for route in entry.get('routes', []) or []:
+        if route.get('to') in ('default', '0.0.0.0/0'):
+            gateway = route.get('via')
+    gateway = gateway or entry.get('gateway4')
+    dns = (entry.get('nameservers') or {}).get('addresses', [])
+    if entry.get('dhcp4'):
+        mode = 'dhcp'
+    elif addrs:
+        mode = 'static'
+    else:
+        mode = 'disabled'
+    return {'mode': mode, 'address': addrs[0] if addrs else '', 'gateway': gateway or '', 'dns': dns}
+
+
+def cmd_show():
+    configs = load_configs()
+    out = {}
+    for name in physical_nics():
+        fname, key = find_entry(configs, name)
+        out[name] = describe(configs[fname]['network']['ethernets'].get(key)) if key else {'mode': 'disabled', 'address': '', 'gateway': '', 'dns': []}
+    print(json.dumps({'interfaces': out, 'pending': read_pending()}))
+
+
+def read_pending():
+    try:
+        with open(PENDING_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def validate(name, cfg):
+    mode = cfg.get('mode')
+    if mode not in ('dhcp', 'static', 'disabled'):
+        fail('%s: ungueltiger Modus' % name)
+    result = {'mode': mode, 'address': None, 'gateway': None, 'dns': []}
+    dns = cfg.get('dns') or []
+    if isinstance(dns, str):
+        dns = [d for d in dns.replace(';', ',').replace(' ', ',').split(',') if d]
+    if len(dns) > 3:
+        fail('%s: maximal 3 DNS-Server' % name)
+    for d in dns:
+        try:
+            result['dns'].append(str(ipaddress.IPv4Address(d.strip())))
+        except ValueError:
+            fail('%s: DNS-Server "%s" ist keine IPv4-Adresse' % (name, d))
+    if mode == 'disabled':
+        result['dns'] = []
+    if mode != 'static':
+        return result
+    try:
+        iface = ipaddress.IPv4Interface((cfg.get('address') or '').strip())
+    except ValueError:
+        fail('%s: Adresse muss im Format 192.168.1.10/24 angegeben werden' % name)
+    if iface.network.prefixlen < 8 or iface.network.prefixlen > 30:
+        fail('%s: Praefixlaenge muss zwischen /8 und /30 liegen' % name)
+    if iface.ip.is_loopback or iface.ip.is_multicast or iface.ip.is_unspecified or \
+            iface.ip == iface.network.network_address or iface.ip == iface.network.broadcast_address:
+        fail('%s: %s ist keine gueltige Host-Adresse' % (name, iface.ip))
+    result['address'] = str(iface)
+    gateway = (cfg.get('gateway') or '').strip()
+    if gateway:
+        try:
+            gw = ipaddress.IPv4Address(gateway)
+        except ValueError:
+            fail('%s: Gateway "%s" ist keine IPv4-Adresse' % (name, gateway))
+        if is_vpn(name):
+            fail('%s: Fuer die VPN-Schnittstelle ist kein Gateway erlaubt' % name)
+        if gw not in iface.network or gw == iface.ip:
+            fail('%s: Gateway %s liegt nicht im Netz %s' % (name, gw, iface.network))
+        result['gateway'] = str(gw)
+    return result
+
+
+def apply_entry(entry, cfg):
+    for key in ('dhcp4', 'addresses', 'routes', 'gateway4', 'nameservers'):
+        entry.pop(key, None)
+    if cfg['mode'] == 'dhcp':
+        entry['dhcp4'] = True
+    else:
+        entry['dhcp4'] = False
+    if cfg['mode'] == 'static':
+        entry['addresses'] = [cfg['address']]
+        if cfg['gateway']:
+            entry['routes'] = [{'to': 'default', 'via': cfg['gateway']}]
+    if cfg['dns']:
+        entry['nameservers'] = {'addresses': cfg['dns']}
+    entry['optional'] = True
+    return entry
+
+
+def run(*args):
+    if DRYRUN:
+        return
+    res = subprocess.run(args, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError('%s: %s' % (' '.join(args), (res.stderr or res.stdout).strip()))
+
+
+def write_config(fname, data):
+    path = os.path.join(NETPLAN_DIR, fname)
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def cmd_apply():
+    try:
+        request = json.load(sys.stdin).get('interfaces') or {}
+    except ValueError:
+        fail('Ungueltiges JSON')
+    nics = physical_nics()
+    if not request:
+        fail('Keine Aenderung angegeben')
+    if read_pending():
+        fail('Es gibt noch eine unbestaetigte Aenderung - erst bestaetigen oder zuruecksetzen')
+
+    new = {}
+    for name, cfg in request.items():
+        if name not in nics:
+            fail('Unbekannte Schnittstelle: %s' % name)
+        new[name] = validate(name, cfg)
+
+    configs = load_configs()
+    touched = set()
+    for name, cfg in new.items():
+        fname, key = find_entry(configs, name)
+        if not key:
+            fname = VPN_FILE if is_vpn(name) else MAIN_FILE
+            key = name
+        ethernets = configs[fname]['network']['ethernets']
+        ethernets[key] = apply_entry(ethernets.get(key) or {}, cfg)
+        touched.add(fname)
+
+    # Ueberlappende statische Netze auf verschiedenen NICs vermeiden
+    nets = []
+    for name in nics:
+        fname, key = find_entry(configs, name)
+        entry = configs[fname]['network']['ethernets'].get(key) if key else None
+        for addr in (entry or {}).get('addresses', []):
+            if ':' in str(addr):
+                continue
+            net = ipaddress.IPv4Interface(addr).network
+            for other, other_net in nets:
+                if net.overlaps(other_net):
+                    fail('%s und %s liegen im selben Netz (%s / %s)' % (name, other, net, other_net))
+            nets.append((name, net))
+
+    os.makedirs(STATE_DIR, mode=0o755, exist_ok=True)
+    for fname in FILES:
+        path = os.path.join(NETPLAN_DIR, fname)
+        backup = os.path.join(STATE_DIR, 'backup-' + fname)
+        if os.path.exists(path):
+            shutil.copy2(path, backup)
+        else:
+            open(backup, 'w').close()
+
+    deadline = int(time.time()) + TIMEOUT
+    try:
+        for fname in sorted(touched):
+            write_config(fname, configs[fname])
+        run('netplan', 'generate')
+        run('systemd-run', '--unit=' + TIMER_UNIT, '--on-active=%ds' % TIMEOUT, '--collect',
+            os.path.abspath(__file__), 'rollback')
+        with open(PENDING_FILE, 'w') as f:
+            json.dump({'deadline': deadline, 'interfaces': sorted(new)}, f)
+        os.chmod(PENDING_FILE, 0o644)
+        run('netplan', 'apply')
+    except Exception as e:
+        restore_backup()
+        fail(str(e))
+    print(json.dumps({'success': True, 'deadline': deadline, 'timeout': TIMEOUT}))
+
+
+def restore_backup():
+    for fname in FILES:
+        path = os.path.join(NETPLAN_DIR, fname)
+        backup = os.path.join(STATE_DIR, 'backup-' + fname)
+        if not os.path.exists(backup):
+            continue
+        if os.path.getsize(backup) > 0:
+            shutil.copy2(backup, path)
+            os.chmod(path, 0o600)
+        elif os.path.exists(path):
+            os.remove(path)
+    try:
+        os.remove(PENDING_FILE)
+    except OSError:
+        pass
+    try:
+        run('systemctl', 'stop', TIMER_UNIT + '.timer')
+    except RuntimeError:
+        pass
+
+
+def cmd_confirm():
+    if not read_pending():
+        fail('Keine Aenderung zu bestaetigen')
+    try:
+        run('systemctl', 'stop', TIMER_UNIT + '.timer')
+    except RuntimeError:
+        pass
+    os.remove(PENDING_FILE)
+    print(json.dumps({'success': True}))
+
+
+def cmd_rollback():
+    if not read_pending():
+        fail('Keine Aenderung zum Zuruecksetzen')
+    restore_backup()
+    try:
+        run('netplan', 'apply')
+    except RuntimeError as e:
+        fail(str(e))
+    print(json.dumps({'success': True}))
+
+
+def main():
+    actions = {'show': cmd_show, 'apply': cmd_apply, 'confirm': cmd_confirm, 'rollback': cmd_rollback}
+    if len(sys.argv) != 2 or sys.argv[1] not in actions:
+        fail('Aufruf: gateway-netconfig show|apply|confirm|rollback')
+    if os.geteuid() != 0 and not DRYRUN:
+        fail('Muss als root laufen (per sudo)')
+    actions[sys.argv[1]]()
+
+
+if __name__ == '__main__':
+    main()

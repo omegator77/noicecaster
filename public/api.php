@@ -4,6 +4,7 @@ require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/PipelineManager.php';
 require_once __DIR__ . '/../src/DecklinkPortManager.php';
 require_once __DIR__ . '/../src/SystemStats.php';
+require_once __DIR__ . '/../src/NetworkManager.php';
 
 header('Content-Type: application/json');
 
@@ -195,6 +196,23 @@ try {
         case 'target_stats':
             $id = (int)($_GET['id'] ?? 0);
             echo json_encode($manager->getTargetStats($id));
+            break;
+
+        case 'network_list':
+            echo json_encode(NetworkManager::list());
+            break;
+
+        case 'network_apply':
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode(NetworkManager::apply($data['interfaces'] ?? []));
+            break;
+
+        case 'network_confirm':
+            echo json_encode(NetworkManager::confirm());
+            break;
+
+        case 'network_rollback':
+            echo json_encode(NetworkManager::rollback());
             break;
 
         default:
