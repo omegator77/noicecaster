@@ -11,3 +11,8 @@ data/uploads/*
 # Python
 __pycache__/
 *.pyc
+
+# Anmeldung (Passwort-Hash, Sessions, Fehlversuche) - nie versionieren
+data/auth.json
+data/auth_attempts.json
+data/sessions/

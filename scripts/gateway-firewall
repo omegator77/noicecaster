@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""Privilegierter Helfer fuer die Firewall-Ansicht des Gateways (ufw).
+
+Wird per sudo vom Webinterface aufgerufen, liegt root-eigen unter
+/usr/local/sbin (siehe deploy/install-netconfig.sh).
+
+Aktionen:
+  status    Firewall-Status und alle Regeln als JSON (lesend)
+  add       JSON von stdin: {"proto": "udp", "port": "9999", "source": "any",
+            "iface": "enp7s0", "comment": "..."}  (iface optional: nur auf dieser NIC)
+            legt eine ERLAUBEN-Regel an, markiert mit "gw:" im Kommentar
+  delete    JSON von stdin: {"proto": "udp", "port": "9999", "source": "any", "iface": ""}
+            loescht eine Regel, aber nur, wenn sie mit "gw:" markiert ist
+  confirm   Aenderungen bestaetigen, Rueckfall-Timer stoppen
+  rollback  alten Stand sofort wiederherstellen
+
+Absicherung gegen Aussperren: Nur eigene (markierte) Regeln sind aenderbar, es gibt
+nur "erlauben", und jede Aenderung startet einen Rueckfall-Timer. Ohne "confirm"
+innerhalb von TIMEOUT Sekunden werden die gesicherten Regeldateien wiederhergestellt.
+"""
+import ipaddress
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+UFW = os.environ.get('GW_UFW', '/usr/sbin/ufw')
+UFW_DIR = os.environ.get('GW_UFW_DIR', '/etc/ufw')
+STATE_DIR = os.environ.get('GW_FW_STATE_DIR', '/var/lib/gateway-firewall')
+DRYRUN = os.environ.get('GW_DRYRUN') == '1'
+RULE_FILES = ['user.rules', 'user6.rules']
+PENDING_FILE = os.path.join(STATE_DIR, 'pending.json')
+TIMER_UNIT = 'gateway-firewall-rollback'
+TIMEOUT = 90
+MARK = 'gw:'
+
+
+def fail(msg):
+    print(json.dumps({'error': msg}))
+    sys.exit(1)
+
+
+def run_ufw(*args):
+    if DRYRUN:
+        return ''
+    res = subprocess.run([UFW] + list(args), capture_output=True, text=True, env=dict(os.environ, LANG='C'))
+    if res.returncode != 0:
+        raise RuntimeError((res.stderr or res.stdout).strip() or 'ufw fehlgeschlagen')
+    return res.stdout
+
+
+def run(*args):
+    if DRYRUN:
+        return
+    res = subprocess.run(args, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError('%s: %s' % (' '.join(args), (res.stderr or res.stdout).strip()))
+
+
+def nic_names():
+    """Schnittstellen, auf die sich Regeln beziehen duerfen: physische NICs und vpn_*."""
+    override = os.environ.get('GW_IFACES')
+    if override:
+        return override.split(',')
+    names = []
+    try:
+        entries = sorted(os.listdir('/sys/class/net'))
+    except OSError:
+        return names
+    for name in entries:
+        base = '/sys/class/net/' + name
+        if name.startswith('vpn_') or (os.path.exists(base + '/device') and not os.path.exists(base + '/wireless')
+                                       and '/virtual/' not in os.path.realpath(base)):
+            names.append(name)
+    return names
+
+
+# ---------------------------------------------------------------- Regeln lesen
+
+def decode_comment(raw):
+    """ufw legt Kommentare in user.rules hex-kodiert ab."""
+    try:
+        return bytes.fromhex(raw).decode('utf-8')
+    except ValueError:
+        return raw
+
+
+def read_rules():
+    rules = []
+    unparsed = []
+    for fname in RULE_FILES:
+        v6 = fname == 'user6.rules'
+        try:
+            with open(os.path.join(UFW_DIR, fname)) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.startswith('### tuple ###'):
+                continue
+            parts = line[len('### tuple ###'):].split()
+            comment = ''
+            if parts and parts[-1].startswith('comment='):
+                comment = decode_comment(parts.pop()[len('comment='):])
+            if len(parts) != 7:
+                unparsed.append(line)
+                continue
+            action, proto, dport, dst, sport, src, direction = parts
+            rules.append({
+                'action': action, 'proto': proto, 'port': dport, 'to': dst, 'sport': sport,
+                'source': 'any' if src in ('0.0.0.0/0', '::/0') else src,
+                'direction': direction, 'iface': direction[3:] if direction.startswith('in_') else '',
+                'comment': comment, 'v6': v6,
+            })
+    # v4/v6-Paare mit gleicher Bedeutung zu einem Eintrag zusammenfassen
+    merged = []
+    seen = {}
+    for r in rules:
+        key = (r['action'], r['proto'], r['port'], r['source'], r['direction'], r['sport'])
+        if r['v6'] and r['source'] == 'any' and key in seen:
+            seen[key]['v6'] = True
+            continue
+        r = dict(r)
+        r['managed'] = r['comment'].startswith(MARK)
+        r['label'] = r['comment'][len(MARK):] if r['managed'] else r['comment']
+        seen[key] = r
+        merged.append(r)
+    return merged, unparsed
+
+
+def cmd_status():
+    rules, unparsed = read_rules()
+    active, default = False, ''
+    try:
+        out = run_ufw('status', 'verbose') if not DRYRUN else ''
+    except RuntimeError:
+        out = ''
+    for line in out.splitlines():
+        if line.startswith('Status:'):
+            active = 'inactive' not in line
+        elif line.startswith('Default:'):
+            default = line[len('Default:'):].strip()
+    print(json.dumps({'active': active, 'default': default, 'rules': rules, 'unparsed': unparsed,
+                      'pending': read_pending()}))
+
+
+# ---------------------------------------------------------------- Aenderungen
+
+def read_pending():
+    try:
+        with open(PENDING_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def validate(req, need_comment):
+    proto = req.get('proto')
+    iface = str(req.get('iface') or '').strip()
+    if iface and iface not in nic_names():
+        fail('Unbekannte Schnittstelle: %s' % iface)
+    if proto not in ('udp', 'tcp'):
+        fail('Protokoll muss udp oder tcp sein')
+    port = str(req.get('port', '')).strip().replace('-', ':')
+    m = re.fullmatch(r'(\d{1,5})(?::(\d{1,5}))?', port)
+    if not m:
+        fail('Port muss eine Zahl oder ein Bereich wie 9000:9010 sein')
+    lo = int(m.group(1))
+    hi = int(m.group(2)) if m.group(2) else lo
+    if not (1 <= lo <= 65535 and 1 <= hi <= 65535 and lo <= hi):
+        fail('Port ausserhalb von 1-65535 oder Bereich verkehrt herum')
+    port = str(lo) if lo == hi else '%d:%d' % (lo, hi)
+    source = str(req.get('source') or 'any').strip().lower()
+    if source != 'any':
+        try:
+            net = ipaddress.IPv4Network(source, strict=False)
+        except ValueError:
+            fail('Quelle muss "any", eine IPv4-Adresse oder ein Netz wie 192.168.1.0/24 sein')
+        source = 'any' if net.prefixlen == 0 else (str(net.network_address) if net.prefixlen == 32 else str(net))
+    comment = ''
+    if need_comment:
+        comment = str(req.get('comment') or '').strip()
+        if not re.fullmatch(r'[\w .\-/äöüÄÖÜß]{0,40}', comment):
+            fail('Bezeichnung: maximal 40 Zeichen, nur Buchstaben, Ziffern, Leerzeichen, . - _ /')
+    return proto, port, source, comment, iface
+
+
+def same(rule, proto, port, source, iface):
+    return (rule['action'] == 'allow' and rule['proto'] == proto and rule['port'] == port
+            and rule['source'] == source and rule['direction'] == ('in_' + iface if iface else 'in'))
+
+
+def snapshot_if_needed():
+    """Sichert die Regeldateien, falls noch keine unbestaetigte Aenderung offen ist."""
+    os.makedirs(STATE_DIR, mode=0o755, exist_ok=True)
+    if read_pending():
+        return False
+    for fname in RULE_FILES:
+        src = os.path.join(UFW_DIR, fname)
+        if os.path.exists(src):
+            shutil.copy2(src, os.path.join(STATE_DIR, 'backup-' + fname))
+    return True
+
+
+def start_timer():
+    deadline = int(time.time()) + TIMEOUT
+    try:
+        run('systemctl', 'stop', TIMER_UNIT + '.timer')
+    except RuntimeError:
+        pass
+    run('systemd-run', '--unit=' + TIMER_UNIT, '--on-active=%ds' % TIMEOUT, '--collect',
+        os.path.abspath(__file__), 'rollback')
+    with open(PENDING_FILE, 'w') as f:
+        json.dump({'deadline': deadline}, f)
+    os.chmod(PENDING_FILE, 0o644)
+    return deadline
+
+
+def restore_backup():
+    for fname in RULE_FILES:
+        backup = os.path.join(STATE_DIR, 'backup-' + fname)
+        if os.path.exists(backup):
+            shutil.copy2(backup, os.path.join(UFW_DIR, fname))
+    try:
+        os.remove(PENDING_FILE)
+    except OSError:
+        pass
+    try:
+        run('systemctl', 'stop', TIMER_UNIT + '.timer')
+    except RuntimeError:
+        pass
+    run_ufw('reload')
+
+
+def change(spec_args):
+    """Fuehrt eine ufw-Aenderung mit Sicherung und Rueckfall-Timer aus."""
+    created = snapshot_if_needed()
+    try:
+        deadline = start_timer()
+        run_ufw(*spec_args)
+    except Exception as e:
+        if created:
+            restore_backup()
+        fail(str(e))
+    print(json.dumps({'success': True, 'deadline': deadline, 'timeout': TIMEOUT}))
+
+
+def spec(proto, port, source, iface):
+    on = ['in', 'on', iface] if iface else []
+    return on + ['proto', proto, 'from', source, 'to', 'any', 'port', port]
+
+
+def cmd_add():
+    req = json.load(sys.stdin)
+    proto, port, source, comment, iface = validate(req, True)
+    rules, _ = read_rules()
+    if any(same(r, proto, port, source, iface) for r in rules):
+        fail('Eine gleiche Regel existiert schon')
+    args = ['allow'] + spec(proto, port, source, iface) + ['comment', MARK + comment]
+    change(args)
+
+
+def cmd_delete():
+    req = json.load(sys.stdin)
+    proto, port, source, _, iface = validate(req, False)
+    rules, _ = read_rules()
+    hit = [r for r in rules if same(r, proto, port, source, iface)]
+    if not hit:
+        fail('Regel nicht gefunden')
+    if not all(r['managed'] for r in hit):
+        fail('Nur vom Gateway angelegte Regeln koennen geloescht werden')
+    change(['--force', 'delete', 'allow'] + spec(proto, port, source, iface))
+
+
+def cmd_confirm():
+    if not read_pending():
+        fail('Keine Aenderung zu bestaetigen')
+    try:
+        run('systemctl', 'stop', TIMER_UNIT + '.timer')
+    except RuntimeError:
+        pass
+    os.remove(PENDING_FILE)
+    print(json.dumps({'success': True}))
+
+
+def cmd_rollback():
+    if not read_pending():
+        fail('Keine Aenderung zum Zuruecksetzen')
+    try:
+        restore_backup()
+    except RuntimeError as e:
+        fail(str(e))
+    print(json.dumps({'success': True}))
+
+
+def main():
+    actions = {'status': cmd_status, 'add': cmd_add, 'delete': cmd_delete,
+               'confirm': cmd_confirm, 'rollback': cmd_rollback}
+    if len(sys.argv) != 2 or sys.argv[1] not in actions:
+        fail('Aufruf: gateway-firewall ' + '|'.join(actions))
+    if os.geteuid() != 0 and not DRYRUN:
+        fail('Muss als root laufen (per sudo)')
+    try:
+        actions[sys.argv[1]]()
+    except ValueError:
+        fail('Ungueltiges JSON')
+
+
+if __name__ == '__main__':
+    main()

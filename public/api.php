@@ -5,8 +5,12 @@ require_once __DIR__ . '/../src/PipelineManager.php';
 require_once __DIR__ . '/../src/DecklinkPortManager.php';
 require_once __DIR__ . '/../src/SystemStats.php';
 require_once __DIR__ . '/../src/NetworkManager.php';
+require_once __DIR__ . '/../src/Auth.php';
+require_once __DIR__ . '/../src/FirewallManager.php';
 
 header('Content-Type: application/json');
+
+Auth::handle();
 
 $db = new Database(__DIR__ . '/../data/pipelines.sqlite');
 $manager = new PipelineManager($db->pdo());
@@ -209,6 +213,28 @@ try {
 
         case 'network_confirm':
             echo json_encode(NetworkManager::confirm());
+            break;
+
+        case 'firewall_status':
+            echo json_encode(FirewallManager::status($manager));
+            break;
+
+        case 'firewall_add':
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode(FirewallManager::add(is_array($data) ? $data : []));
+            break;
+
+        case 'firewall_delete':
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode(FirewallManager::delete(is_array($data) ? $data : []));
+            break;
+
+        case 'firewall_confirm':
+            echo json_encode(FirewallManager::confirm());
+            break;
+
+        case 'firewall_rollback':
+            echo json_encode(FirewallManager::rollback());
             break;
 
         case 'vpn_connect':
