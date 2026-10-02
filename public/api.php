@@ -211,6 +211,14 @@ try {
             echo json_encode(NetworkManager::confirm());
             break;
 
+        case 'vpn_connect':
+            echo json_encode(NetworkManager::vpnConnect());
+            break;
+
+        case 'vpn_reconnect':
+            echo json_encode(NetworkManager::vpnReconnect());
+            break;
+
         case 'network_rollback':
             echo json_encode(NetworkManager::rollback());
             break;

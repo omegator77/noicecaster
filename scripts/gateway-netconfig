@@ -12,11 +12,16 @@ Aktionen:
             der alte Stand wiederhergestellt (Schutz vor Aussperren)
   confirm   Aenderung bestaetigen, Rueckfall-Timer stoppen
   rollback  alten Stand sofort wiederherstellen
+  vpn-status     Status des SoftEther-VPN-Clients (Verbindung steht ja/nein)
+  vpn-connect    VPN-Verbindung aufbauen
+  vpn-reconnect  VPN-Verbindung trennen und neu aufbauen
 
 Verwaltet werden die physischen NICs (Eintraege in 00-installer-config.yaml)
 und die SoftEther-VPN-NIC vpn_* (Eintrag in 99-vpn-nic.yaml). match/set-name/
 optional bleiben erhalten; andere Eintraege und Dateien werden nicht angefasst.
 """
+import csv
+import io
 import ipaddress
 import json
 import os
@@ -36,6 +41,7 @@ FILES = [MAIN_FILE, VPN_FILE]
 PENDING_FILE = os.path.join(STATE_DIR, 'pending.json')
 TIMER_UNIT = 'gateway-netconfig-rollback'
 TIMEOUT = 90
+VPNCMD = os.environ.get('GW_VPNCMD', '/usr/local/vpnclient/vpncmd')
 
 
 def fail(msg):
@@ -328,10 +334,71 @@ def cmd_rollback():
     print(json.dumps({'success': True}))
 
 
+def vpncmd(*cmd):
+    """Ergebnis eines vpncmd-Befehls als CSV-Zeilen; None bei Fehler."""
+    try:
+        res = subprocess.run([VPNCMD, 'localhost', '/CLIENT', '/CSV', '/CMD'] + list(cmd),
+                             capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        fail('vpncmd nicht ausfuehrbar: %s' % e)
+    if res.returncode != 0:
+        return None
+    return [row for row in csv.reader(io.StringIO(res.stdout)) if row]
+
+
+def vpn_account():
+    """Erste Verbindungseinstellung des VPN-Clients (Name, Status, Server, Hub).
+
+    Die CSV-Ausgabe beginnt mit einer Banner-Zeile, danach folgen Kopfzeile
+    und eine Zeile je Verbindung."""
+    rows = vpncmd('AccountList') or []
+    head_i = next((i for i, r in enumerate(rows) if len(r) > 1 and r[0].lower().startswith('vpn connection setting name')), None)
+    if head_i is None or head_i + 1 >= len(rows):
+        fail('Keine VPN-Verbindungseinstellung gefunden')
+    head = [h.lower() for h in rows[head_i]]
+    row = rows[head_i + 1]
+
+    def pick(word):
+        i = next((i for i, h in enumerate(head) if word in h), None)
+        return row[i] if i is not None and i < len(row) else ''
+
+    return {'name': row[0], 'status': pick('status'), 'server': pick('hostname'), 'hub': pick('hub')}
+
+
+def cmd_vpn_status():
+    acc = vpn_account()
+    acc['connected'] = acc['status'].strip().lower() == 'connected'
+    details = {}
+    if acc['connected']:
+        rows = vpncmd('AccountStatusGet', acc['name']) or []
+        for row in rows:
+            if len(row) >= 2 and row[0] != 'Item':
+                details[row[0]] = row[1]
+    acc['details'] = details
+    print(json.dumps(acc))
+
+
+def cmd_vpn_connect():
+    acc = vpn_account()
+    if vpncmd('AccountConnect', acc['name']) is None:
+        fail('AccountConnect fehlgeschlagen')
+    print(json.dumps({'success': True}))
+
+
+def cmd_vpn_reconnect():
+    acc = vpn_account()
+    vpncmd('AccountDisconnect', acc['name'])
+    time.sleep(1)
+    if vpncmd('AccountConnect', acc['name']) is None:
+        fail('AccountConnect fehlgeschlagen')
+    print(json.dumps({'success': True}))
+
+
 def main():
-    actions = {'show': cmd_show, 'apply': cmd_apply, 'confirm': cmd_confirm, 'rollback': cmd_rollback}
+    actions = {'show': cmd_show, 'apply': cmd_apply, 'confirm': cmd_confirm, 'rollback': cmd_rollback,
+               'vpn-status': cmd_vpn_status, 'vpn-connect': cmd_vpn_connect, 'vpn-reconnect': cmd_vpn_reconnect}
     if len(sys.argv) != 2 or sys.argv[1] not in actions:
-        fail('Aufruf: gateway-netconfig show|apply|confirm|rollback')
+        fail('Aufruf: gateway-netconfig ' + '|'.join(actions))
     if os.geteuid() != 0 and not DRYRUN:
         fail('Muss als root laufen (per sudo)')
     actions[sys.argv[1]]()

@@ -221,6 +221,7 @@
     <span><span class="sys-label">CPU</span><span class="sys-value" x-text="(systemStats?.cpu_percent ?? '–') + '%'"></span></span>
     <span><span class="sys-label">RAM</span><span class="sys-value" x-text="formatBytes((systemStats?.mem_used_kb ?? 0) * 1024) + ' / ' + formatBytes((systemStats?.mem_total_kb ?? 0) * 1024)"></span></span>
     <span><span class="sys-label">TEMP</span><span class="sys-value" :class="tempClass(systemStats?.temp_c)" x-text="(systemStats?.temp_c ?? '–') + '°C'"></span></span>
+    <span><span class="sys-label">VPN</span><span class="sys-value" :class="vpnClass()" x-text="vpnLabel()"></span></span>
     <span><span class="sys-label">LOAD</span><span class="sys-value" x-text="systemStats?.load ? systemStats.load.map(l => l.toFixed(2)).join(' / ') : '–'"></span></span>
   </div>
 
@@ -317,7 +318,7 @@
     <div class="section-header-title">
       <h2>Netzwerk</h2>
       <template x-for="nic in network.interfaces" :key="'nled-' + nic.name">
-        <span class="led" :class="nic.carrier ? 'led-green' : ''" :title="nic.name + ': ' + (nic.carrier ? 'Link aktiv' : 'kein Link')"></span>
+        <span class="led" :class="nicLed(nic)" :title="nic.name + ': ' + (nic.is_vpn ? vpnLabel() : (nic.carrier ? 'Link aktiv' : 'kein Link'))"></span>
       </template>
     </div>
     <button type="button" class="btn-secondary" @click="toggleNetworkCollapsed()" x-text="networkCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
@@ -340,7 +341,7 @@
     <template x-for="nic in network.interfaces" :key="'nic-' + nic.name">
       <div style="margin-bottom: 0.75rem; padding-bottom: 0.75rem; border-bottom: 1px solid #2a2e37;">
         <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-weight: 600;">
-          <span class="led" :class="nic.carrier ? 'led-green' : ''"></span>
+          <span class="led" :class="nicLed(nic)"></span>
           <span x-text="nic.name"></span>
           <span class="badge" x-show="nic.is_vpn" style="font-weight: 400;">VPN</span>
           <span class="hint" style="margin: 0; font-weight: 400;" x-text="nic.mac + (nic.carrier ? ' · Link ' + (nic.speed_mbit ? nic.speed_mbit + ' Mbit/s' : 'aktiv') : ' · kein Link') + (nic.driver ? ' · ' + nic.driver : '')"></span>
@@ -353,6 +354,13 @@
           <span x-show="nic.dns.length"> · DNS <span x-text="nic.dns.join(', ')"></span></span>
           <span x-show="nic.ipv6.length"> · <span x-text="nic.ipv6.join(', ')"></span></span>
         </div>
+        <div x-show="nic.is_vpn" style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.3rem 0;">
+          <span class="badge" :class="network.vpn?.connected ? 'running' : ''" x-text="vpnLabel()"></span>
+          <span class="hint" style="margin: 0;" x-show="network.vpn" x-text="(network.vpn?.server ? 'Server ' + network.vpn.server : '') + (network.vpn?.hub ? ' · Hub ' + network.vpn.hub : '') + (network.vpn?.details?.['Session Name'] ? ' · ' + network.vpn.details['Session Name'] : '') + (network.vpn?.details?.['Current Session has been Established since'] ? ' · seit ' + network.vpn.details['Current Session has been Established since'] : '')"></span>
+          <button type="button" class="btn-secondary" @click="vpnAction('vpn_connect')" :disabled="vpnBusy || !network.vpn || network.vpn.connected">Verbinden</button>
+          <button type="button" class="btn-secondary" @click="vpnAction('vpn_reconnect')" :disabled="vpnBusy || !network.vpn">Neu verbinden</button>
+        </div>
+        <div class="hint" x-show="nic.is_vpn && !network.vpn">VPN-Status unbekannt: Netzwerk-Helfer neu installieren (<code>deploy/install-netconfig.sh</code>).</div>
         <div class="hint" x-show="nic.is_vpn" style="color: #d9a400;">Achtung: Wer sich gerade über das VPN verbindet, verliert bei einer Adressänderung die Verbindung und muss die Änderung unter der neuen VPN-Adresse bestätigen (oder 90 s auf den automatischen Rückfall warten).</div>
         <template x-if="network.editable && networkEdit[nic.name]">
           <div class="form-row" style="grid-template-columns: 140px 1.2fr 1fr 1fr;">
@@ -1167,6 +1175,7 @@ function app() {
     network: { interfaces: [], editable: false, pending: null },
     networkEdit: {},
     savingNetwork: false,
+    vpnBusy: false,
     networkNow: Date.now(),
     networkCollapsed: (() => {
       try { return localStorage.getItem('networkCollapsed') === '1'; } catch (e) { return false; }
@@ -1280,6 +1289,40 @@ function app() {
       }
     },
 
+    vpnLabel() {
+      const v = this.network.vpn;
+      if (!v) return 'unbekannt';
+      return v.connected ? 'verbunden' : (v.status || 'getrennt').toLowerCase();
+    },
+
+    vpnClass() {
+      const v = this.network.vpn;
+      if (!v) return '';
+      return v.connected ? '' : 'temp-hot';
+    },
+
+    nicLed(nic) {
+      if (nic.is_vpn) return this.network.vpn ? (this.network.vpn.connected ? 'led-green' : 'led-red') : 'led-gray';
+      return nic.carrier ? 'led-green' : '';
+    },
+
+    async vpnAction(action) {
+      if (action === 'vpn_reconnect' && !confirm('VPN neu verbinden? Eine Verbindung über das VPN (auch diese Seite) bricht dabei kurz ab.')) return;
+      this.vpnBusy = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=' + action);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await new Promise(r => setTimeout(r, 2500));
+        await this.loadNetwork();
+      } catch (e) {
+        this.errorMsg = 'VPN-Aktion fehlgeschlagen: ' + e.message;
+      } finally {
+        this.vpnBusy = false;
+      }
+    },
+
     toggleNetworkCollapsed() {
       this.networkCollapsed = !this.networkCollapsed;
       try { localStorage.setItem('networkCollapsed', this.networkCollapsed ? '1' : '0'); } catch (e) {}
@@ -1309,9 +1352,7 @@ function app() {
 
     async pollNetwork() {
       this.networkNow = Date.now();
-      if (!this.networkCollapsed || this.network.pending) {
-        await this.loadNetwork();
-      }
+      await this.loadNetwork();
       setTimeout(() => this.pollNetwork(), this.network.pending ? 2000 : 15000);
     },
 

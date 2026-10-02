@@ -59,6 +59,7 @@ class NetworkManager
             'interfaces' => $nics,
             'editable' => $helper !== null,
             'pending' => self::pending(),
+            'vpn' => self::vpnStatus(),
         ];
     }
 
@@ -76,6 +77,30 @@ class NetworkManager
     public static function rollback(): array
     {
         return self::requireHelper('rollback');
+    }
+
+    /** VPN-Status des SoftEther-Clients; null, wenn der Helfer fehlt oder veraltet ist. */
+    public static function vpnStatus(): ?array
+    {
+        $res = self::callHelper('vpn-status');
+        if ($res === null || isset($res['error'])) {
+            return null;
+        }
+        // Nur harmlose Felder weitergeben (u.a. nicht den Session-Key)
+        $allowed = ['Session Status', 'Session Name', 'Current Session has been Established since',
+            'Number of Established Sessions', 'Encryption', 'UDP Acceleration is Active'];
+        $res['details'] = array_intersect_key($res['details'] ?? [], array_flip($allowed));
+        return $res;
+    }
+
+    public static function vpnConnect(): array
+    {
+        return self::requireHelper('vpn-connect');
+    }
+
+    public static function vpnReconnect(): array
+    {
+        return self::requireHelper('vpn-reconnect');
     }
 
     public static function pending(): ?array
