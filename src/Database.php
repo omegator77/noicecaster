@@ -70,6 +70,14 @@ class Database
             // von allen Zielen gemeinsam genutzte Aufnahme-Prozess.
             'distributor_pid' => "INTEGER DEFAULT NULL",
             'distributor_status' => "TEXT DEFAULT 'stopped'",
+            // Anzeigename fuer "Ziel 1" (die Pipeline selbst) - analog zum "name"-Feld der
+            // srt_targets-Tabelle, damit das Hauptziel in der UI genauso benennbar/anzeigbar ist
+            // wie die zusaetzlichen Ziele.
+            'target_name' => "TEXT DEFAULT 'Ziel 1'",
+            // x264enc/x265enc speed-preset - steuert nur Kompressionsaufwand/CPU-Last, nicht die
+            // Latenz (die haengt allein an tune=zerolatency + Keyframe-Abstand). 'veryfast' war bisher
+            // fest einprogrammiert; jetzt pro Ziel einstellbar (siehe [[project-noicecaster-repo]]).
+            'video_speed_preset' => "TEXT DEFAULT 'veryfast'",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {
@@ -139,6 +147,7 @@ class Database
                 video_rate_control TEXT DEFAULT 'cbr',
                 video_keyframe_interval INTEGER DEFAULT 0,
                 video_scale_enabled INTEGER DEFAULT 0,
+                video_speed_preset TEXT DEFAULT 'veryfast',
                 width INTEGER DEFAULT 1920,
                 height INTEGER DEFAULT 1080,
                 audio_codec TEXT DEFAULT 'aac',
@@ -150,6 +159,11 @@ class Database
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ");
+
+        $existingTargetColumns = array_column($this->pdo->query("PRAGMA table_info(srt_targets)")->fetchAll(PDO::FETCH_ASSOC), 'name');
+        if (!in_array('video_speed_preset', $existingTargetColumns, true)) {
+            $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN video_speed_preset TEXT DEFAULT 'veryfast'");
+        }
     }
 
     public function pdo(): PDO

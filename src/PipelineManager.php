@@ -30,6 +30,10 @@ class PipelineManager
     ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
     private const VIDEO_RATE_CONTROLS = ['cbr', 'vbr'];
+    // x264enc/x265enc speed-preset - nur bis 'medium' erlaubt, langsamere Presets (slow/slower/
+    // veryslow/placebo) schaffen es bei 1080i/1080p-Echtzeitkodierung typischerweise nicht mehr
+    // rechtzeitig und wuerden Frames droppen statt Latenz/Qualitaet zu verbessern.
+    private const VIDEO_SPEED_PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium'];
     private const SRT_PBKEYLEN = [0, 16, 24, 32];
     private const AUDIO_TEST_WAVES = ['sine', 'silence'];
 
@@ -122,8 +126,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -157,6 +161,8 @@ class PipelineManager
             ':audio_test_wave' => $this->sanitizeAudioTestWave($data),
             ':preview_enabled' => (int)($data['preview_enabled'] ?? 0) === 1 ? 1 : 0,
             ':test_pattern_enabled' => (int)($data['test_pattern_enabled'] ?? 0) === 1 ? 1 : 0,
+            ':target_name' => $this->sanitizeTargetName($data),
+            ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -257,10 +263,22 @@ class PipelineManager
         return in_array($rc, self::VIDEO_RATE_CONTROLS, true) ? $rc : 'cbr';
     }
 
+    private function sanitizeSpeedPreset(array $data): string
+    {
+        $preset = $data['video_speed_preset'] ?? 'veryfast';
+        return in_array($preset, self::VIDEO_SPEED_PRESETS, true) ? $preset : 'veryfast';
+    }
+
     private function sanitizeAudioTestWave(array $data): string
     {
         $wave = $data['audio_test_wave'] ?? 'sine';
         return in_array($wave, self::AUDIO_TEST_WAVES, true) ? $wave : 'sine';
+    }
+
+    private function sanitizeTargetName(array $data): string
+    {
+        $name = trim((string)($data['target_name'] ?? ''));
+        return $name !== '' ? $name : 'Ziel 1';
     }
 
     public static function previewImagePath(int $id): string
@@ -293,17 +311,18 @@ class PipelineManager
     }
 
 
-    private function buildVideoEncoder(string $codec, int $bitrate, int $keyframeInterval, string $rateControl): string
+    private function buildVideoEncoder(string $codec, int $bitrate, int $keyframeInterval, string $rateControl, string $speedPreset = 'veryfast'): string
     {
         switch ($codec) {
             case 'h265':
-                $chain = "x265enc tune=zerolatency bitrate={$bitrate} key-int-max={$keyframeInterval}";
+                $chain = "x265enc tune=zerolatency speed-preset={$speedPreset} bitrate={$bitrate} key-int-max={$keyframeInterval}";
                 if ($rateControl === 'cbr') {
                     // x265 hat keine eigene VBV-Property, daher ueber die x265-Optionszeile erzwungen
                     $chain .= " option-string=\"vbv-bufsize={$bitrate}:vbv-maxrate={$bitrate}\"";
                 }
                 return $chain . " ! h265parse config-interval=-1";
             case 'mpeg2':
+                // avenc_mpeg2video kennt kein speed-preset - Parameter wird fuer diesen Codec ignoriert
                 $bps = $bitrate * 1000;
                 $chain = "avenc_mpeg2video bitrate={$bps} gop-size={$keyframeInterval}";
                 if ($rateControl === 'cbr') {
@@ -311,7 +330,7 @@ class PipelineManager
                 }
                 return $chain . " ! mpegvideoparse";
             default:
-                $chain = "x264enc tune=zerolatency speed-preset=veryfast bitrate={$bitrate} key-int-max={$keyframeInterval}";
+                $chain = "x264enc tune=zerolatency speed-preset={$speedPreset} bitrate={$bitrate} key-int-max={$keyframeInterval}";
                 if ($rateControl === 'cbr') {
                     // 1s VBV-Puffer erzwingt eine echte Konstant-Bitrate statt nur eines Zielwerts
                     $chain .= " vbv-buf-capacity=1000";
@@ -494,7 +513,8 @@ class PipelineManager
         $framerate = self::HD_MODE_CAPS[$decklinkMode]['fps_num'] / self::HD_MODE_CAPS[$decklinkMode]['fps_den'];
         $keyframeInterval = $this->sanitizeKeyframeInterval($target, (int)round($framerate));
         $rateControl = $this->sanitizeVideoRateControl($target);
-        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl);
+        $speedPreset = $this->sanitizeSpeedPreset($target);
+        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset);
 
         $audio = $this->sanitizeAudio($target);
         $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
@@ -530,13 +550,22 @@ class PipelineManager
 
         $prefix = "env GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
 
-        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
-            "{$videoEncoder} ! mpegtsmux name=mux ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
+        // shmsrc liefert nur einen rohen Byte-Strom ohne eigenes Timing - der Segment-Event, den es
+        // erzeugt, steht in Format "bytes", nicht "time" (verifiziert 2026-09-30 per identity-Probe
+        // auf dem laufenden Socket). Downstream-Elemente wie avenc_s302m verlangen aber ein
+        // Zeit-Segment und werfen sonst "assertion 'segment->format == format' failed" - stumm bei
+        // Video, aber bei Audio klar sichtbar, und in beiden Faellen verhindert es offenbar, dass
+        // mpegtsmux ueberhaupt jemals ein Muxed-Paket ausgibt (SRT-Verbindung baut sauber auf, aber
+        // es fliessen nur Keepalives, nie echte Daten - reproduziert per echtem SRT-Client-Verbindungstest).
+        // rawvideoparse/rawaudioparse (gst-plugins-bad) lesen die vorher gesetzten Caps
+        // (use-sink-caps=true) und wandeln den Byte-Strom in einen korrekt getakteten Zeit-Strom um.
+        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
+            "{$videoEncoder} ! mpegtsmux name=mux ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
         // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
         $rawAudioCaps = "audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels={$decklink['audio_channels']}";
-        $audioBranch = "shmsrc socket-path={$audioShm} is-live=true ! {$rawAudioCaps} ! {$channelSelect}audioconvert ! audioresample ! " .
+        $audioBranch = "shmsrc socket-path={$audioShm} is-live=true ! {$rawAudioCaps} ! rawaudioparse use-sink-caps=true ! {$channelSelect}audioconvert ! audioresample ! " .
             $this->buildAudioEncoderChain($audio);
 
         return $prefix . $videoBranch . $audioBranch;
@@ -682,8 +711,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_bitrate)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_bitrate)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_bitrate, video_speed_preset)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_bitrate, :video_speed_preset)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -705,6 +734,7 @@ class PipelineManager
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
             ':audio_bitrate' => $audio['bitrate'],
+            ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -739,7 +769,8 @@ class PipelineManager
                 height = :height,
                 audio_codec = :audio_codec,
                 audio_output_channels = :audio_output_channels,
-                audio_bitrate = :audio_bitrate
+                audio_bitrate = :audio_bitrate,
+                video_speed_preset = :video_speed_preset
             WHERE id = :id
         ");
         $stmt->execute([
@@ -762,6 +793,7 @@ class PipelineManager
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
             ':audio_bitrate' => $audio['bitrate'],
+            ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
     }
 
@@ -901,7 +933,8 @@ class PipelineManager
         $videoFormat = $this->videoFormatForCodec($videoCodec);
         $keyframeInterval = $this->sanitizeKeyframeInterval($p, $framerate);
         $rateControl = $this->sanitizeVideoRateControl($p);
-        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl);
+        $speedPreset = $this->sanitizeSpeedPreset($p);
+        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset);
         $srtSecurity = $this->sanitizeSrtSecurity($p);
         $srtSecurityProps = $this->buildSrtSecurityProps($srtSecurity);
         $clockOverlayElement = $this->buildClockOverlayElement($p);
@@ -950,7 +983,7 @@ class PipelineManager
                 "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
                 "mpegtsmux name=mux ! " .
-                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
+                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
 
             $audio = $this->sanitizeAudio($p);
             $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
@@ -988,7 +1021,7 @@ class PipelineManager
             "videoconvert ! {$clockOverlayElement}" .
             "{$videoEncoder} ! " .
             "mpegtsmux name=mux ! " .
-            "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
+            "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
 
         $audio = $this->sanitizeAudio($p);
         $audioTestWave = $this->sanitizeAudioTestWave($p);
@@ -1035,7 +1068,6 @@ class PipelineManager
         $latency = (int)$p['srt_latency'];
         $mode = $p['srt_mode'] ?? 'listener';
         $srtSecurity = $this->sanitizeSrtSecurity($p);
-        $srtSecurityProps = $this->buildSrtSecurityProps($srtSecurity);
 
         if ($mode === 'caller') {
             $host = $p['srt_target_host'] ?? '';
@@ -1061,35 +1093,28 @@ class PipelineManager
             $outputMode = DecklinkPortManager::DEFAULT_OUTPUT_MODE;
         }
 
-        $prefix = "env GST_DEBUG=srtsrc:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
+        // Empfaenger laeuft als kleines Python-Hilfsprogramm statt als gst-launch-Zeile: tsdemux legt
+        // seine Pads beim Verbindungsaufbau neu an (z. B. audio_0_0042 -> audio_1_0042). Eine
+        // gst-launch-Zeile verbindet die "demux."-Verweise nur einmal, der Audio-Zweig bleibt dabei
+        // haengen (Ton bricht nach ~2 Puffern ab). Das Hilfsprogramm verbindet jedes neue Pad selbst
+        // (pad-added) und nimmt den Codec ueber decodebin, es braucht daher keine Caps-Filter mehr
+        // (auch SMPTE 302M aus dem eigenen Sender wird so dekodiert). Beim Stop (SIGTERM) schliesst es
+        // die SRT-Verbindung sauber, damit ein Sender nicht auf eine tote Verbindung wartet.
+        $helper = escapeshellarg(__DIR__ . '/../scripts/srt_to_sdi_receiver.py');
+        $args = ' --uri ' . escapeshellarg($srtUri) .
+            ' --latency ' . $latency .
+            ' --device ' . (int)$decklink['device_number'] .
+            ' --mode ' . escapeshellarg($outputMode) .
+            ' --profile ' . escapeshellarg($decklink['profile']) .
+            ' --audio-channels ' . (int)$decklink['audio_channels'];
+        if ($srtSecurity['passphrase'] !== null) {
+            $args .= ' --passphrase ' . escapeshellarg($srtSecurity['passphrase']) . ' --pbkeylen ' . (int)$srtSecurity['pbkeylen'];
+        }
+        if ($srtSecurity['streamid'] !== null) {
+            $args .= ' --streamid ' . escapeshellarg($srtSecurity['streamid']);
+        }
 
-        // tsdemux legt seine Video-/Audio-Pads erst zur Laufzeit an (dynamische "Sometimes"-Pads) -
-        // ohne Caps-Filter direkt danach kann gst-launch die beiden gleich aussehenden "demux."-
-        // Verweise nicht dem richtigen Zweig zuordnen (queue hat caps=ANY, die Zuordnung waere rein
-        // von der Pad-Erstellungsreihenfolge des Demuxers abhaengig) - das fuehrte dazu, dass Audio
-        // im Video-Zweig landete und umgekehrt, abhaengig davon welcher PID zuerst erkannt wurde.
-        // Reproduziert und mit gst-inspect verifiziert am 2026-09-28, siehe [[project-noicecaster-repo]].
-        //
-        // Bekannte, noch offene Einschraenkung (siehe [[project-noicecaster-repo]]): verbindet sich
-        // diese Pipeline zu einer bereits laufenden sdi_to_srt-Sender-Pipeline (Ausgang wird spaeter
-        // gestartet/neugestartet als der zugehoerige Eingang), sendet tsdemux beim Verbindungsaufbau
-        // ein kurzes "stream removed"-EOS auf dem betroffenen Pad - Ursache liegt in tsdemux selbst
-        // (vermutlich PCR-/Continuity-Sprung beim Late-Join), nicht im decodebin unten. Workaround:
-        // Eingang und Ausgang gemeinsam (neu) starten, dann funktioniert der Empfang zuverlaessig.
-        $videoCapsFilter = 'capsfilter caps="video/x-h264; video/x-h265; video/mpeg"';
-        $audioCapsFilter = 'capsfilter caps="audio/mpeg; audio/x-ac3; audio/x-eac3; audio/ac3; audio/x-private1-ac3; audio/x-opus"';
-
-        // decodebin statt festem Codec, da der eingehende SRT-Stream H.264, H.265 oder MPEG-2 enthalten kann
-        $videoBranch = "demux. ! queue ! {$videoCapsFilter} ! decodebin ! videoconvert ! videoscale ! videorate ! " .
-            "decklinkvideosink device-number={$decklink['device_number']} mode={$outputMode} profile={$decklink['profile']}";
-
-        // decodebin statt festem Codec, da der eingehende SRT-Stream AAC, MP2 oder AC3 enthalten kann
-        $audioBranch = " demux. ! queue ! {$audioCapsFilter} ! decodebin ! audioconvert ! audioresample ! " .
-            "decklinkaudiosink device-number={$decklink['device_number']}";
-
-        // keep-listening=true: bei Trennung des Senders auf einen Reconnect warten statt die Pipeline
-        // per EOS zu beenden (Default ist false - waere fuer ein unbeaufsichtigtes Gateway ungeeignet)
-        return $prefix . "srtsrc uri=\"{$srtUri}\" latency={$latency} keep-listening=true{$srtSecurityProps} ! tsdemux name=demux " . $videoBranch . $audioBranch;
+        return "env GST_DEBUG=srtsrc:5 GST_DEBUG_NO_COLOR=1 python3 {$helper}{$args}";
     }
 
     private function updateStatus(int $id, string $status, ?int $pid): void
@@ -1153,7 +1178,9 @@ class PipelineManager
                 clock_overlay_enabled = :clock_overlay_enabled,
                 audio_test_wave = :audio_test_wave,
                 preview_enabled = :preview_enabled,
-                test_pattern_enabled = :test_pattern_enabled
+                test_pattern_enabled = :test_pattern_enabled,
+                target_name = :target_name,
+                video_speed_preset = :video_speed_preset
             WHERE id = :id
         ");
         $stmt->execute([
@@ -1189,6 +1216,8 @@ class PipelineManager
             ':audio_test_wave' => $this->sanitizeAudioTestWave($data),
             ':preview_enabled' => (int)($data['preview_enabled'] ?? 0) === 1 ? 1 : 0,
             ':test_pattern_enabled' => (int)($data['test_pattern_enabled'] ?? 0) === 1 ? 1 : 0,
+            ':target_name' => $this->sanitizeTargetName($data),
+            ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
     }
 

@@ -330,15 +330,24 @@
           <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'srt_to_sdi'">Ausgang</span>
           <span class="badge" style="background:#3f3f46; color:#a1a1aa;" x-show="!tileDirection(portFor(n))">Nicht verwendet</span>
           <template x-if="tilePipelineFor(n)">
-            <span class="badge" :class="tilePipelineFor(n).status" x-text="tilePipelineFor(n).status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+            <span class="badge" :class="tilePipelineFor(n).status" :title="tileForms[n].target_name || 'Ziel 1'" x-text="(tileForms[n].target_name || 'Ziel 1') + ': ' + (tilePipelineFor(n).status === 'running' ? 'Läuft' : 'Gestoppt')"></span>
+          </template>
+          <template x-for="target in (targets[tilePipelineFor(n)?.id] || [])" :key="target.id">
+            <span class="badge" :class="target.status" :title="target.name" x-text="target.name + ': ' + (target.status === 'running' ? 'Läuft' : 'Gestoppt')"></span>
           </template>
         </span>
         <span style="display: flex; gap: 0.5rem; align-items: center;">
+          <template x-if="tilePipelineFor(n) && !tileCollapsed[n]">
+            <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="savingTile[n]" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
+          </template>
           <template x-if="tilePipelineFor(n)">
             <span>
-              <button class="btn-start" x-show="tilePipelineFor(n).status !== 'running'" @click="start(tileForms[n].id)">Start</button>
+              <button class="btn-start" x-show="tilePipelineFor(n).status !== 'running'" :disabled="tileIsDirty(n)" :title="tileIsDirty(n) ? 'Erst speichern, dann starten' : ''" @click="start(tileForms[n].id)">Start</button>
               <button class="btn-stop" x-show="tilePipelineFor(n).status === 'running'" @click="stop(tileForms[n].id)">Stop</button>
             </span>
+          </template>
+          <template x-if="tilePipelineFor(n) && !tileCollapsed[n] && tileDirection(portFor(n)) === 'sdi_to_srt'">
+            <button type="button" class="btn-secondary" @click="toggleTargetsExpanded(n)" x-text="targetsExpanded[n] ? 'Ziele einklappen' : 'Ziele aufklappen'"></button>
           </template>
           <button type="button" class="btn-secondary" @click="toggleTileCollapsed(n)" x-text="tileCollapsed[n] ? 'Aufklappen' : 'Einklappen'"></button>
         </span>
@@ -380,8 +389,12 @@
           </template>
 
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
-            <div>
+            <div x-show="targetsExpanded[n]">
               <div>
+                <label>Name des Ziels</label>
+                <input type="text" x-model="tileForms[n].target_name" placeholder="Ziel 1">
+              </div>
+              <div style="margin-top: 0.5rem;">
                 <label>Video-Codec</label>
                 <select x-model="tileForms[n].video_codec">
                   <option value="h264">H.264 (empfohlen, breite Kompatibilität)</option>
@@ -405,6 +418,17 @@
               <div style="margin-top: 0.5rem;">
                 <label>Bitrate (kbit/s)</label>
                 <input type="number" x-model.number="tileForms[n].bitrate">
+              </div>
+              <div style="margin-top: 0.5rem;" x-show="tileForms[n].video_codec !== 'mpeg2'">
+                <label>Encoder-Preset (Geschwindigkeit ↔ Kompression, keine Latenz-Auswirkung)</label>
+                <select x-model="tileForms[n].video_speed_preset">
+                  <option value="ultrafast">Ultrafast (am wenigsten CPU)</option>
+                  <option value="superfast">Superfast</option>
+                  <option value="veryfast">Veryfast (Standard)</option>
+                  <option value="faster">Faster</option>
+                  <option value="fast">Fast</option>
+                  <option value="medium">Medium (beste Kompression, am meisten CPU)</option>
+                </select>
               </div>
 
               <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
@@ -477,7 +501,7 @@
           </template>
 
           <template x-if="!(tileDirection(portFor(n)) === 'srt_to_sdi' && tileForms[n].test_pattern_enabled)">
-            <div>
+            <div x-show="tileDirection(portFor(n)) !== 'sdi_to_srt' || targetsExpanded[n]">
               <div style="margin-top: 0.75rem;">
                 <label>SRT-Link einfügen</label>
                 <div style="display: flex; gap: 0.5rem;">
@@ -531,25 +555,58 @@
             </div>
           </template>
 
-          <div class="actions">
-            <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="savingTile[n]" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
-          </div>
-
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
             <div style="margin-top: 1rem; border-top: 1px solid #2a2e37; padding-top: 0.75rem;">
-              <button type="button" class="btn-secondary" @click="toggleAdvanced(n)" x-text="advancedOpen[n] ? 'Advanced einklappen' : 'Advanced: weitere SRT-Ziele'"></button>
+              <h2 style="margin: 0; font-size: 0.95rem; color: #cbd5e1;">Ziele</h2>
 
-              <div x-show="advancedOpen[n]" style="margin-top: 0.75rem;">
+              <!-- Eingeklappt: kompakte Statuszeile je Ziel (inkl. Ziel 1), unabhaengig von den
+                   Einstellungsformularen oben/unten - die bleiben bei Bedarf trotzdem ueber die
+                   Buttons hier bedienbar, ohne die grossen Formulare aufklappen zu muessen. -->
+              <div x-show="!targetsExpanded[n]" style="margin-top: 0.5rem;">
+                <template x-if="tilePipelineFor(n)">
+                <div class="target-row" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid #2a2e37;">
+                  <span style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="badge" :class="tilePipelineFor(n).status" x-text="tilePipelineFor(n).status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+                    <strong x-text="tileForms[n].target_name || 'Ziel 1'"></strong>
+                  </span>
+                  <span>
+                    <button class="btn-start" x-show="tilePipelineFor(n).status !== 'running'" :disabled="tileIsDirty(n)" :title="tileIsDirty(n) ? 'Erst speichern, dann starten' : ''" @click="start(tileForms[n].id)">Start</button>
+                    <button class="btn-stop" x-show="tilePipelineFor(n).status === 'running'" @click="stop(tileForms[n].id)">Stop</button>
+                  </span>
+                </div>
+                </template>
+                <template x-for="target in (targets[tilePipelineFor(n)?.id] || [])" :key="'row-' + target.id">
+                  <div class="target-row" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.4rem 0; border-bottom: 1px solid #2a2e37;">
+                    <span style="display: flex; align-items: center; gap: 0.5rem;">
+                      <span class="badge" :class="target.status" x-text="target.status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+                      <strong x-text="target.name"></strong>
+                    </span>
+                    <span>
+                      <button class="btn-start" x-show="target.status !== 'running'" :disabled="targetIsDirty(target)" :title="targetIsDirty(target) ? 'Erst speichern, dann starten' : ''" @click="startTarget(target)">Start</button>
+                      <button class="btn-stop" x-show="target.status === 'running'" @click="stopTarget(target)">Stop</button>
+                    </span>
+                  </div>
+                </template>
+              </div>
+
+              <div x-show="targetsExpanded[n]" style="margin-top: 0.75rem;">
                 <div class="hint" style="margin-bottom: 0.75rem;">
                   Zusätzliche, unabhängige SRT-Ziele für denselben SDI-Eingang - jedes mit eigenem Codec/Bitrate/SRT-Ziel, einzeln start-/stoppbar.
-                  Nur für feste HD-Modi (720p/1080i/1080p), nicht für "Auto" oder SD-Modi.
+                  Nur für feste HD-Modi (720p/1080i/1080p), nicht für "Auto" oder SD-Modi. Ziel 1 (das Hauptziel) wird oben eingestellt.
                 </div>
 
                 <template x-for="target in (targets[tilePipelineFor(n)?.id] || [])" :key="target.id">
                   <div class="card" style="margin-bottom: 0.75rem;">
-                    <div class="card-header">
-                      <input type="text" x-model="target.name" style="max-width: 220px;" placeholder="Name des Ziels">
-                      <span class="badge" :class="target.status" x-text="target.status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+                    <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
+                      <span style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="text" x-model="target.name" style="max-width: 220px;" placeholder="Name des Ziels">
+                        <span class="badge" :class="target.status" x-text="target.status === 'running' ? 'Läuft' : 'Gestoppt'"></span>
+                      </span>
+                      <span style="display: flex; gap: 0.5rem; align-items: center;">
+                        <button type="button" class="btn-primary" x-show="target.status !== 'running'" @click="saveTarget(target)">Speichern</button>
+                        <button class="btn-start" x-show="target.status !== 'running'" :disabled="targetIsDirty(target)" :title="targetIsDirty(target) ? 'Erst speichern, dann starten' : ''" @click="startTarget(target)">Start</button>
+                        <button class="btn-stop" x-show="target.status === 'running'" @click="stopTarget(target)">Stop</button>
+                      </span>
                     </div>
 
                     <template x-if="target.status === 'running'">
@@ -604,6 +661,17 @@
                             <input type="number" x-model.number="target.video_keyframe_interval" placeholder="0 = automatisch">
                           </div>
                         </div>
+                        <div style="margin-top: 0.5rem;" x-show="target.video_codec !== 'mpeg2'">
+                          <label>Encoder-Preset (Geschwindigkeit ↔ Kompression, keine Latenz-Auswirkung)</label>
+                          <select x-model="target.video_speed_preset">
+                            <option value="ultrafast">Ultrafast (am wenigsten CPU)</option>
+                            <option value="superfast">Superfast</option>
+                            <option value="veryfast">Veryfast (Standard)</option>
+                            <option value="faster">Faster</option>
+                            <option value="fast">Fast</option>
+                            <option value="medium">Medium (beste Kompression, am meisten CPU)</option>
+                          </select>
+                        </div>
                         <label style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                           <input type="checkbox" x-model="target.video_scale_enabled" style="width: auto;">
                           <span>Auflösung herunterskalieren</span>
@@ -644,6 +712,14 @@
                           <input type="number" x-model.number="target.audio_bitrate">
                         </div>
 
+                        <div style="margin-top: 0.5rem;">
+                          <label>SRT-Link einfügen</label>
+                          <div style="display: flex; gap: 0.5rem;">
+                            <input type="text" x-model="targetSrtLinkInput[target.id]" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
+                            <button type="button" class="btn-primary" @click="applySrtLinkToTarget(target)">Übernehmen</button>
+                          </div>
+                          <div class="hint" x-show="targetSrtLinkMessage[target.id]" x-text="targetSrtLinkMessage[target.id]"></div>
+                        </div>
                         <div style="margin-top: 0.5rem;">
                           <label>Verbindungsmodus</label>
                           <select x-model="target.srt_mode">
@@ -688,9 +764,6 @@
                     </template>
 
                     <div class="actions">
-                      <button class="btn-start" x-show="target.status !== 'running'" @click="startTarget(target)">Start</button>
-                      <button class="btn-stop" x-show="target.status === 'running'" @click="stopTarget(target)">Stop</button>
-                      <button type="button" class="btn-primary" x-show="target.status !== 'running'" @click="saveTarget(target)">Speichern</button>
                       <button type="button" class="btn-delete" x-show="target.status !== 'running'" @click="deleteTarget(target)">Löschen</button>
                     </div>
                   </div>
@@ -994,9 +1067,11 @@
 function defaultTileForm(deviceNumber) {
   return {
     id: null,
+    target_name: 'Ziel 1',
     video_codec: 'h264',
     video_keyframe_interval: 0,
     video_rate_control: 'cbr',
+    video_speed_preset: 'veryfast',
     clock_overlay_enabled: false,
     preview_enabled: false,
     decklink_profile: 'two-sub-devices-half',
@@ -1040,6 +1115,7 @@ function app() {
     previewTick: 0,
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
+    tileSavedForms: {},
     savingTile: { 0: false, 1: false, 2: false, 3: false },
     srtLinkInput: '',
     srtLinkMessage: '',
@@ -1048,9 +1124,14 @@ function app() {
     tileCollapsed: (() => {
       try { const raw = localStorage.getItem('tileCollapsed'); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
     })(),
-    advancedOpen: { 0: false, 1: false, 2: false, 3: false },
+    targetsExpanded: (() => {
+      try { const raw = localStorage.getItem('targetsExpanded'); return raw ? JSON.parse(raw) : {}; } catch (e) { return {}; }
+    })(),
     targets: {},
     targetStats: {},
+    targetSnapshots: {},
+    targetSrtLinkInput: {},
+    targetSrtLinkMessage: {},
     form: {
       name: '',
       pipeline_direction: 'sdi_to_srt',
@@ -1088,15 +1169,20 @@ function app() {
         const res = await fetch('api.php?action=list');
         this.pipelines = await res.json();
         await this.loadStats();
-        // Offene Advanced-Panels (zusaetzliche SRT-Ziele) mit aktualisieren, damit Status/Stats
-        // dort genauso live bleiben wie bei den Haupt-Pipelines. Nur neu laden, wenn dort auch
-        // wirklich etwas laeuft - sonst wuerden gerade laufende, ungespeicherte Bearbeitungen an
-        // gestoppten Zielen alle 3s durch die Server-Kopie ueberschrieben werden.
+        // Ziel-Status auch im zugeklappten/geschlossenen Zustand aktuell halten (fuer die Badges im
+        // Kachel-Header), und bei offenem Advanced-Panel Status/Stats live nachziehen. Bei offenem
+        // Panel nur neu laden, wenn dort auch wirklich etwas laeuft - sonst wuerden gerade laufende,
+        // ungespeicherte Bearbeitungen an gestoppten Zielen alle 3s durch die Server-Kopie
+        // ueberschrieben werden. Ist das Panel zu, kann niemand gerade etwas bearbeiten, also immer
+        // sicher neu laden.
         for (const n of [0, 1, 2, 3]) {
-          if (this.advancedOpen[n]) {
-            const p = this.tilePipelineFor(n);
-            const hasRunning = p && (this.targets[p.id] || []).some(t => t.status === 'running');
-            if (p && hasRunning) await this.loadTargets(p.id);
+          const p = this.tilePipelineFor(n);
+          if (!p) continue;
+          if (!this.targetsExpanded[n]) {
+            await this.loadTargets(p.id);
+          } else {
+            const hasRunning = (this.targets[p.id] || []).some(t => t.status === 'running');
+            if (hasRunning) await this.loadTargets(p.id);
           }
         }
       } catch (e) {
@@ -1210,13 +1296,16 @@ function app() {
         const p = this.tilePipelineFor(n);
         if (!p) {
           this.tileForms[n] = defaultTileForm(n);
+          this.tileSavedForms[n] = JSON.stringify(this.tileForms[n]);
           continue;
         }
         this.tileForms[n] = {
           id: p.id,
+          target_name: p.target_name || 'Ziel 1',
           video_codec: p.video_codec || 'h264',
           video_keyframe_interval: p.video_keyframe_interval ?? 0,
           video_rate_control: p.video_rate_control || 'cbr',
+          video_speed_preset: p.video_speed_preset || 'veryfast',
           clock_overlay_enabled: !!(p.clock_overlay_enabled && p.clock_overlay_enabled != 0),
           preview_enabled: !!(p.preview_enabled && p.preview_enabled != 0),
           decklink_profile: (p.decklink_profile && p.decklink_profile !== 'default') ? p.decklink_profile : 'two-sub-devices-half',
@@ -1237,7 +1326,12 @@ function app() {
           srt_streamid: p.srt_streamid || '',
           test_pattern_enabled: !!(p.test_pattern_enabled && p.test_pattern_enabled != 0)
         };
+        this.tileSavedForms[n] = JSON.stringify(this.tileForms[n]);
       }
+    },
+
+    tileIsDirty(n) {
+      return JSON.stringify(this.tileForms[n]) !== this.tileSavedForms[n];
     },
 
     toggleTileCollapsed(n) {
@@ -1260,6 +1354,7 @@ function app() {
       this.errorMsg = '';
       const payload = {
         name: 'Anschluss ' + (n + 1) + (port.label ? ' – ' + port.label : ''),
+        target_name: tf.target_name,
         pipeline_direction: direction,
         source_type: direction === 'sdi_to_srt' ? 'decklink' : 'videotestsrc',
         decklink_device_number: n,
@@ -1269,6 +1364,7 @@ function app() {
         video_codec: tf.video_codec,
         video_keyframe_interval: tf.video_keyframe_interval,
         video_rate_control: tf.video_rate_control,
+        video_speed_preset: tf.video_speed_preset,
         clock_overlay_enabled: tf.clock_overlay_enabled,
         preview_enabled: tf.preview_enabled,
         bitrate: tf.bitrate,
@@ -1305,10 +1401,11 @@ function app() {
       }
     },
 
-    // --- Advanced: zusaetzliche SRT-Ziele pro SDI-Eingang ---
-    toggleAdvanced(n) {
-      this.advancedOpen[n] = !this.advancedOpen[n];
-      if (this.advancedOpen[n]) {
+    // --- Ziele: Ziel 1 (Pipeline selbst) + zusaetzliche SRT-Ziele pro SDI-Eingang ---
+    toggleTargetsExpanded(n) {
+      this.targetsExpanded[n] = !this.targetsExpanded[n];
+      try { localStorage.setItem('targetsExpanded', JSON.stringify(this.targetsExpanded)); } catch (e) {}
+      if (this.targetsExpanded[n]) {
         const p = this.tilePipelineFor(n);
         if (p) this.loadTargets(p.id);
       }
@@ -1320,6 +1417,9 @@ function app() {
         const res = await fetch('api.php?action=targets_list&pipeline_id=' + pipelineId);
         this.targets[pipelineId] = await res.json();
         for (const target of this.targets[pipelineId]) {
+          this.targetSnapshots[target.id] = JSON.stringify(target);
+          if (!(target.id in this.targetSrtLinkInput)) this.targetSrtLinkInput[target.id] = '';
+          if (!(target.id in this.targetSrtLinkMessage)) this.targetSrtLinkMessage[target.id] = '';
           if (target.status === 'running') {
             try {
               const statsRes = await fetch('api.php?action=target_stats&id=' + target.id);
@@ -1332,10 +1432,14 @@ function app() {
       }
     },
 
+    targetIsDirty(target) {
+      return JSON.stringify(target) !== this.targetSnapshots[target.id];
+    },
+
     newTargetDefaults() {
       return {
         name: 'Ziel', srt_mode: 'listener', srt_port: 9000, srt_target_host: '', srt_latency: 120,
-        video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_keyframe_interval: 0,
+        video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_speed_preset: 'veryfast', video_keyframe_interval: 0,
         video_scale_enabled: false, width: 1920, height: 1080,
         audio_codec: 'aac', audio_output_channels: 2, audio_bitrate: 192,
         srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
@@ -1366,6 +1470,7 @@ function app() {
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        this.targetSnapshots[target.id] = JSON.stringify(target);
       } catch (e) {
         this.errorMsg = 'Fehler beim Speichern des Ziels: ' + e.message;
       }
@@ -1659,6 +1764,22 @@ function app() {
       if (parsed.pbkeylen) this.tileForms[n].srt_pbkeylen = parsed.pbkeylen;
       if (parsed.latency) this.tileForms[n].srt_latency = parsed.latency;
       this.tileSrtLinkMessage[n] = `Übernommen: ${parsed.host}:${parsed.port}` + (parsed.notes.length ? ' — ' + parsed.notes.join('; ') : '');
+    },
+
+    applySrtLinkToTarget(target) {
+      const parsed = this.parseSrtLink(this.targetSrtLinkInput[target.id]);
+      if (parsed.error) {
+        this.targetSrtLinkMessage[target.id] = parsed.error;
+        return;
+      }
+      target.srt_mode = 'caller';
+      target.srt_target_host = parsed.host;
+      target.srt_port = parsed.port;
+      if (parsed.streamid) target.srt_streamid = parsed.streamid;
+      if (parsed.passphrase) target.srt_passphrase = parsed.passphrase;
+      if (parsed.pbkeylen) target.srt_pbkeylen = parsed.pbkeylen;
+      if (parsed.latency) target.srt_latency = parsed.latency;
+      this.targetSrtLinkMessage[target.id] = `Übernommen: ${parsed.host}:${parsed.port}` + (parsed.notes.length ? ' — ' + parsed.notes.join('; ') : '');
     },
 
     cpuDisplay(stat) {
