@@ -190,13 +190,102 @@ def find_sps(buf):
         i += 3
 
 
-def parse_audio(stype, es):
+AC3_CHANNELS = [2, 1, 2, 3, 3, 4, 4, 5]
+
+
+def descriptors(desc):
+    pos = 0
+    while pos + 2 <= len(desc):
+        tag, ln = desc[pos], desc[pos + 1]
+        yield tag, desc[pos + 2:pos + 2 + ln]
+        pos += 2 + ln
+
+
+def parse_ac3(es):
+    i = es.find(b'\x0b\x77', 0, 4000)
+    if i < 0 or len(es) < i + 10:
+        return None
+    b = Bits(es[i + 2:i + 12])
+    b.u(16)
+    fscod = b.u(2)
+    b.u(6)
+    b.u(5)
+    b.u(3)
+    acmod = b.u(3)
+    if (acmod & 1) and acmod != 1:
+        b.u(2)
+    if acmod & 4:
+        b.u(2)
+    if acmod == 2:
+        b.u(2)
+    lfe = b.u(1)
+    rate = {0: 48000, 1: 44100, 2: 32000}.get(fscod)
+    return {'codec': 'AC-3', 'rate': rate, 'channels': AC3_CHANNELS[acmod] + lfe}
+
+
+def parse_private(desc, es):
+    """PES-privat (Typ 0x06): Format ueber die Deskriptoren der PMT bestimmen."""
+    for tag, body in descriptors(desc):
+        if tag == 0x05 and body[:4] == b'Opus':
+            ch = None
+            for t2, b2 in descriptors(desc):
+                if t2 == 0x7f and len(b2) >= 2 and b2[0] == 0x80 and 1 <= b2[1] <= 8:
+                    ch = b2[1]
+            return {'codec': 'Opus', 'rate': 48000, 'channels': ch}
+        if tag == 0x05 and body[:4] == b'BSSD':
+            return {'codec': 'PCM (SMPTE 302M)', 'rate': 48000, 'channels': None}
+        if tag == 0x6a:
+            return parse_ac3(es) or {'codec': 'AC-3', 'rate': None, 'channels': None}
+        if tag == 0x7a:
+            return {'codec': 'E-AC-3', 'rate': None, 'channels': None}
+    return None
+
+
+def aac_pce_channels(es, i):
+    """Kanalzahl aus dem Program Config Element (AAC mit mehr als 2 Kanaelen: channel_configuration = 0)."""
+    hdr = 7 if es[i + 1] & 1 else 9
+    b = Bits(es[i + hdr:i + hdr + 40])
+    if b.u(3) != 5:           # ID_PCE
+        return None
+    b.u(4); b.u(2); b.u(4)
+    nf, ns, nb, nl = b.u(4), b.u(4), b.u(4), b.u(2)
+    b.u(3); b.u(4)            # Assoc-Daten, Coupling-Kanaele
+    if b.u(1):
+        b.u(4)
+    if b.u(1):
+        b.u(4)
+    if b.u(1):
+        b.u(3)
+    total = 0
+    for n in (nf, ns, nb):
+        for _ in range(n):
+            total += 2 if b.u(1) else 1
+            b.u(4)
+    return total + nl
+
+
+def parse_audio(stype, es, desc=b''):
+    if stype == 0x06:
+        r = parse_private(desc, es)
+        if r:
+            return r
+    if stype in (0x81, 0x06):
+        r = parse_ac3(es)
+        if r:
+            return r
     if stype in (0x0f, 0x11) and len(es) >= 7:
         for i in range(min(len(es) - 7, 4000)):
             if es[i] == 0xFF and es[i + 1] & 0xF6 == 0xF0:
                 profile = (es[i + 2] >> 6) + 1
                 sf = (es[i + 2] >> 2) & 0xF
                 ch = ((es[i + 2] & 1) << 2) | (es[i + 3] >> 6)
+                if ch == 0:
+                    try:
+                        ch = aac_pce_channels(es, i)
+                    except Exception:
+                        ch = None
+                elif ch == 7:
+                    ch = 8      # channel_configuration 7 = 7.1 = 8 Kanaele
                 return {'codec': 'AAC-LC' if profile == 2 else 'AAC (Profil %d)' % profile,
                         'rate': AAC_RATES[sf] if sf < len(AAC_RATES) else None, 'channels': ch}
     if stype in (0x03, 0x04) and len(es) >= 4:
@@ -234,6 +323,7 @@ def analyse(packets):
     es_first = {}          # pid -> erste Nutzdaten (fuer Audio-Header)
     video_buf = bytearray()
     video_pid = audio_pid = None
+    audio_pids = []        # alle Audio-Spuren (z. B. mehrere Stereo-Paare)
     cur_pes = {}           # pid -> bytearray des laufenden PES (Anfang)
     vhead = None           # Anfang des laufenden Videobildes
     vframes = []           # je Bild: Keyframe ja/nein
@@ -296,23 +386,25 @@ def analyse(packets):
                 st = s[k]
                 ep = ((s[k + 1] & 0x1f) << 8) | s[k + 2]
                 il = ((s[k + 3] & 0xf) << 8) | s[k + 4]
-                streams.append({'type': st, 'pid': ep})
+                streams.append({'type': st, 'pid': ep, 'desc': bytes(s[k + 5:k + 5 + il])})
                 k += 5 + il
             pmt = {'pid': pmt_pid, 'version': ver, 'pcr_pid': pcr_p, 'streams': streams}
             for st in streams:
                 if st['type'] in VIDEO_TYPES and video_pid is None:
                     video_pid = st['pid']
-                elif st['type'] in AUDIO_TYPES and audio_pid is None:
-                    audio_pid = st['pid']
-        elif pid in (video_pid, audio_pid) and pid is not None:
+                elif st['type'] in AUDIO_TYPES:
+                    audio_pids.append(st['pid'])
+                    if audio_pid is None:
+                        audio_pid = st['pid']
+        elif pid is not None and (pid == video_pid or pid in audio_pids):
             if pusi:
                 t = pts_from_pes(payload)
                 if t is not None:
                     pes.setdefault(pid, []).append((idx, t / 90.0))
                 cur_pes[pid] = True
-                if pid == audio_pid and pid not in es_first and len(payload) > 9:
+                if pid in audio_pids and pid not in es_first and len(payload) > 9:
                     es_first[pid] = bytearray(payload[9 + payload[8]:])
-            elif pid == audio_pid and pid in es_first and len(es_first[pid]) < 6000:
+            elif pid in audio_pids and pid in es_first and len(es_first[pid]) < 6000:
                 es_first[pid] += payload
             if pid == video_pid and len(video_buf) < MAX_VIDEO_BYTES:
                 video_buf += payload
@@ -377,17 +469,26 @@ def analyse(packets):
             v['gop_frames'] = None
         v['keyframes_in_window'] = len(keys)
         res['video'] = v
-    # Audio
-    if audio_pid is not None:
-        a = {'pid': audio_pid}
-        stype = next(s['type'] for s in pmt['streams'] if s['pid'] == audio_pid)
-        a.update(parse_audio(stype, bytes(es_first.get(audio_pid, b''))))
-        iv = intervals(pes.get(audio_pid, []))
+    # Audio: alle Spuren auswerten; 'audio' bleibt die erste (Kompatibilitaet), 'audios' enthaelt alle
+    audios = []
+    for apid in audio_pids:
+        a = {'pid': apid}
+        stype = next(x['type'] for x in pmt['streams'] if x['pid'] == apid)
+        desc = next((x['desc'] for x in pmt['streams'] if x['pid'] == apid), b'')
+        a.update(parse_audio(stype, bytes(es_first.get(apid, b'')), desc))
+        iv = intervals(pes.get(apid, []))
         if len(iv) >= 3:
             med = statistics.median(iv)
             a['interval_ms'] = round(med, 2)
             a['interval_dev_ms'] = round(max(abs(x - med) for x in iv), 2)
-        res['audio'] = a
+        audios.append(a)
+        # In der PID-Tabelle den erkannten Codec statt des allgemeinen Typnamens zeigen (z. B. Opus statt "PES privat")
+        for st in res['streams']:
+            if st['pid'] == apid and a.get('codec'):
+                st['name'] = a['codec']
+    if audios:
+        res['audio'] = audios[0]
+        res['audios'] = audios
     # PCR-Abstand
     if len(pcr_list) >= 3:
         d = [b[1] - a[1] for a, b in zip(pcr_list, pcr_list[1:])]

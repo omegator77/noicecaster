@@ -604,8 +604,8 @@
               </div>
               <div>
                 <div class="k">Audio</div>
-                <div class="v" x-text="statsAudioLine(it.probe.audio)"></div>
-                <div class="s" x-text="it.config.audio_codec ? 'Soll ' + it.config.audio_codec.toUpperCase() + (it.config.audio_kbit ? ' ' + it.config.audio_kbit + ' kbit/s' : '') + (it.config.audio_channels ? ', ' + it.config.audio_channels + ' Kanäle' : '') : ''"></div>
+                <div class="v" :class="it.probe.audio ? '' : 'st-bad'" x-text="statsAudioLine(it.probe.audio, it.probe.audios)"></div>
+                <div class="s" x-text="it.config.audio_codec ? 'Soll ' + it.config.audio_codec.toUpperCase() + (it.config.audio_kbit ? ' ' + it.config.audio_kbit + ' kbit/s' : '') + (it.config.audio_channels ? ', ' + it.config.audio_channels + ' Kanäle' + (it.config.audio_track_mode === 'pairs' && it.config.audio_channels > 2 ? ' (' + (it.config.audio_channels / 2) + ' Stereo-Spuren)' : '') : '') : ''"></div>
               </div>
               <div>
                 <div class="k">Gleichmäßigkeit</div>
@@ -819,10 +819,15 @@
                 <div>
                   <label>Ausgabe-Kanäle (für Encoding)</label>
                   <select x-model.number="tileForms[n].audio_output_channels">
-                    <template x-for="ch in audioChannelOptions(tileForms[n].audio_codec)" :key="ch">
+                    <template x-for="ch in audioChannelOptions(tileForms[n].audio_codec, tileForms[n].audio_track_mode)" :key="ch">
                       <option :value="ch" x-text="ch"></option>
                     </template>
                   </select>
+<label style="margin-top: 0.5rem;">Tonspuren</label>
+<select x-model="tileForms[n].audio_track_mode" @change="clampAudioChannels(tileForms[n])">
+  <option value="multi">Eine Mehrkanal-Spur</option>
+  <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
+</select>
                 </div>
               </div>
               <div class="form-row" style="margin-top: 0.5rem;">
@@ -1052,10 +1057,15 @@
                           <div>
                             <label>Audio-Kanäle</label>
                             <select x-model.number="target.audio_output_channels">
-                              <template x-for="ch in audioChannelOptions(target.audio_codec)" :key="ch">
+                              <template x-for="ch in audioChannelOptions(target.audio_codec, target.audio_track_mode)" :key="ch">
                                 <option :value="ch" x-text="ch"></option>
                               </template>
                             </select>
+<label style="margin-top: 0.5rem;">Tonspuren</label>
+<select x-model="target.audio_track_mode" @change="clampAudioChannels(target)">
+  <option value="multi">Eine Mehrkanal-Spur</option>
+  <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
+</select>
                           </div>
                         </div>
                         <div style="margin-top: 0.5rem;">
@@ -1267,10 +1277,15 @@
         <div>
           <label>Ausgabe-Kanäle</label>
           <select x-model.number="form.audio_output_channels">
-            <template x-for="ch in audioChannelOptions(form.audio_codec)" :key="ch">
+            <template x-for="ch in audioChannelOptions(form.audio_codec, form.audio_track_mode)" :key="ch">
               <option :value="ch" x-text="ch"></option>
             </template>
           </select>
+<label style="margin-top: 0.5rem;">Tonspuren</label>
+<select x-model="form.audio_track_mode" @change="clampAudioChannels(form)">
+  <option value="multi">Eine Mehrkanal-Spur</option>
+  <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
+</select>
         </div>
         <div>
           <label>Audio-Bitrate (kbit/s)</label>
@@ -1321,10 +1336,15 @@
         <div>
           <label>Ausgabe-Kanäle</label>
           <select x-model.number="form.audio_output_channels">
-            <template x-for="ch in audioChannelOptions(form.audio_codec)" :key="ch">
+            <template x-for="ch in audioChannelOptions(form.audio_codec, form.audio_track_mode)" :key="ch">
               <option :value="ch" x-text="ch"></option>
             </template>
           </select>
+<label style="margin-top: 0.5rem;">Tonspuren</label>
+<select x-model="form.audio_track_mode" @change="clampAudioChannels(form)">
+  <option value="multi">Eine Mehrkanal-Spur</option>
+  <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
+</select>
         </div>
       </div>
       <div style="margin-top: 0.5rem;">
@@ -1433,6 +1453,7 @@ function defaultTileForm(deviceNumber) {
     decklink_audio_channels: 2,
     audio_codec: 'aac',
     audio_output_channels: 2,
+    audio_track_mode: 'multi',
     audio_bitrate: 192,
     srt_port: 9000 + deviceNumber,
     srt_mode: 'listener',
@@ -1525,6 +1546,7 @@ function app() {
       decklink_audio_channels: 2,
       audio_codec: 'aac',
       audio_output_channels: 2,
+      audio_track_mode: 'multi',
       audio_bitrate: 192,
       audio_test_wave: 'sine',
       video_codec: 'h264',
@@ -1701,8 +1723,16 @@ function app() {
       return parts.join(' · ');
     },
 
-    statsAudioLine(a) {
-      if (!a) return '–';
+    statsAudioLine(a, all) {
+      if (!a) return '⚠ kein Audio im Strom';
+      if (all && all.length > 1) {
+        const same = all.every(x => x.codec === a.codec && x.channels === a.channels && x.rate === a.rate);
+        if (same) {
+          const rate = a.rate ? ' · ' + Math.round(a.rate / 100) / 10 + ' kHz' : '';
+          return all.length + ' Spuren · ' + a.codec + rate + (a.channels ? ' · je ' + a.channels + ' Kanäle' : '');
+        }
+        return all.length + ' Spuren · ' + all.map(x => x.codec + (x.channels ? ' ' + x.channels + 'K' : '')).join(', ');
+      }
       const parts = [a.codec];
       if (a.rate) parts.push(Math.round(a.rate / 100) / 10 + ' kHz');
       if (a.channels) parts.push(a.channels + ' Kanäle');
@@ -1996,6 +2026,7 @@ function app() {
           decklink_audio_channels: p.decklink_audio_channels ?? 2,
           audio_codec: p.audio_codec || 'aac',
           audio_output_channels: p.audio_output_channels ?? 2,
+          audio_track_mode: p.audio_track_mode || 'multi',
           audio_bitrate: p.audio_bitrate ?? 192,
           srt_port: p.srt_port ?? (9000 + n),
           srt_mode: p.srt_mode || 'listener',
@@ -2053,6 +2084,7 @@ function app() {
         height: tf.height,
         audio_codec: tf.audio_codec,
         audio_output_channels: tf.audio_output_channels,
+        audio_track_mode: tf.audio_track_mode,
         audio_bitrate: tf.audio_bitrate,
         srt_port: tf.srt_port,
         srt_mode: tf.srt_mode,
@@ -2121,7 +2153,7 @@ function app() {
         name: 'Ziel', srt_mode: 'listener', srt_port: 9000, srt_target_host: '', srt_latency: 120,
         video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_speed_preset: 'veryfast', video_keyframe_interval: 0,
         video_scale_enabled: false, width: 1920, height: 1080,
-        audio_codec: 'aac', audio_output_channels: 2, audio_bitrate: 192,
+        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', audio_bitrate: 192,
         srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
       };
     },
@@ -2352,15 +2384,17 @@ function app() {
       return text.replace('.', ',');
     },
 
-    audioChannelOptions(codec) {
-      // Kanalzahlen, die der jeweilige Encoder tatsaechlich hergibt (Codec-Spezifikation,
+    audioChannelOptions(codec, trackMode) {
+      // Mehrkanal-Spur: Kanalzahlen, die der jeweilige Encoder tatsaechlich hergibt (Codec-Spezifikation,
       // nicht frei waehlbar) - MP2 z.B. nur Mono/Stereo, PCM/SMPTE-302M max. 8 Kanaele.
+      // Stereo-Spuren: je 2 Kanaele eine eigene Spur, fuer jeden Codec moeglich (4/8/16 Kanaele = 2/4/8 Spuren).
+      if (trackMode === 'pairs') return [2, 4, 8, 16];
       const byCodec = { aac: [2, 4, 8, 16], opus: [2, 4, 8, 16], pcm: [2, 4, 6, 8], ac3: [2, 4, 6], mp2: [2] };
       return byCodec[codec] || [2];
     },
 
     clampAudioChannels(target) {
-      const allowed = this.audioChannelOptions(target.audio_codec);
+      const allowed = this.audioChannelOptions(target.audio_codec, target.audio_track_mode);
       if (!allowed.includes(target.audio_output_channels)) {
         target.audio_output_channels = allowed[0];
       }
@@ -2492,6 +2526,7 @@ function app() {
         decklink_audio_channels: p.decklink_audio_channels ?? 2,
         audio_codec: p.audio_codec || 'aac',
         audio_output_channels: p.audio_output_channels ?? 2,
+          audio_track_mode: p.audio_track_mode || 'multi',
         audio_bitrate: p.audio_bitrate ?? 192,
         audio_test_wave: p.audio_test_wave || 'sine',
         video_codec: p.video_codec || 'h264',
@@ -2531,6 +2566,7 @@ function app() {
         decklink_audio_channels: 2,
         audio_codec: 'aac',
         audio_output_channels: 2,
+        audio_track_mode: 'multi',
         audio_bitrate: 192,
         audio_test_wave: 'sine',
         video_codec: 'h264',

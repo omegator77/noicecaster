@@ -50,6 +50,7 @@ class Database
             'pipeline_direction' => "TEXT DEFAULT 'sdi_to_srt'",
             'audio_codec' => "TEXT DEFAULT 'aac'",
             'audio_output_channels' => "INTEGER DEFAULT 2",
+            'audio_track_mode' => "TEXT DEFAULT 'multi'",
             'audio_bitrate' => "INTEGER DEFAULT 192",
             'video_codec' => "TEXT DEFAULT 'h264'",
             'video_rate_control' => "TEXT DEFAULT 'cbr'",
@@ -152,6 +153,7 @@ class Database
                 height INTEGER DEFAULT 1080,
                 audio_codec TEXT DEFAULT 'aac',
                 audio_output_channels INTEGER DEFAULT 2,
+                audio_track_mode TEXT DEFAULT 'multi',
                 audio_bitrate INTEGER DEFAULT 192,
                 pid INTEGER DEFAULT NULL,
                 status TEXT DEFAULT 'stopped',
@@ -163,6 +165,9 @@ class Database
         $existingTargetColumns = array_column($this->pdo->query("PRAGMA table_info(srt_targets)")->fetchAll(PDO::FETCH_ASSOC), 'name');
         if (!in_array('video_speed_preset', $existingTargetColumns, true)) {
             $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN video_speed_preset TEXT DEFAULT 'veryfast'");
+        }
+        if (!in_array('audio_track_mode', $existingTargetColumns, true)) {
+            $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN audio_track_mode TEXT DEFAULT 'multi'");
         }
     }
 

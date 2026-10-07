@@ -103,6 +103,7 @@ class StreamStats
             'audio_codec' => $row['audio_codec'] ?? null,
             'audio_kbit' => isset($row['audio_bitrate']) ? (int)$row['audio_bitrate'] : null,
             'audio_channels' => isset($row['audio_output_channels']) ? (int)$row['audio_output_channels'] : null,
+            'audio_track_mode' => $row['audio_track_mode'] ?? 'multi',
             'srt_mode' => $row['srt_mode'] ?? null,
             'srt_port' => isset($row['srt_port']) ? (int)$row['srt_port'] : null,
             'srt_host' => $row['srt_target_host'] ?? null,

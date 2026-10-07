@@ -126,8 +126,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -149,6 +149,7 @@ class PipelineManager
             ':pipeline_direction' => $direction,
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
+            ':audio_track_mode' => $audio['track_mode'],
             ':video_codec' => $videoCodec,
             ':audio_bitrate' => $audio['bitrate'],
             ':video_rate_control' => $rateControl,
@@ -217,7 +218,12 @@ class PipelineManager
             $codec = 'aac';
         }
 
-        $allowedChannels = self::AUDIO_CODEC_CHANNELS[$codec] ?? self::AUDIO_OUTPUT_CHANNELS;
+        // 'multi' = ein Mehrkanal-Stream (Kanalzahlen je Codec begrenzt), 'pairs' = je 2 Kanaele eine eigene
+        // Stereo-Spur (4/8/16 Kanaele ergeben 2/4/8 Spuren, fuer jeden Codec moeglich)
+        $trackMode = ($data['audio_track_mode'] ?? 'multi') === 'pairs' ? 'pairs' : 'multi';
+        $allowedChannels = $trackMode === 'pairs'
+            ? self::AUDIO_OUTPUT_CHANNELS
+            : (self::AUDIO_CODEC_CHANNELS[$codec] ?? self::AUDIO_OUTPUT_CHANNELS);
         $channels = (int)($data['audio_output_channels'] ?? 2);
         if (!in_array($channels, $allowedChannels, true)) {
             $channels = $allowedChannels[0];
@@ -232,6 +238,7 @@ class PipelineManager
             'codec' => $codec,
             'channels' => $channels,
             'bitrate' => $bitrate,
+            'track_mode' => $trackMode,
         ];
     }
 
@@ -376,7 +383,24 @@ class PipelineManager
         return $extra;
     }
 
-    private function buildAudioChannelSelectElement(int $captureChannels, int $outputChannels): string
+    /**
+     * Ausgangskanaele auf die aufgenommenen begrenzen: der Mixer holt aus 2 Kanaelen keine 6 heraus,
+     * die Encoder-Kette bekaeme sonst Caps, die sie nie erfuellt, und der Strom hat keinen Ton.
+     */
+    private function clampAudioToCapture(array $audio, int $captureChannels): array
+    {
+        if ($audio['channels'] <= $captureChannels) {
+            return $audio;
+        }
+        $allowed = ($audio['track_mode'] ?? 'multi') === 'pairs'
+            ? self::AUDIO_OUTPUT_CHANNELS
+            : (self::AUDIO_CODEC_CHANNELS[$audio['codec']] ?? self::AUDIO_OUTPUT_CHANNELS);
+        $fit = array_filter($allowed, fn($c) => $c <= $captureChannels);
+        $audio['channels'] = $fit ? max($fit) : 2;
+        return $audio;
+    }
+
+    private function buildAudioChannelSelectElement(int $captureChannels, int $outputChannels, string $codec = ''): string
     {
         if ($captureChannels <= 2) {
             // decklinkaudiosrc liefert bei 2 aufgenommenen Kanaelen bereits eine gueltige
@@ -388,7 +412,41 @@ class PipelineManager
         // (avenc_aac, avenc_s302m, ...) lehnen das trotz passender Kanalzahl ab. audiomixmatrix im
         // first-channels-Modus greift die ersten N Kanaele heraus (bei Gleichstand quasi alle) und
         // setzt dabei eine gueltige Standard-Kanalbelegung (channel-mask=-1 = automatisch).
-        return "audiomixmatrix mode=first-channels channel-mask=-1 ! audio/x-raw,channels={$outputChannels} ! ";
+        // AAC mit 4 Kanaelen: das automatische Layout ist "quadro" (FL FR RL RR), dafuer gibt es keine
+        // AAC-Standardkonfiguration. avenc_aac schreibt dann channel_configuration=0 und die Belegung nur
+        // selten in einem Zusatzblock (PCE); ein Empfaenger, der mitten im Strom einsteigt, kann den Ton
+        // nicht dekodieren. Mit 4.0 (FL FR FC RC, channel-mask 0x107) ist es die Standardkonfiguration 4.
+        $layout = ($codec === 'aac' && $outputChannels === 4) ? ',channel-mask=(bitmask)0x107' : '';
+        return "audiomixmatrix mode=first-channels channel-mask=-1 ! \"audio/x-raw,channels={$outputChannels}{$layout}\" ! ";
+    }
+
+    /**
+     * Kette vom geparsten Rohton bis zu den Encodern ("mux." am Ende).
+     * 'multi': eine Spur mit allen Kanaelen. 'pairs': je zwei Kanaele eine eigene Stereo-Spur; jedes Paar wird
+     * ueber audiomixmatrix (manueller Modus, channel-mask=3 = Stereo) aus dem Mehrkanalton gezogen und einzeln
+     * kodiert, der Muxer legt jede Spur auf eine eigene PID. Die Bitrate gilt pro Spur.
+     */
+    private function buildAudioProcessing(int $captureChannels, array $audio, string $channelSelect): string
+    {
+        if (($audio['track_mode'] ?? 'multi') !== 'pairs' || $captureChannels <= 2 || $audio['channels'] <= 2) {
+            return "{$channelSelect}audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($audio);
+        }
+        $pairAudio = ['codec' => $audio['codec'], 'channels' => 2, 'bitrate' => $audio['bitrate'], 'track_mode' => 'multi'];
+        $chain = "tee name=atee ";
+        for ($k = 0; $k < intdiv($audio['channels'], 2); $k++) {
+            $rows = [];
+            foreach ([2 * $k, 2 * $k + 1] as $col) {
+                $cells = [];
+                for ($c = 0; $c < $captureChannels; $c++) {
+                    $cells[] = '(double)' . ($c === $col ? '1.0' : '0.0');
+                }
+                $rows[] = '<' . implode(',', $cells) . '>';
+            }
+            $matrix = '<' . implode(',', $rows) . '>';
+            $chain .= "atee. ! queue ! audiomixmatrix in-channels={$captureChannels} out-channels=2 mode=manual channel-mask=3 " .
+                "matrix=\"{$matrix}\" ! audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($pairAudio) . " ";
+        }
+        return $chain;
     }
 
     private function buildAudioEncoderChain(array $audio): string
@@ -536,8 +594,8 @@ class PipelineManager
         $speedPreset = $this->sanitizeSpeedPreset($target);
         $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset);
 
-        $audio = $this->sanitizeAudio($target);
-        $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
+        $audio = $this->clampAudioToCapture($this->sanitizeAudio($target), (int)$decklink['audio_channels']);
+        $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels'], $audio['codec']);
 
         $scaleEnabled = (int)($target['video_scale_enabled'] ?? 0) === 1;
         if ($scaleEnabled) {
@@ -591,9 +649,14 @@ class PipelineManager
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
         // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
-        $rawAudioCaps = "audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels={$decklink['audio_channels']}";
-        $audioBranch = "shmsrc socket-path={$audioShm} is-live=true ! {$rawAudioCaps} ! rawaudioparse use-sink-caps=true ! {$channelSelect}audioconvert ! audioresample ! " .
-            $this->buildAudioEncoderChain($audio);
+        // Ab 3 Kanaelen verlangt GStreamer eine channel-mask in den Caps (0 = unpositioniert; SDI-Mehrkanal hat keine
+        // feste Belegung). Fehlt sie, scheitert die Caps-Verhandlung zwischen shmsrc und rawaudioparse und es kommt
+        // gar kein Ton an (kein Fehler im Log, im Strom fehlt die Audiospur). Bei 2 Kanaelen reicht der Standard.
+        $captureChannels = (int)$decklink['audio_channels'];
+        $channelMaskCaps = $captureChannels > 2 ? ',channel-mask=(bitmask)0' : '';
+        $rawAudioCaps = "\"audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels={$captureChannels}{$channelMaskCaps}\"";
+        $audioBranch = "shmsrc socket-path={$audioShm} is-live=true ! {$rawAudioCaps} ! rawaudioparse use-sink-caps=true ! " .
+            $this->buildAudioProcessing($captureChannels, $audio, $channelSelect);
 
         return $prefix . $videoBranch . $audioBranch;
     }
@@ -738,8 +801,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_bitrate, video_speed_preset)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_bitrate, :video_speed_preset)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, audio_bitrate, video_speed_preset)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :audio_bitrate, :video_speed_preset)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -760,6 +823,7 @@ class PipelineManager
             ':height' => (int)($data['height'] ?? 1080),
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
+            ':audio_track_mode' => $audio['track_mode'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -796,6 +860,7 @@ class PipelineManager
                 height = :height,
                 audio_codec = :audio_codec,
                 audio_output_channels = :audio_output_channels,
+                audio_track_mode = :audio_track_mode,
                 audio_bitrate = :audio_bitrate,
                 video_speed_preset = :video_speed_preset
             WHERE id = :id
@@ -819,6 +884,7 @@ class PipelineManager
             ':height' => (int)($data['height'] ?? 1080),
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
+            ':audio_track_mode' => $audio['track_mode'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -1013,10 +1079,10 @@ class PipelineManager
                 "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
-            $audio = $this->sanitizeAudio($p);
-            $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
+            $audio = $this->clampAudioToCapture($this->sanitizeAudio($p), (int)$decklink['audio_channels']);
+            $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels'], $audio['codec']);
             $audioBranch = "decklinkaudiosrc device-number={$decklink['device_number']} channels={$decklink['audio_channels']} ! " .
-                "{$channelSelect}audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($audio);
+                $this->buildAudioProcessing((int)$decklink['audio_channels'], $audio, $channelSelect);
 
             return $prefix . $videoBranch . $audioBranch;
         }
@@ -1195,6 +1261,7 @@ class PipelineManager
                 pipeline_direction = :pipeline_direction,
                 audio_codec = :audio_codec,
                 audio_output_channels = :audio_output_channels,
+                audio_track_mode = :audio_track_mode,
                 audio_bitrate = :audio_bitrate,
                 video_codec = :video_codec,
                 video_rate_control = :video_rate_control,
@@ -1232,6 +1299,7 @@ class PipelineManager
             ':pipeline_direction' => $direction,
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
+            ':audio_track_mode' => $audio['track_mode'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_codec' => $videoCodec,
             ':video_rate_control' => $rateControl,
