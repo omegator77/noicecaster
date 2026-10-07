@@ -425,6 +425,7 @@
           <strong x-text="nic.ipv4.length ? nic.ipv4.join(', ') : 'keine IPv4-Adresse'"></strong>
           <span x-show="nic.dhcp_active"> (DHCP)</span>
           <span x-show="nic.gateway"> · Gateway <span x-text="nic.gateway"></span></span>
+          <span x-show="nic.static_routes && nic.static_routes.length"> · Routen <span x-text="(nic.static_routes || []).join(', ')"></span></span>
           <span x-show="nic.dns.length"> · DNS <span x-text="nic.dns.join(', ')"></span></span>
           <span x-show="nic.ipv6.length"> · <span x-text="nic.ipv6.join(', ')"></span></span>
         </div>
@@ -437,6 +438,7 @@
         <div class="hint" x-show="nic.is_vpn && !network.vpn">VPN-Status unbekannt: Netzwerk-Helfer neu installieren (<code>deploy/install-netconfig.sh</code>).</div>
         <div class="hint" x-show="nic.is_vpn" style="color: #d9a400;">Achtung: Wer sich gerade über das VPN verbindet, verliert bei einer Adressänderung die Verbindung und muss die Änderung unter der neuen VPN-Adresse bestätigen (oder 90 s auf den automatischen Rückfall warten).</div>
         <template x-if="network.editable && networkEdit[nic.name]">
+          <div>
           <div class="form-row" style="grid-template-columns: 140px 1.2fr 1fr 1fr;">
             <select x-model="networkEdit[nic.name].mode">
               <option value="dhcp">DHCP</option>
@@ -446,6 +448,10 @@
             <input type="text" x-model="networkEdit[nic.name].address" placeholder="192.168.1.10/24" :disabled="networkEdit[nic.name].mode !== 'static'">
             <input type="text" x-model="networkEdit[nic.name].gateway" placeholder="Gateway (optional)" :disabled="nic.is_vpn || networkEdit[nic.name].mode !== 'static'">
             <input type="text" x-model="networkEdit[nic.name].dns" placeholder="DNS, kommagetrennt" :disabled="networkEdit[nic.name].mode === 'disabled'">
+          </div>
+          <div class="form-row" style="grid-template-columns: 1fr;" x-show="!nic.is_vpn">
+            <input type="text" x-model="networkEdit[nic.name].routes" placeholder="Zusätzliche Routen, z. B. 10.70.20.0/24 via 10.70.40.253, 10.70.30.0/24 via 10.70.40.253" :disabled="networkEdit[nic.name].mode !== 'static'">
+          </div>
           </div>
         </template>
       </div>
@@ -1595,7 +1601,7 @@ function app() {
         for (const nic of data.interfaces) {
           if (!this.networkEdit[nic.name]) {
             const c = nic.configured || { mode: nic.dhcp_active ? 'dhcp' : 'static', address: nic.ipv4[0] || '', gateway: nic.gateway || '', dns: [] };
-            this.networkEdit[nic.name] = { mode: c.mode, address: c.address || '', gateway: c.gateway || '', dns: (c.dns || []).join(', ') };
+            this.networkEdit[nic.name] = { mode: c.mode, address: c.address || '', gateway: c.gateway || '', dns: (c.dns || []).join(', '), routes: (c.routes || []).map(r => r.to + ' via ' + r.via).join(', ') };
           }
         }
       } catch (e) {
@@ -1617,8 +1623,8 @@ function app() {
       for (const nic of this.network.interfaces) {
         const e = this.networkEdit[nic.name];
         const c = nic.configured;
-        if (!c || c.mode !== e.mode || (e.mode === 'static' && (c.address !== e.address.trim() || (c.gateway || '') !== e.gateway.trim())) || (c.dns || []).join(', ') !== e.dns.trim()) {
-          changed[nic.name] = { mode: e.mode, address: e.address.trim(), gateway: e.gateway.trim(), dns: e.dns };
+        if (!c || c.mode !== e.mode || (e.mode === 'static' && (c.address !== e.address.trim() || (c.gateway || '') !== e.gateway.trim())) || (c.dns || []).join(', ') !== e.dns.trim() || (e.mode === 'static' && (c.routes || []).map(r => r.to + ' via ' + r.via).join(', ') !== e.routes.trim())) {
+          changed[nic.name] = { mode: e.mode, address: e.address.trim(), gateway: e.gateway.trim(), dns: e.dns, routes: e.routes };
         }
       }
       const names = Object.keys(changed);

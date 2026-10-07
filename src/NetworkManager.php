@@ -37,6 +37,13 @@ class NetworkManager
                     $gateway = $r['gateway'] ?? '';
                 }
             }
+            $staticRoutes = [];
+            foreach ($routes as $r) {
+                if (($r['dev'] ?? '') === $name && ($r['dst'] ?? '') !== 'default'
+                    && ($r['protocol'] ?? '') === 'static' && !empty($r['gateway'])) {
+                    $staticRoutes[] = $r['dst'] . ' via ' . $r['gateway'];
+                }
+            }
             $speed = (int)self::readSys($name, 'speed');
             $nics[] = [
                 'name' => $name,
@@ -49,6 +56,7 @@ class NetworkManager
                 'ipv4' => $ipv4,
                 'ipv6' => $ipv6,
                 'gateway' => $gateway,
+                'static_routes' => $staticRoutes,
                 'dns' => self::dns($name),
                 'dhcp_active' => $dynamic,
                 'configured' => $configured[$name] ?? null,

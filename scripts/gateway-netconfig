@@ -25,6 +25,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -111,6 +112,14 @@ def find_entry(configs, name):
     return None, None
 
 
+PRIVATE_NETS = [ipaddress.IPv4Network(n) for n in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')]
+MAX_ROUTES = 8
+
+
+def is_default(route):
+    return route.get('to') in ('default', '0.0.0.0/0')
+
+
 def describe(entry):
     entry = entry or {}
     addrs = [a for a in entry.get('addresses', []) if ':' not in str(a)]
@@ -126,7 +135,10 @@ def describe(entry):
         mode = 'static'
     else:
         mode = 'disabled'
-    return {'mode': mode, 'address': addrs[0] if addrs else '', 'gateway': gateway or '', 'dns': dns}
+    routes = [{'to': str(r.get('to')), 'via': str(r.get('via'))} for r in entry.get('routes', []) or []
+              if not is_default(r) and r.get('via')]
+    return {'mode': mode, 'address': addrs[0] if addrs else '', 'gateway': gateway or '', 'dns': dns,
+            'routes': routes}
 
 
 def cmd_show():
@@ -150,7 +162,7 @@ def validate(name, cfg):
     mode = cfg.get('mode')
     if mode not in ('dhcp', 'static', 'disabled'):
         fail('%s: ungueltiger Modus' % name)
-    result = {'mode': mode, 'address': None, 'gateway': None, 'dns': []}
+    result = {'mode': mode, 'address': None, 'gateway': None, 'dns': [], 'routes': []}
     dns = cfg.get('dns') or []
     if isinstance(dns, str):
         dns = [d for d in dns.replace(';', ',').replace(' ', ',').split(',') if d]
@@ -186,7 +198,43 @@ def validate(name, cfg):
         if gw not in iface.network or gw == iface.ip:
             fail('%s: Gateway %s liegt nicht im Netz %s' % (name, gw, iface.network))
         result['gateway'] = str(gw)
+    result['routes'] = parse_routes(name, cfg.get('routes'), iface)
     return result
+
+
+def parse_routes(name, raw, iface):
+    """Zusaetzliche Routen "Netz via Gateway" (nur private Netze, nie eine Standardroute)."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        items = []
+        for part in raw.replace(';', ',').split(','):
+            part = part.strip()
+            if not part:
+                continue
+            m = re.fullmatch(r'(\S+)\s+via\s+(\S+)', part)
+            if not m:
+                fail('%s: Route "%s" muss wie "10.70.20.0/24 via 10.70.40.253" angegeben werden' % (name, part))
+            items.append({'to': m.group(1), 'via': m.group(2)})
+    else:
+        items = raw
+    if len(items) > MAX_ROUTES:
+        fail('%s: maximal %d zusaetzliche Routen' % (name, MAX_ROUTES))
+    routes = []
+    for item in items:
+        try:
+            net = ipaddress.IPv4Network(str(item.get('to', '')).strip(), strict=False)
+            via = ipaddress.IPv4Address(str(item.get('via', '')).strip())
+        except ValueError:
+            fail('%s: ungueltige Route %s' % (name, item))
+        if net.prefixlen == 0 or not any(net.subnet_of(p) for p in PRIVATE_NETS):
+            fail('%s: Route %s ist kein privates Netz (10/8, 172.16/12, 192.168/16)' % (name, net))
+        if via not in iface.network or via == iface.ip:
+            fail('%s: Gateway %s der Route %s liegt nicht im Netz %s' % (name, via, net, iface.network))
+        if net.overlaps(iface.network):
+            fail('%s: Route %s liegt im eigenen Netz %s' % (name, net, iface.network))
+        routes.append({'to': str(net), 'via': str(via)})
+    return routes
 
 
 def apply_entry(entry, cfg):
@@ -198,8 +246,12 @@ def apply_entry(entry, cfg):
         entry['dhcp4'] = False
     if cfg['mode'] == 'static':
         entry['addresses'] = [cfg['address']]
+        routes = []
         if cfg['gateway']:
-            entry['routes'] = [{'to': 'default', 'via': cfg['gateway']}]
+            routes.append({'to': 'default', 'via': cfg['gateway']})
+        routes += cfg['routes']
+        if routes:
+            entry['routes'] = routes
     if cfg['dns']:
         entry['nameservers'] = {'addresses': cfg['dns']}
     entry['optional'] = True
@@ -264,6 +316,18 @@ def cmd_apply():
                 if net.overlaps(other_net):
                     fail('%s und %s liegen im selben Netz (%s / %s)' % (name, other, net, other_net))
             nets.append((name, net))
+
+    # Routen duerfen keine Netze anderer NICs (auch des VPN) ueberdecken
+    for name in nics:
+        fname, key = find_entry(configs, name)
+        entry = configs[fname]['network']['ethernets'].get(key) if key else None
+        for route in (entry or {}).get('routes', []) or []:
+            if is_default(route):
+                continue
+            rnet = ipaddress.IPv4Network(route['to'], strict=False)
+            for other, other_net in nets:
+                if other != name and rnet.overlaps(other_net):
+                    fail('Route %s auf %s ueberdeckt das Netz %s von %s' % (rnet, name, other_net, other))
 
     os.makedirs(STATE_DIR, mode=0o755, exist_ok=True)
     for fname in FILES:
