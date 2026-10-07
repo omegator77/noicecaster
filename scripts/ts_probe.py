@@ -392,29 +392,6 @@ def analyse(packets):
     if len(pcr_list) >= 3:
         d = [b[1] - a[1] for a, b in zip(pcr_list, pcr_list[1:])]
         res['pcr_interval_ms'] = {'median': round(statistics.median(d), 1), 'max': round(max(d), 1)}
-    # Ton/Bild-Versatz ueber die PCR-Zeit (Mittel ueber das Fenster)
-    if len(pcr_list) >= 3 and video_pid in pes and audio_pid in pes:
-        import bisect
-        idxs = [p[0] for p in pcr_list]
-
-        def pcr_at(i):
-            k = bisect.bisect_left(idxs, i)
-            if k == 0 or k >= len(idxs):
-                return None
-            (i0, t0), (i1, t1) = pcr_list[k - 1], pcr_list[k]
-            return t0 + (t1 - t0) * (i - i0) / max(1, (i1 - i0))
-
-        def mean_off(l):
-            vals = []
-            for i, t in l:
-                c = pcr_at(i)
-                if c is not None:
-                    vals.append(t - c)
-            return statistics.mean(vals) if vals else None
-
-        ao, vo = mean_off(pes[audio_pid]), mean_off(pes[video_pid])
-        if ao is not None and vo is not None:
-            res['av_offset_ms'] = round(ao - vo, 1)
     return res
 
 

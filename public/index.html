@@ -608,11 +608,6 @@
                 <div class="s" x-text="it.config.audio_codec ? 'Soll ' + it.config.audio_codec.toUpperCase() + (it.config.audio_kbit ? ' ' + it.config.audio_kbit + ' kbit/s' : '') + (it.config.audio_channels ? ', ' + it.config.audio_channels + ' Kanäle' : '') : ''"></div>
               </div>
               <div>
-                <div class="k">Ton/Bild-Versatz</div>
-                <div class="v" :class="offsetClass(it.probe.av_offset_ms)" x-text="it.probe.av_offset_ms === undefined ? '–' : fmtSigned(it.probe.av_offset_ms) + ' ms'"></div>
-                <div class="s">Zeitstempel Ton gegen Bild (unter ±40 ms ist unkritisch)</div>
-              </div>
-              <div>
                 <div class="k">Gleichmäßigkeit</div>
                 <div class="v" :class="devClass(statsMaxDev(it.probe))" x-text="'± ' + statsMaxDev(it.probe).toFixed(2).replace('.', ',') + ' ms'"></div>
                 <div class="s" x-text="'Bild ' + (it.probe.video && it.probe.video.interval_ms ? String(it.probe.video.interval_ms).replace('.', ',') + ' ms' : '–') + ' · Ton ' + (it.probe.audio && it.probe.audio.interval_ms ? String(it.probe.audio.interval_ms).replace('.', ',') + ' ms' : '–') + ' · größte Abweichung'"></div>
@@ -1670,16 +1665,6 @@ function app() {
     fmtKbit(k) {
       if (k === null || k === undefined) return '–';
       return k >= 1000 ? (k / 1000).toFixed(2).replace('.', ',') + ' Mbit/s' : k + ' kbit/s';
-    },
-
-    fmtSigned(v) {
-      return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1).replace('.', ',');
-    },
-
-    offsetClass(ms) {
-      if (ms === undefined || ms === null) return '';
-      const a = Math.abs(ms);
-      return a < 40 ? 'st-ok' : (a < 100 ? 'st-warn' : 'st-bad');
     },
 
     devClass(ms) {
