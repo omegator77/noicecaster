@@ -496,6 +496,26 @@ class PipelineManager
         return $prefix . $videoBranch . $audioBranch;
     }
 
+    /**
+     * Loopback-UDP-Port, auf dem ein Sender seinen Transportstrom fuer die Statistik ausgibt
+     * (Pipeline-Prozess 47000+id, Zusatzziel 49000+id). Siehe scripts/ts_probe.py.
+     */
+    public static function tapPort(string $kind, int $id): int
+    {
+        return ($kind === 'target' ? 49000 : 47000) + $id;
+    }
+
+    /**
+     * Zweiter Zweig hinter dem Muxer (tee name=tap): Kopie des Transportstroms auf 127.0.0.1,
+     * nur fuer die Statistik. Leckere Queue, damit ein fehlender oder langsamer Leser den
+     * eigentlichen SRT-Weg nie bremst; tsparse buendelt 7 TS-Pakete je Datagramm (1316 Byte).
+     */
+    private function tapBranch(int $port): string
+    {
+        return "tap. ! queue leaky=downstream max-size-buffers=300 ! tsparse alignment=7 ! " .
+            "udpsink host=127.0.0.1 port={$port} sync=false async=false ";
+    }
+
     private function buildShmTargetCommand(array $p, array $target): string
     {
         $decklink = $this->sanitizeDecklink([
@@ -549,6 +569,9 @@ class PipelineManager
         $audioShm = escapeshellarg($this->shmAudioPath((int)$p['id']));
 
         $prefix = "env GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
+        $tap = $this->tapBranch(isset($target['pipeline_id'])
+            ? self::tapPort('target', (int)$target['id'])
+            : self::tapPort('pipeline', (int)$p['id']));
 
         // shmsrc liefert nur einen rohen Byte-Strom ohne eigenes Timing - der Segment-Event, den es
         // erzeugt, steht in Format "bytes", nicht "time" (verifiziert 2026-09-30 per identity-Probe
@@ -564,7 +587,7 @@ class PipelineManager
         // AAC-Encoder) etwas spaeter, steht in dieser ersten PMT nur das Video und Empfaenger wie
         // Magewell ordnen die Tonspur falsch zu oder finden sie nicht. 0,2 s Wartezeit beim Start genuegen.
         $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
-            "{$videoEncoder} ! mpegtsmux name=mux latency=200000000 ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
+            "{$videoEncoder} ! mpegtsmux name=mux latency=200000000 ! tee name=tap ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
         // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
@@ -964,6 +987,7 @@ class PipelineManager
 
         // TZ nur für die Pipeline selbst gesetzt (fuer clockoverlay) - aendert nicht die Systemzeitzone des Servers
         $prefix = "env TZ=Europe/Berlin GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
+        $tap = $this->tapBranch(self::tapPort('pipeline', (int)$p['id']));
 
         if ($sourceType === 'decklink') {
             $decklink = $this->sanitizeDecklink([
@@ -986,8 +1010,8 @@ class PipelineManager
                 "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
                 "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "mpegtsmux name=mux latency=200000000 ! " .
-                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
+                "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
+                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
             $audio = $this->sanitizeAudio($p);
             $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels']);
@@ -1006,8 +1030,8 @@ class PipelineManager
 
             $videoBranch = "demux.video_0 ! queue ! decodebin ! videoconvert ! {$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "mpegtsmux name=mux latency=200000000 ! " .
-                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
+                "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
+                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} {$tap}";
 
             $audio = $this->sanitizeAudio($p);
             $audioBranch = "demux.audio_0 ! queue ! decodebin ! audioconvert ! audioresample ! " .
@@ -1024,8 +1048,8 @@ class PipelineManager
             "video/x-raw,format={$videoFormat},width={$width},height={$height},framerate={$framerate}/1 ! " .
             "videoconvert ! {$clockOverlayElement}" .
             "{$videoEncoder} ! " .
-            "mpegtsmux name=mux latency=200000000 ! " .
-            "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
+            "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
+            "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
         $audio = $this->sanitizeAudio($p);
         $audioTestWave = $this->sanitizeAudioTestWave($p);

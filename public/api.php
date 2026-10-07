@@ -7,6 +7,7 @@ require_once __DIR__ . '/../src/SystemStats.php';
 require_once __DIR__ . '/../src/NetworkManager.php';
 require_once __DIR__ . '/../src/Auth.php';
 require_once __DIR__ . '/../src/FirewallManager.php';
+require_once __DIR__ . '/../src/StreamStats.php';
 
 header('Content-Type: application/json');
 
@@ -213,6 +214,10 @@ try {
 
         case 'network_confirm':
             echo json_encode(NetworkManager::confirm());
+            break;
+
+        case 'stats_overview':
+            echo json_encode(StreamStats::collect($manager));
             break;
 
         case 'firewall_status':

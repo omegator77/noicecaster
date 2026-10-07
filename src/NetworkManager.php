@@ -71,6 +71,30 @@ class NetworkManager
         ];
     }
 
+    /** Zaehler aller verwalteten NICs (Bytes, Fehler, Drops) fuer die Statistik; der Browser bildet die Raten. */
+    public static function counters(): array
+    {
+        $out = [];
+        foreach (self::physicalNics() as $name) {
+            $base = '/sys/class/net/' . $name . '/statistics/';
+            $read = function (string $f) use ($base): int {
+                $v = @file_get_contents($base . $f);
+                return $v === false ? 0 : (int)trim($v);
+            };
+            $speed = (int)self::readSys($name, 'speed');
+            $out[] = [
+                'name' => $name,
+                'is_vpn' => strpos($name, 'vpn_') === 0,
+                'carrier' => strpos($name, 'vpn_') === 0 ? true : self::readSys($name, 'carrier') === '1',
+                'speed_mbit' => $speed > 0 ? $speed : null,
+                'rx_bytes' => $read('rx_bytes'), 'tx_bytes' => $read('tx_bytes'),
+                'rx_errors' => $read('rx_errors'), 'tx_errors' => $read('tx_errors'),
+                'rx_dropped' => $read('rx_dropped'), 'tx_dropped' => $read('tx_dropped'),
+            ];
+        }
+        return $out;
+    }
+
     /** Neue Einstellungen anwenden (mit Rueckfall-Timer im Helfer). */
     public static function apply(array $interfaces): array
     {

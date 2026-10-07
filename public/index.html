@@ -207,6 +207,16 @@
   .led-red { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
   .led-gray { background: #52525b; }
   .led-blue { background: #3b82f6; box-shadow: 0 0 5px #3b82f6; }
+  .sg { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.9rem 1.2rem; margin: 0.6rem 0; }
+  .sg .k { color: #8b93a1; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .sg .v { font-weight: 600; }
+  .sg .s { color: #8b93a1; font-size: 0.78rem; }
+  .st-ok { color: #86efac; }
+  .st-warn { color: #fdba74; }
+  .st-bad { color: #fca5a5; }
+  .st-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.5rem; }
+  .st-table th { text-align: left; color: #8b93a1; font-weight: 500; font-size: 0.72rem; text-transform: uppercase; padding: 0.25rem 0.5rem; }
+  .st-table td { padding: 0.3rem 0.5rem; border-top: 1px solid #2a2e37; }
   #login-overlay { position: fixed; inset: 0; background: rgba(10, 12, 16, 0.96); z-index: 1000; display: flex; align-items: center; justify-content: center; }
   #login-overlay[hidden] { display: none; }
   #login-form { width: min(360px, 90vw); }
@@ -275,7 +285,7 @@
   }).catch(() => {});
 })();
 </script>
-<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); initPreviewTicker(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); })">
   <div class="retro-banner">
     <div class="retro-logo">NOICECASTER</div>
     <div class="retro-sub">*** SDI ⇄ SRT GATEWAY ***</div>
@@ -546,6 +556,117 @@
         </div>
       </div>
     </template>
+  </div>
+
+  <div class="section-header" style="margin-top: 2rem;">
+    <div class="section-header-title">
+      <h2>Statistik</h2>
+      <span class="badge" x-show="!statsCollapsed" x-text="statsView.items.length + (statsView.items.length === 1 ? ' Stream' : ' Streams')"></span>
+    </div>
+    <button type="button" class="btn-secondary" @click="toggleStatsCollapsed()" x-text="statsCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+  </div>
+  <div x-show="!statsCollapsed">
+    <div class="card" x-show="!statsView.items.length">
+      <div class="hint">Keine Pipeline läuft. Sobald ein Stream gestartet ist, erscheinen hier seine Kennzahlen (alle 3 s aktualisiert, nur solange dieser Bereich aufgeklappt ist).</div>
+    </div>
+    <template x-for="it in statsView.items" :key="it.key">
+      <div class="card">
+        <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
+          <span style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+            <strong x-text="it.name"></strong>
+            <span class="badge" x-text="it.direction === 'sender' ? 'SDI → SRT' : 'SRT → SDI'"></span>
+            <span class="hint" style="margin: 0;" x-text="statsSrtLine(it.config)"></span>
+          </span>
+        </div>
+        <template x-if="it.direction === 'receiver'">
+          <div class="hint">Empfänger: Stromdaten (Bitrate, PIDs, Timing) gibt es hier nicht, weil der Strom beim Sender gemessen wird. SRT-Kennzahlen des Empfangs folgen mit der nächsten Ausbaustufe.</div>
+        </template>
+        <template x-if="it.direction === 'sender' && !(it.probe && it.probe.active)">
+          <div class="hint" x-text="'Kein Messwert: ' + ((it.probe && it.probe.error) || 'noch nicht gemessen') + ((it.probe && it.probe.error === 'keine Daten am Abgriff') ? ' (Die Pipeline muss nach dem Update einmal neu gestartet werden, damit der Messabgriff aktiv ist.)' : '')"></div>
+        </template>
+        <template x-if="it.direction === 'sender' && it.probe && it.probe.active">
+          <div>
+            <div class="sg">
+              <div>
+                <div class="k">Bitrate gesamt</div>
+                <div class="v" x-text="fmtKbit(it.probe.total_kbit)"></div>
+                <div class="s" x-text="'Video ' + fmtKbit((it.probe.streams.find(s => s.role === 'video') || {}).kbit) + (it.config.video_kbit ? ' · Soll ' + fmtKbit(it.config.video_kbit) : '') + ' (inkl. TS-Overhead)'"></div>
+              </div>
+              <div>
+                <div class="k">Video</div>
+                <div class="v" x-text="statsVideoLine(it.probe.video)"></div>
+                <div class="s" x-text="statsVideoSub(it)"></div>
+              </div>
+              <div>
+                <div class="k">Keyframes (GOP)</div>
+                <div class="v" x-text="it.probe.video && it.probe.video.gop_frames ? it.probe.video.gop_frames + ' Bilder (' + String(it.probe.video.gop_s).replace('.', ',') + ' s)' : '–'"></div>
+                <div class="s" x-text="it.probe.video ? it.probe.video.keyframes_in_window + ' Keyframes im Messfenster' : ''"></div>
+              </div>
+              <div>
+                <div class="k">Audio</div>
+                <div class="v" x-text="statsAudioLine(it.probe.audio)"></div>
+                <div class="s" x-text="it.config.audio_codec ? 'Soll ' + it.config.audio_codec.toUpperCase() + (it.config.audio_kbit ? ' ' + it.config.audio_kbit + ' kbit/s' : '') + (it.config.audio_channels ? ', ' + it.config.audio_channels + ' Kanäle' : '') : ''"></div>
+              </div>
+              <div>
+                <div class="k">Ton/Bild-Versatz</div>
+                <div class="v" :class="offsetClass(it.probe.av_offset_ms)" x-text="it.probe.av_offset_ms === undefined ? '–' : fmtSigned(it.probe.av_offset_ms) + ' ms'"></div>
+                <div class="s">Zeitstempel Ton gegen Bild (unter ±40 ms ist unkritisch)</div>
+              </div>
+              <div>
+                <div class="k">Gleichmäßigkeit</div>
+                <div class="v" :class="devClass(statsMaxDev(it.probe))" x-text="'± ' + statsMaxDev(it.probe).toFixed(2).replace('.', ',') + ' ms'"></div>
+                <div class="s" x-text="'Bild ' + (it.probe.video && it.probe.video.interval_ms ? String(it.probe.video.interval_ms).replace('.', ',') + ' ms' : '–') + ' · Ton ' + (it.probe.audio && it.probe.audio.interval_ms ? String(it.probe.audio.interval_ms).replace('.', ',') + ' ms' : '–') + ' · größte Abweichung'"></div>
+              </div>
+              <div>
+                <div class="k">Paketfehler (Continuity)</div>
+                <div class="v" :class="it.probe.continuity_errors ? 'st-bad' : 'st-ok'" x-text="it.probe.continuity_errors"></div>
+                <div class="s">im Messfenster, 0 = lückenloser Strom</div>
+              </div>
+              <div>
+                <div class="k">Programmtabelle</div>
+                <div class="v" x-text="'PMT-PID ' + it.probe.pmt.pid + ' · Version ' + it.probe.pmt.version"></div>
+                <div class="s" x-text="'PCR-PID ' + it.probe.pmt.pcr_pid + (it.probe.pcr_interval_ms ? ' · PCR-Abstand ' + String(it.probe.pcr_interval_ms.median).replace('.', ',') + ' ms (max ' + String(it.probe.pcr_interval_ms.max).replace('.', ',') + ')' : '')"></div>
+              </div>
+            </div>
+            <table class="st-table">
+              <thead><tr><th>PID</th><th>Art</th><th>Format</th><th>Bitrate</th></tr></thead>
+              <tbody>
+                <template x-for="s in it.probe.streams" :key="s.pid">
+                  <tr><td x-text="s.pid + ' (0x' + s.pid.toString(16) + ')'"></td><td x-text="s.role === 'video' ? 'Video' : (s.role === 'audio' ? 'Audio' : 'Daten')"></td><td x-text="s.name"></td><td x-text="fmtKbit(s.kbit)"></td></tr>
+                </template>
+                <tr x-show="it.probe.null_kbit"><td>8191</td><td>Füllpakete</td><td>Null-Pakete</td><td x-text="fmtKbit(it.probe.null_kbit)"></td></tr>
+              </tbody>
+            </table>
+            <div style="margin-top: 0.6rem;">
+              <div class="k" style="color: #8b93a1; font-size: 0.7rem; text-transform: uppercase;">Bitrate gesamt, letzte 3 Minuten</div>
+              <svg viewBox="0 0 300 44" preserveAspectRatio="none" style="width: 100%; height: 44px; background: #14171c; border-radius: 4px;">
+                <polyline fill="none" stroke="#3b82f6" stroke-width="1.5" :points="statsSpark(it.key)"></polyline>
+              </svg>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <div class="card" x-show="statsView.nics.length">
+      <div style="font-weight: 600;">Netzwerkkarten (Durchsatz seit der letzten Messung)</div>
+      <table class="st-table">
+        <thead><tr><th>NIC</th><th>Link</th><th>Empfang</th><th>Senden</th><th>Fehler</th><th>Drops</th></tr></thead>
+        <tbody>
+          <template x-for="n in statsView.nics" :key="n.name">
+            <tr>
+              <td><span x-text="n.name"></span> <span class="badge" x-show="n.is_vpn">VPN</span></td>
+              <td x-text="n.is_vpn ? 'virtuell' : (n.carrier ? (n.speed_mbit ? n.speed_mbit + ' Mbit/s' : 'aktiv') : 'kein Link')"></td>
+              <td x-text="nicRate(n.name, 'rx')"></td>
+              <td x-text="nicRate(n.name, 'tx')"></td>
+              <td :class="(n.rx_errors + n.tx_errors) ? 'st-warn' : ''" x-text="n.rx_errors + n.tx_errors"></td>
+              <td :class="(n.rx_dropped + n.tx_dropped) ? 'st-warn' : ''" x-text="n.rx_dropped + n.tx_dropped"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="hint" style="margin-top: 0.4rem;">Fehler und Drops sind Zähler seit dem Start des Rechners.</div>
+    </div>
   </div>
 
   <h2 style="margin: 2rem 0 1rem;">SDI-Anschluss-Pipelines</h2>
@@ -1346,6 +1467,14 @@ function app() {
     firewall: { available: false, active: null, rules: [], needed: [], presets: [], unparsed: [], pending: null },
     fwForm: { proto: 'udp', port: '', iface: '', source: 'any', custom: '', comment: '' },
     fwBusy: false,
+    statsView: { items: [], nics: [], time: 0 },
+    statsHist: {},
+    nicPrev: {},
+    nicRates: {},
+    statsGen: 0,
+    statsCollapsed: (() => {
+      try { return localStorage.getItem('statsCollapsed') !== '0'; } catch (e) { return true; }
+    })(),
     firewallCollapsed: (() => {
       try { return localStorage.getItem('firewallCollapsed') === '1'; } catch (e) { return false; }
     })(),
@@ -1494,6 +1623,121 @@ function app() {
       } finally {
         this.vpnBusy = false;
       }
+    },
+
+    toggleStatsCollapsed() {
+      this.statsCollapsed = !this.statsCollapsed;
+      try { localStorage.setItem('statsCollapsed', this.statsCollapsed ? '1' : '0'); } catch (e) {}
+      this.statsGen++;
+      if (!this.statsCollapsed) this.pollStats(this.statsGen);
+    },
+
+    async pollStats(gen = this.statsGen) {
+      if (this.statsCollapsed || gen !== this.statsGen) return;
+      try {
+        const res = await fetch('api.php?action=stats_overview');
+        const data = await res.json();
+        if (!data.error) {
+          const now = performance.now() / 1000;
+          for (const it of data.items) {
+            if (it.probe && it.probe.active && it.probe.total_kbit != null) {
+              const h = this.statsHist[it.key] = this.statsHist[it.key] || [];
+              h.push(it.probe.total_kbit);
+              if (h.length > 60) h.shift();
+            }
+          }
+          for (const n of data.nics || []) {
+            const p = this.nicPrev[n.name];
+            if (p) {
+              const dt = now - p.t;
+              if (dt > 0.5) {
+                this.nicRates[n.name] = {
+                  rx: Math.max(0, (n.rx_bytes - p.rx) * 8 / dt / 1e6),
+                  tx: Math.max(0, (n.tx_bytes - p.tx) * 8 / dt / 1e6)
+                };
+              }
+            }
+            this.nicPrev[n.name] = { t: now, rx: n.rx_bytes, tx: n.tx_bytes };
+          }
+          this.statsView = data;
+        }
+      } catch (e) {
+        // Statistik ist nicht kritisch
+      }
+      setTimeout(() => this.pollStats(gen), 3000);
+    },
+
+    fmtKbit(k) {
+      if (k === null || k === undefined) return '–';
+      return k >= 1000 ? (k / 1000).toFixed(2).replace('.', ',') + ' Mbit/s' : k + ' kbit/s';
+    },
+
+    fmtSigned(v) {
+      return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1).replace('.', ',');
+    },
+
+    offsetClass(ms) {
+      if (ms === undefined || ms === null) return '';
+      const a = Math.abs(ms);
+      return a < 40 ? 'st-ok' : (a < 100 ? 'st-warn' : 'st-bad');
+    },
+
+    devClass(ms) {
+      return ms <= 2 ? 'st-ok' : (ms <= 8 ? 'st-warn' : 'st-bad');
+    },
+
+    statsMaxDev(probe) {
+      return Math.max((probe.video && probe.video.interval_dev_ms) || 0, (probe.audio && probe.audio.interval_dev_ms) || 0);
+    },
+
+    statsSrtLine(c) {
+      if (!c) return '';
+      const mode = c.srt_mode === 'caller' ? 'Caller → ' + (c.srt_host || '?') + ':' + c.srt_port : 'Listener :' + c.srt_port;
+      return mode + ' · Latenz ' + (c.srt_latency ?? '–') + ' ms · ' + (c.encrypted ? 'verschlüsselt' : 'unverschlüsselt');
+    },
+
+    statsVideoLine(v) {
+      if (!v) return '–';
+      const size = v.width ? v.width + '×' + v.height : '';
+      const fps = v.fps ? String(v.fps).replace('.', ',') + ' Bilder/s' : '';
+      return [size, fps].filter(Boolean).join(' · ') || '–';
+    },
+
+    statsVideoSub(it) {
+      const v = it.probe.video;
+      if (!v) return '';
+      const parts = [];
+      if (v.profile) parts.push('H.264 ' + v.profile + '@' + v.level + (v.interlaced ? ', Halbbilder' : ', progressiv'));
+      const c = it.config;
+      const sizeApplies = c && (c.scaled || (c.source_type && c.source_type !== 'decklink'));
+      if (sizeApplies && c.width && c.height && v.width && (c.width !== v.width || c.height !== v.height)) {
+        parts.push('Soll ' + c.width + '×' + c.height);
+      }
+      return parts.join(' · ');
+    },
+
+    statsAudioLine(a) {
+      if (!a) return '–';
+      const parts = [a.codec];
+      if (a.rate) parts.push(Math.round(a.rate / 100) / 10 + ' kHz');
+      if (a.channels) parts.push(a.channels + ' Kanäle');
+      return parts.filter(Boolean).join(' · ');
+    },
+
+    statsSpark(key) {
+      const h = this.statsHist[key] || [];
+      if (h.length < 2) return '';
+      const max = Math.max(...h) * 1.1 || 1;
+      const min = Math.min(...h) * 0.9;
+      const span = (max - min) || 1;
+      return h.map((v, i) => (i * 300 / 59).toFixed(1) + ',' + (42 - (v - min) / span * 40).toFixed(1)).join(' ');
+    },
+
+    nicRate(name, dir) {
+      const r = this.nicRates[name];
+      if (!r) return '…';
+      const v = r[dir];
+      return v >= 1 ? v.toFixed(1).replace('.', ',') + ' Mbit/s' : (v * 1000).toFixed(0) + ' kbit/s';
     },
 
     toggleFirewallCollapsed() {

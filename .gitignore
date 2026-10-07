@@ -16,3 +16,7 @@ __pycache__/
 data/auth.json
 data/auth_attempts.json
 data/sessions/
+
+# Statistik (Sperrdatei und letzter Messwert)
+data/streamstats.lock
+data/streamstats_cache.json
