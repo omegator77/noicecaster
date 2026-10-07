@@ -559,8 +559,12 @@ class PipelineManager
         // es fliessen nur Keepalives, nie echte Daten - reproduziert per echtem SRT-Client-Verbindungstest).
         // rawvideoparse/rawaudioparse (gst-plugins-bad) lesen die vorher gesetzten Caps
         // (use-sink-caps=true) und wandeln den Byte-Strom in einen korrekt getakteten Zeit-Strom um.
+        // mpegtsmux latency=200000000: Der Muxer schreibt seine erste PAT/PMT, sobald das Video da ist,
+        // und srtsink schickt diese als Stream-Header an jeden neuen Empfaenger. Kommt der Ton (Verteiler/
+        // AAC-Encoder) etwas spaeter, steht in dieser ersten PMT nur das Video und Empfaenger wie
+        // Magewell ordnen die Tonspur falsch zu oder finden sie nicht. 0,2 s Wartezeit beim Start genuegen.
         $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
-            "{$videoEncoder} ! mpegtsmux name=mux ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
+            "{$videoEncoder} ! mpegtsmux name=mux latency=200000000 ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
         // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
@@ -982,7 +986,7 @@ class PipelineManager
                 "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
                 "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "mpegtsmux name=mux ! " .
+                "mpegtsmux name=mux latency=200000000 ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
 
             $audio = $this->sanitizeAudio($p);
@@ -1002,7 +1006,7 @@ class PipelineManager
 
             $videoBranch = "demux.video_0 ! queue ! decodebin ! videoconvert ! {$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "mpegtsmux name=mux ! " .
+                "mpegtsmux name=mux latency=200000000 ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} ";
 
             $audio = $this->sanitizeAudio($p);
@@ -1020,7 +1024,7 @@ class PipelineManager
             "video/x-raw,format={$videoFormat},width={$width},height={$height},framerate={$framerate}/1 ! " .
             "videoconvert ! {$clockOverlayElement}" .
             "{$videoEncoder} ! " .
-            "mpegtsmux name=mux ! " .
+            "mpegtsmux name=mux latency=200000000 ! " .
             "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false ";
 
         $audio = $this->sanitizeAudio($p);
