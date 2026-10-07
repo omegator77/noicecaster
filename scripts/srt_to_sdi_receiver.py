@@ -32,9 +32,19 @@ def build(a):
         "queue name=vq ! decodebin ! videoconvert ! videoscale ! videorate ! "
         f"decklinkvideosink device-number={a.device} mode={a.mode} profile={a.profile}"
     )
+    # Die DeckLink-Ausgabe kennt nur 2, 8 oder 16 Kanaele. Bei mehr als 2 Ausgabekanaelen den Ton DISKRET
+    # abbilden (Kanal 1..N des Stroms auf Ausgang 1..N, der Rest bleibt still): ein reines audioconvert rechnet
+    # 4.0 nach 7.1 um und verteilt den Ton als Lautsprecher-Signal auf alle Ausgaenge. channel-mask=0 =
+    # unpositioniert, wie es der DeckLink-Treiber selbst fuer 8/16 Kanaele liefert.
+    if a.audio_channels > 2:
+        mix = "audiomixmatrix mode=first-channels channel-mask=0 ! "
+        caps = f"audio/x-raw,format=S16LE,rate=48000,channels={a.audio_channels},channel-mask=(bitmask)0"
+    else:
+        mix = ""
+        caps = f"audio/x-raw,format=S16LE,rate=48000,channels={a.audio_channels}"
     audio = (
         "queue name=aq max-size-time=1000000000 ! decodebin ! audioconvert ! audioresample ! "
-        f"audio/x-raw,format=S16LE,rate=48000,channels={a.audio_channels} ! "
+        f"{mix}{caps} ! "
         f"decklinkaudiosink device-number={a.device}"
     )
     pipe = Gst.parse_launch(f"srtsrc name=src ! tsdemux name=demux  {video}  {audio}")

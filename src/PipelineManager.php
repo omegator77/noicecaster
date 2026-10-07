@@ -18,14 +18,19 @@ class PipelineManager
     private const DECKLINK_AUDIO_CHANNELS = [2, 8, 16, 0];
     private const DIRECTIONS = ['sdi_to_srt', 'srt_to_sdi'];
     private const AUDIO_CODECS = ['aac', 'mp2', 'ac3', 'opus', 'pcm'];
-    private const AUDIO_OUTPUT_CHANNELS = [2, 4, 8, 16];
+    // VORERST nur 2 und 4 Ausgabekanaele (4 = 4.0, vollbandig; Entscheidung 2026-10-07). Mehr geht mit dem
+    // Magewell nicht sauber: AAC mit 6/8 Kanaelen hat einen LFE-Platz (Kanal 4, nur bis ca. 250 Hz), AAC mit
+    // eigenem Layout (PCE) ist mitten im Strom nicht dekodierbar, Opus/AC-3/PCM spielt der Magewell nicht.
+    // Technisch moegliche Obergrenzen je Codec (spaeter wieder freigeben): aac/opus 2,4,8,16 - pcm 2,4,6,8 -
+    // ac3 2,4,6 - mp2 2.
+    private const AUDIO_OUTPUT_CHANNELS = [2, 4];
     // Kanalzahlen, die der jeweilige Encoder tatsaechlich unterstuetzt (Codec-Spezifikation) -
     // z.B. akzeptiert avenc_mp2 nur Mono/Stereo, avenc_s302m (PCM) max. 8 Kanaele.
     private const AUDIO_CODEC_CHANNELS = [
-        'aac' => [2, 4, 8, 16],
-        'opus' => [2, 4, 8, 16],
-        'pcm' => [2, 4, 6, 8],
-        'ac3' => [2, 4, 6],
+        'aac' => [2, 4],
+        'opus' => [2, 4],
+        'pcm' => [2, 4],
+        'ac3' => [2, 4],
         'mp2' => [2],
     ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
