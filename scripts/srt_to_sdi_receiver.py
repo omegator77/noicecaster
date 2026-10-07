@@ -30,6 +30,15 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+def pad_info(name: str):
+    """(Generation, PID) aus einem tsdemux-Pad-Namen wie audio_1_0042."""
+    parts = name.split("_")
+    try:
+        return int(parts[1]), parts[-1]
+    except (IndexError, ValueError):
+        return 0, name
+
+
 def build(a):
     # --null-sinks: fakesink statt DeckLink-Ausgabe, nur zum Entwickeln und Testen ohne Karte
     vsink = ("fakesink name=vsink sync=true" if a.null_sinks
@@ -87,7 +96,17 @@ def build(a):
             return
         sink = tgt.get_static_pad("sink")
         peer = sink.get_peer()
-        if peer is not None:  # altes Pad derselben Art (Stream wurde neu angelegt)
+        if peer is not None:
+            # Pad-Namen: <Art>_<Generation>_<PID>, z. B. audio_0_0042. Legt tsdemux den Strom neu an (neue
+            # Verbindung, Sender wechselt PIDs oder Programm), steigt die Generation, die neuen Pads kommen VOR
+            # dem Entfernen der alten: die neuere Generation ersetzt die alte. Ein weiteres Pad mit gleicher
+            # Generation und anderer PID ist eine zusaetzliche Spur (z. B. Stereo-Spuren): die erste bleibt am
+            # Ausgang.
+            old_gen, old_pid = pad_info(peer.get_name())
+            new_gen, new_pid = pad_info(pad.get_name())
+            if new_gen < old_gen or (new_gen == old_gen and new_pid != old_pid):
+                log(f"Pad {pad.get_name()} ignoriert (weitere {kind}-Spur, ausgegeben wird {peer.get_name()})")
+                return
             peer.unlink(sink)
         res = pad.link(sink)
         log(f"Pad {pad.get_name()} -> {tgt.get_name()}: {res.value_nick}")

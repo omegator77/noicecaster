@@ -51,6 +51,10 @@ class Database
             'audio_codec' => "TEXT DEFAULT 'aac'",
             'audio_output_channels' => "INTEGER DEFAULT 2",
             'audio_track_mode' => "TEXT DEFAULT 'multi'",
+            'ts_video_pid' => "INTEGER DEFAULT 0",
+            'ts_audio_pid' => "INTEGER DEFAULT 0",
+            'ts_pmt_pid' => "INTEGER DEFAULT 0",
+            'ts_program' => "INTEGER DEFAULT 0",
             'audio_bitrate' => "INTEGER DEFAULT 192",
             'video_codec' => "TEXT DEFAULT 'h264'",
             'video_rate_control' => "TEXT DEFAULT 'cbr'",
@@ -154,6 +158,10 @@ class Database
                 audio_codec TEXT DEFAULT 'aac',
                 audio_output_channels INTEGER DEFAULT 2,
                 audio_track_mode TEXT DEFAULT 'multi',
+                ts_video_pid INTEGER DEFAULT 0,
+                ts_audio_pid INTEGER DEFAULT 0,
+                ts_pmt_pid INTEGER DEFAULT 0,
+                ts_program INTEGER DEFAULT 0,
                 audio_bitrate INTEGER DEFAULT 192,
                 pid INTEGER DEFAULT NULL,
                 status TEXT DEFAULT 'stopped',
@@ -168,6 +176,11 @@ class Database
         }
         if (!in_array('audio_track_mode', $existingTargetColumns, true)) {
             $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN audio_track_mode TEXT DEFAULT 'multi'");
+        }
+        foreach (['ts_video_pid', 'ts_audio_pid', 'ts_pmt_pid', 'ts_program'] as $tsColumn) {
+            if (!in_array($tsColumn, $existingTargetColumns, true)) {
+                $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN {$tsColumn} INTEGER DEFAULT 0");
+            }
         }
     }
 

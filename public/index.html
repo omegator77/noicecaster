@@ -873,6 +873,18 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<details style="margin-top: 0.6rem;">
+  <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="tileForms[n].ts_video_pid" placeholder="0 = auto (65)"></div>
+    <div><label>Audio-PID (erste Spur)</label><input type="number" min="0" max="8190" x-model.number="tileForms[n].ts_audio_pid" placeholder="0 = auto (66)"></div>
+  </div>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>PMT-PID</label><input type="number" min="0" max="8190" x-model.number="tileForms[n].ts_pmt_pid" placeholder="0 = auto (32)"></div>
+    <div><label>Programmnummer</label><input type="number" min="0" max="65535" x-model.number="tileForms[n].ts_program" placeholder="0 = auto (1)"></div>
+  </div>
+  <div class="hint">0 = automatisch (wie bisher). Erlaubt 32 bis 8190, nicht 17. Weitere Audio-Spuren (Stereo-Spuren) zählen ab der Audio-PID hoch. Alle PIDs müssen verschieden sein.</div>
+</details>
                 </div>
               </div>
               <div class="form-row" style="margin-top: 0.5rem;">
@@ -1120,6 +1132,18 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<details style="margin-top: 0.6rem;">
+  <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="target.ts_video_pid" placeholder="0 = auto (65)"></div>
+    <div><label>Audio-PID (erste Spur)</label><input type="number" min="0" max="8190" x-model.number="target.ts_audio_pid" placeholder="0 = auto (66)"></div>
+  </div>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>PMT-PID</label><input type="number" min="0" max="8190" x-model.number="target.ts_pmt_pid" placeholder="0 = auto (32)"></div>
+    <div><label>Programmnummer</label><input type="number" min="0" max="65535" x-model.number="target.ts_program" placeholder="0 = auto (1)"></div>
+  </div>
+  <div class="hint">0 = automatisch (wie bisher). Erlaubt 32 bis 8190, nicht 17. Weitere Audio-Spuren (Stereo-Spuren) zählen ab der Audio-PID hoch. Alle PIDs müssen verschieden sein.</div>
+</details>
                           </div>
                         </div>
                         <div style="margin-top: 0.5rem;">
@@ -1340,6 +1364,18 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<details style="margin-top: 0.6rem;">
+  <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="form.ts_video_pid" placeholder="0 = auto (65)"></div>
+    <div><label>Audio-PID (erste Spur)</label><input type="number" min="0" max="8190" x-model.number="form.ts_audio_pid" placeholder="0 = auto (66)"></div>
+  </div>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>PMT-PID</label><input type="number" min="0" max="8190" x-model.number="form.ts_pmt_pid" placeholder="0 = auto (32)"></div>
+    <div><label>Programmnummer</label><input type="number" min="0" max="65535" x-model.number="form.ts_program" placeholder="0 = auto (1)"></div>
+  </div>
+  <div class="hint">0 = automatisch (wie bisher). Erlaubt 32 bis 8190, nicht 17. Weitere Audio-Spuren (Stereo-Spuren) zählen ab der Audio-PID hoch. Alle PIDs müssen verschieden sein.</div>
+</details>
         </div>
         <div>
           <label>Audio-Bitrate (kbit/s)</label>
@@ -1399,6 +1435,18 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<details style="margin-top: 0.6rem;">
+  <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="form.ts_video_pid" placeholder="0 = auto (65)"></div>
+    <div><label>Audio-PID (erste Spur)</label><input type="number" min="0" max="8190" x-model.number="form.ts_audio_pid" placeholder="0 = auto (66)"></div>
+  </div>
+  <div class="form-row" style="margin-top: 0.4rem;">
+    <div><label>PMT-PID</label><input type="number" min="0" max="8190" x-model.number="form.ts_pmt_pid" placeholder="0 = auto (32)"></div>
+    <div><label>Programmnummer</label><input type="number" min="0" max="65535" x-model.number="form.ts_program" placeholder="0 = auto (1)"></div>
+  </div>
+  <div class="hint">0 = automatisch (wie bisher). Erlaubt 32 bis 8190, nicht 17. Weitere Audio-Spuren (Stereo-Spuren) zählen ab der Audio-PID hoch. Alle PIDs müssen verschieden sein.</div>
+</details>
         </div>
       </div>
       <div style="margin-top: 0.5rem;">
@@ -1508,6 +1556,7 @@ function defaultTileForm(deviceNumber) {
     audio_codec: 'aac',
     audio_output_channels: 2,
     audio_track_mode: 'multi',
+    ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0,
     audio_bitrate: 192,
     srt_port: 9000 + deviceNumber,
     srt_mode: 'listener',
@@ -1601,6 +1650,7 @@ function app() {
       audio_codec: 'aac',
       audio_output_channels: 2,
       audio_track_mode: 'multi',
+      ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0,
       audio_bitrate: 192,
       audio_test_wave: 'sine',
       video_codec: 'h264',
@@ -2110,6 +2160,7 @@ function app() {
           audio_codec: p.audio_codec || 'aac',
           audio_output_channels: p.audio_output_channels ?? 2,
           audio_track_mode: p.audio_track_mode || 'multi',
+          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0,
           audio_bitrate: p.audio_bitrate ?? 192,
           srt_port: p.srt_port ?? (9000 + n),
           srt_mode: p.srt_mode || 'listener',
@@ -2168,6 +2219,7 @@ function app() {
         audio_codec: tf.audio_codec,
         audio_output_channels: tf.audio_output_channels,
         audio_track_mode: tf.audio_track_mode,
+        ts_video_pid: tf.ts_video_pid, ts_audio_pid: tf.ts_audio_pid, ts_pmt_pid: tf.ts_pmt_pid, ts_program: tf.ts_program,
         audio_bitrate: tf.audio_bitrate,
         srt_port: tf.srt_port,
         srt_mode: tf.srt_mode,
@@ -2236,7 +2288,7 @@ function app() {
         name: 'Ziel', srt_mode: 'listener', srt_port: 9000, srt_target_host: '', srt_latency: 120,
         video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_speed_preset: 'veryfast', video_keyframe_interval: 0,
         video_scale_enabled: false, width: 1920, height: 1080,
-        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', audio_bitrate: 192,
+        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, audio_bitrate: 192,
         srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
       };
     },
@@ -2613,6 +2665,7 @@ function app() {
         audio_codec: p.audio_codec || 'aac',
         audio_output_channels: p.audio_output_channels ?? 2,
           audio_track_mode: p.audio_track_mode || 'multi',
+          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0,
         audio_bitrate: p.audio_bitrate ?? 192,
         audio_test_wave: p.audio_test_wave || 'sine',
         video_codec: p.video_codec || 'h264',
@@ -2653,6 +2706,7 @@ function app() {
         audio_codec: 'aac',
         audio_output_channels: 2,
         audio_track_mode: 'multi',
+        ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0,
         audio_bitrate: 192,
         audio_test_wave: 'sine',
         video_codec: 'h264',

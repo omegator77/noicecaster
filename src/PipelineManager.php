@@ -124,6 +124,7 @@ class PipelineManager
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
         $audio = $this->sanitizeAudio($data);
+        $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $keyframeInterval = (int)($data['video_keyframe_interval'] ?? 0);
@@ -131,8 +132,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -155,6 +156,10 @@ class PipelineManager
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
             ':audio_track_mode' => $audio['track_mode'],
+            ':ts_video_pid' => $ts['video'],
+            ':ts_audio_pid' => $ts['audio'],
+            ':ts_pmt_pid' => $ts['pmt'],
+            ':ts_program' => $ts['program'],
             ':video_codec' => $videoCodec,
             ':audio_bitrate' => $audio['bitrate'],
             ':video_rate_control' => $rateControl,
@@ -425,16 +430,95 @@ class PipelineManager
         return "audiomixmatrix mode=first-channels channel-mask=-1 ! \"audio/x-raw,channels={$outputChannels}{$layout}\" ! ";
     }
 
+    // Standardwerte, die der Muxer von sich aus vergibt (so waren die Streams bisher; 0 = automatisch)
+    private const TS_DEFAULT_VIDEO_PID = 65;
+    private const TS_DEFAULT_AUDIO_PID = 66;
+    private const TS_DEFAULT_PMT_PID = 32;
+
+    /**
+     * Feste PIDs und Programmnummer fuer den Transportstrom pruefen (0 = automatisch). Erlaubt sind PIDs von 32 bis
+     * 8190 (17 ist fuer die SDT reserviert); Video, PMT und alle Audio-Spuren (Audio-PID, +1, +2, ...) muessen
+     * verschieden sein.
+     */
+    private function sanitizeTsIds(array $data, array $audio): array
+    {
+        $ts = [
+            'video' => (int)($data['ts_video_pid'] ?? 0),
+            'audio' => (int)($data['ts_audio_pid'] ?? 0),
+            'pmt' => (int)($data['ts_pmt_pid'] ?? 0),
+            'program' => (int)($data['ts_program'] ?? 0),
+        ];
+        foreach (['video' => 'Video-PID', 'audio' => 'Audio-PID', 'pmt' => 'PMT-PID'] as $key => $label) {
+            if ($ts[$key] !== 0 && ($ts[$key] < 32 || $ts[$key] > 8190 || $ts[$key] === 17)) {
+                throw new RuntimeException("{$label} muss 0 (automatisch) oder zwischen 32 und 8190 liegen (17 ist reserviert)");
+            }
+        }
+        if ($ts['program'] < 0 || $ts['program'] > 65535) {
+            throw new RuntimeException('Programmnummer muss 0 (automatisch) oder zwischen 1 und 65535 liegen');
+        }
+        if (!($ts['video'] || $ts['audio'] || $ts['pmt'] || $ts['program'])) {
+            return $ts;
+        }
+        $tracks = ($audio['track_mode'] ?? 'multi') === 'pairs' ? max(1, intdiv((int)$audio['channels'], 2)) : 1;
+        $first = $ts['audio'] ?: self::TS_DEFAULT_AUDIO_PID;
+        if ($first + $tracks - 1 > 8190) {
+            throw new RuntimeException("Audio-PID {$first} reicht fuer {$tracks} Audio-Spuren nicht (letzte PID waere " . ($first + $tracks - 1) . ', maximal 8190)');
+        }
+        $used = [];
+        $assign = function (int $pid, string $label) use (&$used) {
+            if (isset($used[$pid])) {
+                throw new RuntimeException("PID {$pid} ist doppelt vergeben ({$used[$pid]} und {$label})");
+            }
+            $used[$pid] = $label;
+        };
+        $assign($ts['video'] ?: self::TS_DEFAULT_VIDEO_PID, 'Video');
+        $assign($ts['pmt'] ?: self::TS_DEFAULT_PMT_PID, 'PMT');
+        for ($i = 0; $i < $tracks; $i++) {
+            $assign($first + $i, $tracks > 1 ? 'Audio-Spur ' . ($i + 1) : 'Audio');
+        }
+        return $ts;
+    }
+
+    /**
+     * Muxer-Einstellungen fuer feste PIDs/Programmnummer. Ohne eigene Angaben bleibt alles wie bisher
+     * (automatische Pads "mux." und keine prog-map). Mit Angaben werden alle Eingaenge ueber ihre PID benannt
+     * (request pad "sink_<PID>"); die fehlenden Werte nehmen die bisherigen Standardwerte, damit die
+     * Programm-Zuordnung vollstaendig ist. In prog-map muss die PMT-PID als (uint) stehen, mit (int) wirkt sie nicht.
+     */
+    private function muxSetupFor(array $row): array
+    {
+        $audio = $this->sanitizeAudio($row);
+        $ts = $this->sanitizeTsIds($row, $audio);
+        if (!($ts['video'] || $ts['audio'] || $ts['pmt'] || $ts['program'])) {
+            return ['videoPad' => '', 'props' => '', 'audioPad' => fn(int $i) => 'mux.'];
+        }
+        $video = $ts['video'] ?: self::TS_DEFAULT_VIDEO_PID;
+        $first = $ts['audio'] ?: self::TS_DEFAULT_AUDIO_PID;
+        $pmt = $ts['pmt'] ?: self::TS_DEFAULT_PMT_PID;
+        $program = $ts['program'] ?: 1;
+        $tracks = $audio['track_mode'] === 'pairs' ? max(1, intdiv((int)$audio['channels'], 2)) : 1;
+        $map = "sink_{$video}=(int){$program}";
+        for ($i = 0; $i < $tracks; $i++) {
+            $map .= ',sink_' . ($first + $i) . "=(int){$program}";
+        }
+        $map .= ",PMT_{$program}=(uint){$pmt},PCR_{$program}=sink_{$video}";
+        return [
+            'videoPad' => "mux.sink_{$video} ",
+            'props' => " prog-map=\"program_map,{$map}\"",
+            'audioPad' => fn(int $i) => 'mux.sink_' . ($first + $i),
+        ];
+    }
+
     /**
      * Kette vom geparsten Rohton bis zu den Encodern ("mux." am Ende).
      * 'multi': eine Spur mit allen Kanaelen. 'pairs': je zwei Kanaele eine eigene Stereo-Spur; jedes Paar wird
      * ueber audiomixmatrix (manueller Modus, channel-mask=3 = Stereo) aus dem Mehrkanalton gezogen und einzeln
      * kodiert, der Muxer legt jede Spur auf eine eigene PID. Die Bitrate gilt pro Spur.
      */
-    private function buildAudioProcessing(int $captureChannels, array $audio, string $channelSelect): string
+    private function buildAudioProcessing(int $captureChannels, array $audio, string $channelSelect, array $mux): string
     {
         if (($audio['track_mode'] ?? 'multi') !== 'pairs' || $captureChannels <= 2 || $audio['channels'] <= 2) {
-            return "{$channelSelect}audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($audio);
+            return "{$channelSelect}audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($audio, $mux['audioPad'](0));
         }
         $pairAudio = ['codec' => $audio['codec'], 'channels' => 2, 'bitrate' => $audio['bitrate'], 'track_mode' => 'multi'];
         $chain = "tee name=atee ";
@@ -449,19 +533,19 @@ class PipelineManager
             }
             $matrix = '<' . implode(',', $rows) . '>';
             $chain .= "atee. ! queue ! audiomixmatrix in-channels={$captureChannels} out-channels=2 mode=manual channel-mask=3 " .
-                "matrix=\"{$matrix}\" ! audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($pairAudio) . " ";
+                "matrix=\"{$matrix}\" ! audioconvert ! audioresample ! " . $this->buildAudioEncoderChain($pairAudio, $mux['audioPad']($k)) . " ";
         }
         return $chain;
     }
 
-    private function buildAudioEncoderChain(array $audio): string
+    private function buildAudioEncoderChain(array $audio, string $muxPad = 'mux.'): string
     {
         $channels = $audio['channels'];
         $bps = $audio['bitrate'] * 1000;
 
         if ($audio['codec'] === 'pcm') {
             // SMPTE 302M: unkomprimiertes PCM, kein Bitrate-Parameter, feste Samplerate 48kHz
-            return "audio/x-raw,channels={$channels},rate=48000 ! avenc_s302m strict=experimental ! mux.";
+            return "audio/x-raw,channels={$channels},rate=48000 ! avenc_s302m strict=experimental ! {$muxPad}";
         }
 
         switch ($audio['codec']) {
@@ -479,7 +563,7 @@ class PipelineManager
                 break;
         }
 
-        return "audio/x-raw,channels={$channels} ! {$encoder} ! mux.";
+        return "audio/x-raw,channels={$channels} ! {$encoder} ! {$muxPad}";
     }
 
     // --- Mehrere SRT-Ziele pro SDI-Eingang (Advanced-Menue) ---
@@ -642,6 +726,7 @@ class PipelineManager
         $tap = $this->tapBranch(isset($target['pipeline_id'])
             ? self::tapPort('target', (int)$target['id'])
             : self::tapPort('pipeline', (int)$p['id']));
+        $mux = $this->muxSetupFor($target);
 
         // shmsrc liefert nur einen rohen Byte-Strom ohne eigenes Timing - der Segment-Event, den es
         // erzeugt, steht in Format "bytes", nicht "time" (verifiziert 2026-09-30 per identity-Probe
@@ -657,7 +742,7 @@ class PipelineManager
         // AAC-Encoder) etwas spaeter, steht in dieser ersten PMT nur das Video und Empfaenger wie
         // Magewell ordnen die Tonspur falsch zu oder finden sie nicht. 0,2 s Wartezeit beim Start genuegen.
         $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
-            "{$videoEncoder} ! mpegtsmux name=mux latency=200000000 ! tee name=tap ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
+            "{$videoEncoder} ! {$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
         // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
@@ -668,7 +753,7 @@ class PipelineManager
         $channelMaskCaps = $captureChannels > 2 ? ',channel-mask=(bitmask)0' : '';
         $rawAudioCaps = "\"audio/x-raw,format=S32LE,layout=interleaved,rate=48000,channels={$captureChannels}{$channelMaskCaps}\"";
         $audioBranch = "shmsrc socket-path={$audioShm} is-live=true ! {$rawAudioCaps} ! rawaudioparse use-sink-caps=true ! " .
-            $this->buildAudioProcessing($captureChannels, $audio, $channelSelect);
+            $this->buildAudioProcessing($captureChannels, $audio, $channelSelect, $mux);
 
         return $prefix . $videoBranch . $audioBranch;
     }
@@ -808,13 +893,14 @@ class PipelineManager
             throw new RuntimeException("Zusaetzliche SRT-Ziele sind nur fuer SDI-Eingangs-Pipelines moeglich.");
         }
         $audio = $this->sanitizeAudio($data);
+        $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, audio_bitrate, video_speed_preset)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :audio_bitrate, :video_speed_preset)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, audio_bitrate, video_speed_preset)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :audio_bitrate, :video_speed_preset)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -836,6 +922,10 @@ class PipelineManager
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
             ':audio_track_mode' => $audio['track_mode'],
+            ':ts_video_pid' => $ts['video'],
+            ':ts_audio_pid' => $ts['audio'],
+            ':ts_pmt_pid' => $ts['pmt'],
+            ':ts_program' => $ts['program'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -849,6 +939,7 @@ class PipelineManager
             throw new RuntimeException("Laufendes Ziel kann nicht bearbeitet werden. Bitte zuerst stoppen.");
         }
         $audio = $this->sanitizeAudio($data);
+        $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $srtSecurity = $this->sanitizeSrtSecurity($data);
@@ -873,6 +964,10 @@ class PipelineManager
                 audio_codec = :audio_codec,
                 audio_output_channels = :audio_output_channels,
                 audio_track_mode = :audio_track_mode,
+                ts_video_pid = :ts_video_pid,
+                ts_audio_pid = :ts_audio_pid,
+                ts_pmt_pid = :ts_pmt_pid,
+                ts_program = :ts_program,
                 audio_bitrate = :audio_bitrate,
                 video_speed_preset = :video_speed_preset
             WHERE id = :id
@@ -897,6 +992,10 @@ class PipelineManager
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
             ':audio_track_mode' => $audio['track_mode'],
+            ':ts_video_pid' => $ts['video'],
+            ':ts_audio_pid' => $ts['audio'],
+            ':ts_pmt_pid' => $ts['pmt'],
+            ':ts_program' => $ts['program'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -1066,6 +1165,7 @@ class PipelineManager
         // TZ nur für die Pipeline selbst gesetzt (fuer clockoverlay) - aendert nicht die Systemzeitzone des Servers
         $prefix = "env TZ=Europe/Berlin GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
         $tap = $this->tapBranch(self::tapPort('pipeline', (int)$p['id']));
+        $mux = $this->muxSetupFor($p);
 
         if ($sourceType === 'decklink') {
             $decklink = $this->sanitizeDecklink([
@@ -1088,13 +1188,13 @@ class PipelineManager
                 "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
                 "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
+                "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
             $audio = $this->clampAudioToCapture($this->sanitizeAudio($p), (int)$decklink['audio_channels']);
             $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels'], $audio['codec']);
             $audioBranch = "decklinkaudiosrc device-number={$decklink['device_number']} channels={$decklink['audio_channels']} ! " .
-                $this->buildAudioProcessing((int)$decklink['audio_channels'], $audio, $channelSelect);
+                $this->buildAudioProcessing((int)$decklink['audio_channels'], $audio, $channelSelect, $mux);
 
             return $prefix . $videoBranch . $audioBranch;
         }
@@ -1108,12 +1208,12 @@ class PipelineManager
 
             $videoBranch = "demux.video_0 ! queue ! decodebin ! videoconvert ! {$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
+                "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} {$tap}";
 
             $audio = $this->sanitizeAudio($p);
             $audioBranch = "demux.audio_0 ! queue ! decodebin ! audioconvert ! audioresample ! " .
-                $this->buildAudioEncoderChain($audio);
+                $this->buildAudioEncoderChain($audio, $mux['audioPad'](0));
 
             return $prefix . "filesrc location={$fileArg} ! qtdemux name=demux " . $videoBranch . $audioBranch;
         }
@@ -1126,12 +1226,12 @@ class PipelineManager
             "video/x-raw,format={$videoFormat},width={$width},height={$height},framerate={$framerate}/1 ! " .
             "videoconvert ! {$clockOverlayElement}" .
             "{$videoEncoder} ! " .
-            "mpegtsmux name=mux latency=200000000 ! tee name=tap ! " .
+            "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
             "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
         $audio = $this->sanitizeAudio($p);
         $audioTestWave = $this->sanitizeAudioTestWave($p);
-        $audioBranch = "audiotestsrc wave={$audioTestWave} freq=1000 is-live=true ! " . $this->buildAudioEncoderChain($audio);
+        $audioBranch = "audiotestsrc wave={$audioTestWave} freq=1000 is-live=true ! " . $this->buildAudioEncoderChain($audio, $mux['audioPad'](0));
 
         return $prefix . $videoBranch . $audioBranch;
     }
@@ -1248,6 +1348,7 @@ class PipelineManager
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
         $audio = $this->sanitizeAudio($data);
+        $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $keyframeInterval = (int)($data['video_keyframe_interval'] ?? 0);
@@ -1276,6 +1377,10 @@ class PipelineManager
                 audio_codec = :audio_codec,
                 audio_output_channels = :audio_output_channels,
                 audio_track_mode = :audio_track_mode,
+                ts_video_pid = :ts_video_pid,
+                ts_audio_pid = :ts_audio_pid,
+                ts_pmt_pid = :ts_pmt_pid,
+                ts_program = :ts_program,
                 audio_bitrate = :audio_bitrate,
                 video_codec = :video_codec,
                 video_rate_control = :video_rate_control,
@@ -1314,6 +1419,10 @@ class PipelineManager
             ':audio_codec' => $audio['codec'],
             ':audio_output_channels' => $audio['channels'],
             ':audio_track_mode' => $audio['track_mode'],
+            ':ts_video_pid' => $ts['video'],
+            ':ts_audio_pid' => $ts['audio'],
+            ':ts_pmt_pid' => $ts['pmt'],
+            ':ts_program' => $ts['program'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_codec' => $videoCodec,
             ':video_rate_control' => $rateControl,
