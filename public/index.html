@@ -578,19 +578,64 @@
             <span class="hint" style="margin: 0;" x-text="statsSrtLine(it.config)"></span>
           </span>
         </div>
-        <template x-if="it.direction === 'receiver'">
-          <div class="hint">Empfänger: Stromdaten (Bitrate, PIDs, Timing) gibt es hier nicht, weil der Strom beim Sender gemessen wird. SRT-Kennzahlen des Empfangs folgen mit der nächsten Ausbaustufe.</div>
+        <template x-if="it.note">
+          <div class="hint" x-text="it.note"></div>
         </template>
-        <template x-if="it.direction === 'sender' && !(it.probe && it.probe.active)">
+        <template x-if="it.direction === 'receiver' && it.srt">
+          <div>
+            <div class="sg">
+              <div>
+                <div class="k">Empfangsrate (SRT)</div>
+                <div class="v" x-text="fmtMbit(it.srt.srt.receive_rate_mbps)"></div>
+                <div class="s" x-text="'verfügbare Bandbreite ' + fmtMbit(it.srt.srt.bandwidth_mbps)"></div>
+              </div>
+              <div>
+                <div class="k">Laufzeit (RTT)</div>
+                <div class="v" x-text="fmtNum(it.srt.srt.rtt_ms, 1) + ' ms'"></div>
+                <div class="s" x-text="'Latenz-Puffer ' + (it.srt.srt.negotiated_latency_ms ?? '–') + ' ms'"></div>
+              </div>
+              <div>
+                <div class="k">Paketverlust</div>
+                <div class="v" :class="srtLossClass(it.srt.srt)" x-text="srtLossText(it.srt.srt)"></div>
+                <div class="s" x-text="'wiederholt und repariert: ' + (it.srt.srt.packets_received_retransmitted ?? 0)"></div>
+              </div>
+              <div>
+                <div class="k">Endgültig verworfen</div>
+                <div class="v" :class="(it.srt.srt.packets_received_dropped || 0) > 0 ? 'st-bad' : 'st-ok'" x-text="it.srt.srt.packets_received_dropped ?? 0"></div>
+                <div class="s">zu spät oder nicht repariert, das ergibt Bildfehler (Latenz erhöhen)</div>
+              </div>
+              <div>
+                <div class="k">Puffer vor dem Ausgang</div>
+                <div class="v" x-text="((it.srt.queues && it.srt.queues.vq) ? it.srt.queues.vq.ms : '–') + ' ms Bild · ' + ((it.srt.queues && it.srt.queues.aq) ? it.srt.queues.aq.ms : '–') + ' ms Ton'"></div>
+                <div class="s" x-text="'Ausgang: ' + srtSinkLine(it.srt.sinks)"></div>
+              </div>
+              <div>
+                <div class="k">Empfangen gesamt</div>
+                <div class="v" x-text="formatBytes(it.srt.srt.bytes_received_total || 0)"></div>
+                <div class="s" x-text="'Wiederholungsanfragen (NACK) gesendet: ' + (it.srt.srt.packet_nack_sent ?? 0)"></div>
+              </div>
+            </div>
+            <div style="margin-top: 0.6rem;">
+              <div class="k" style="color: #8b93a1; font-size: 0.7rem; text-transform: uppercase;">Empfangsrate, letzte 3 Minuten</div>
+              <svg viewBox="0 0 300 44" preserveAspectRatio="none" style="width: 100%; height: 44px; background: #14171c; border-radius: 4px;">
+                <polyline fill="none" stroke="#22c55e" stroke-width="1.5" :points="statsSpark('r' + it.key)"></polyline>
+              </svg>
+            </div>
+          </div>
+        </template>
+        <template x-if="it.direction === 'receiver' && !it.srt && !it.note">
+          <div class="hint">Keine SRT-Zahlen vom Empfänger. Er muss nach dem Update einmal neu gestartet werden, oder er ist gerade gestoppt.</div>
+        </template>
+        <template x-if="!it.note && !(it.probe && it.probe.active)">
           <div class="hint" x-text="'Kein Messwert: ' + ((it.probe && it.probe.error) || 'noch nicht gemessen') + ((it.probe && it.probe.error === 'keine Daten am Abgriff') ? ' (Die Pipeline muss nach dem Update einmal neu gestartet werden, damit der Messabgriff aktiv ist.)' : '')"></div>
         </template>
-        <template x-if="it.direction === 'sender' && it.probe && it.probe.active">
+        <template x-if="it.probe && it.probe.active">
           <div>
             <div class="sg">
               <div>
                 <div class="k">Bitrate gesamt</div>
                 <div class="v" x-text="fmtKbit(it.probe.total_kbit)"></div>
-                <div class="s" x-text="'Video ' + fmtKbit((it.probe.streams.find(s => s.role === 'video') || {}).kbit) + (it.config.video_kbit ? ' · Soll ' + fmtKbit(it.config.video_kbit) : '') + ' (inkl. TS-Overhead)'"></div>
+                <div class="s" x-text="'Video ' + fmtKbit((it.probe.streams.find(s => s.role === 'video') || {}).kbit) + (it.direction === 'sender' && it.config.video_kbit ? ' · Soll ' + fmtKbit(it.config.video_kbit) : '') + ' (inkl. TS-Overhead)'"></div>
               </div>
               <div>
                 <div class="k">Video</div>
@@ -605,7 +650,7 @@
               <div>
                 <div class="k">Audio</div>
                 <div class="v" :class="it.probe.audio ? '' : 'st-bad'" x-text="statsAudioLine(it.probe.audio, it.probe.audios)"></div>
-                <div class="s" x-text="it.config.audio_codec ? 'Soll ' + it.config.audio_codec.toUpperCase() + (it.config.audio_kbit ? ' ' + it.config.audio_kbit + ' kbit/s' : '') + (it.config.audio_channels ? ', ' + it.config.audio_channels + ' Kanäle' + (it.config.audio_track_mode === 'pairs' && it.config.audio_channels > 2 ? ' (' + (it.config.audio_channels / 2) + ' Stereo-Spuren)' : '') : '') : ''"></div>
+                <div class="s" x-text="it.direction === 'receiver' ? (it.config.sdi_out_channels ? 'SDI-Ausgabe: ' + it.config.sdi_out_channels + ' Kanäle' : '') : it.config.audio_codec ? 'Soll ' + it.config.audio_codec.toUpperCase() + (it.config.audio_kbit ? ' ' + it.config.audio_kbit + ' kbit/s' : '') + (it.config.audio_channels ? ', ' + it.config.audio_channels + ' Kanäle' + (it.config.audio_track_mode === 'pairs' && it.config.audio_channels > 2 ? ' (' + (it.config.audio_channels / 2) + ' Stereo-Spuren)' : '') : '') : ''"></div>
               </div>
               <div>
                 <div class="k">Gleichmäßigkeit</div>
@@ -1666,6 +1711,11 @@ function app() {
         if (!data.error) {
           const now = performance.now() / 1000;
           for (const it of data.items) {
+            if (it.srt && it.srt.srt && it.srt.srt.receive_rate_mbps != null) {
+              const hr = this.statsHist['r' + it.key] = this.statsHist['r' + it.key] || [];
+              hr.push(it.srt.srt.receive_rate_mbps * 1000);
+              if (hr.length > 60) hr.shift();
+            }
             if (it.probe && it.probe.active && it.probe.total_kbit != null) {
               const h = this.statsHist[it.key] = this.statsHist[it.key] || [];
               h.push(it.probe.total_kbit);
@@ -1725,7 +1775,7 @@ function app() {
       const parts = [];
       if (v.profile) parts.push('H.264 ' + v.profile + '@' + v.level + (v.interlaced ? ', Halbbilder' : ', progressiv'));
       const c = it.config;
-      const sizeApplies = c && (c.scaled || (c.source_type && c.source_type !== 'decklink'));
+      const sizeApplies = it.direction === 'sender' && c && (c.scaled || (c.source_type && c.source_type !== 'decklink'));
       if (sizeApplies && c.width && c.height && v.width && (c.width !== v.width || c.height !== v.height)) {
         parts.push('Soll ' + c.width + '×' + c.height);
       }
@@ -1755,6 +1805,30 @@ function app() {
       const min = Math.min(...h) * 0.9;
       const span = (max - min) || 1;
       return h.map((v, i) => (i * 300 / 59).toFixed(1) + ',' + (42 - (v - min) / span * 40).toFixed(1)).join(' ');
+    },
+
+    fmtMbit(v) {
+      return v === undefined || v === null ? '–' : Number(v).toFixed(2).replace('.', ',') + ' Mbit/s';
+    },
+
+    fmtNum(v, digits) {
+      return v === undefined || v === null ? '–' : Number(v).toFixed(digits).replace('.', ',');
+    },
+
+    srtLossText(s) {
+      const lost = s.packets_received_lost || 0;
+      const total = lost + (s.packets_received || 0);
+      return lost + ' Pakete (' + (total ? lost / total * 100 : 0).toFixed(2).replace('.', ',') + ' %)';
+    },
+
+    srtLossClass(s) {
+      return (s.packets_received_lost || 0) === 0 ? 'st-ok' : 'st-warn';
+    },
+
+    srtSinkLine(sinks) {
+      const v = sinks && sinks.vsink;
+      if (!v) return '–';
+      return (v.rendered ?? '–') + ' Bilder ausgegeben, ' + (v.dropped ?? 0) + ' verworfen';
     },
 
     nicRate(name, dir) {

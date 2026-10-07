@@ -20,3 +20,4 @@ data/sessions/
 # Statistik (Sperrdatei und letzter Messwert)
 data/streamstats.lock
 data/streamstats_cache.json
+data/rxstats_*.json

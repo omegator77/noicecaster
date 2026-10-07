@@ -565,7 +565,14 @@ class PipelineManager
      */
     public static function tapPort(string $kind, int $id): int
     {
-        return ($kind === 'target' ? 49000 : 47000) + $id;
+        $base = ['pipeline' => 47000, 'target' => 49000, 'receiver' => 50000][$kind] ?? 47000;
+        return $base + $id;
+    }
+
+    /** JSON-Datei, in die der Empfaenger jede Sekunde seine SRT-Zahlen schreibt (siehe scripts/srt_to_sdi_receiver.py). */
+    public static function receiverStatsPath(int $id): string
+    {
+        return __DIR__ . "/../data/rxstats_{$id}.json";
     }
 
     /**
@@ -1205,7 +1212,9 @@ class PipelineManager
             ' --device ' . (int)$decklink['device_number'] .
             ' --mode ' . escapeshellarg($outputMode) .
             ' --profile ' . escapeshellarg($decklink['profile']) .
-            ' --audio-channels ' . (int)$decklink['audio_channels'];
+            ' --audio-channels ' . (int)$decklink['audio_channels'] .
+            ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id'])) .
+            ' --tap-port ' . self::tapPort('receiver', (int)$p['id']);
         if ($srtSecurity['passphrase'] !== null) {
             $args .= ' --passphrase ' . escapeshellarg($srtSecurity['passphrase']) . ' --pbkeylen ' . (int)$srtSecurity['pbkeylen'];
         }

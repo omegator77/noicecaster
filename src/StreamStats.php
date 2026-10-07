@@ -36,6 +36,7 @@ class StreamStats
             $previous = self::readCache();
             $items = self::buildItems($manager);
             self::runProbes($items, $previous['items'] ?? []);
+            self::attachReceiverStats($items);
             $result = ['items' => $items, 'time' => microtime(true), 'cached' => false];
             @file_put_contents(self::dataDir() . '/streamstats_cache.json', json_encode($result));
             $result['nics'] = NetworkManager::counters();
@@ -62,13 +63,18 @@ class StreamStats
                 continue;
             }
             $sender = ($p['pipeline_direction'] ?? 'sdi_to_srt') === 'sdi_to_srt';
-            $items[] = [
+            $testPattern = !$sender && !empty($p['test_pattern_enabled']);
+            $item = [
                 'key' => 'p' . $p['id'],
                 'name' => (string)$p['name'] . ($sender ? ' / ' . ($p['target_name'] ?? 'Ziel 1') : ''),
                 'direction' => $sender ? 'sender' : 'receiver',
-                'port' => $sender ? PipelineManager::tapPort('pipeline', (int)$p['id']) : null,
+                'port' => $testPattern ? null : PipelineManager::tapPort($sender ? 'pipeline' : 'receiver', (int)$p['id']),
                 'config' => self::config($p),
             ];
+            if ($testPattern) {
+                $item['note'] = 'Der Ausgang gibt ein Testbild aus (kein SRT-Empfang), daher gibt es keine Stromdaten.';
+            }
+            $items[] = $item;
             if (!$sender) {
                 continue;
             }
@@ -94,6 +100,7 @@ class StreamStats
             'source_type' => $row['source_type'] ?? 'decklink',
             // Beim SDI-Eingang gilt die Bildgroesse der Buchse; width/height zaehlen nur bei Skalierung
             'scaled' => !empty($row['video_scale_enabled']),
+            'sdi_out_channels' => isset($row['decklink_audio_channels']) ? (int)$row['decklink_audio_channels'] : null,
             'video_kbit' => isset($row['bitrate']) ? (int)$row['bitrate'] : null,
             'width' => isset($row['width']) ? (int)$row['width'] : null,
             'height' => isset($row['height']) ? (int)$row['height'] : null,
@@ -112,13 +119,28 @@ class StreamStats
         ];
     }
 
+    /** SRT-Zahlen der Empfaenger: der Empfaenger schreibt sie jede Sekunde in eine Datei (aelter als 6 s = veraltet). */
+    private static function attachReceiverStats(array &$items): void
+    {
+        foreach ($items as $i => $item) {
+            if ($item['direction'] !== 'receiver' || strpos($item['key'], 'p') !== 0) {
+                continue;
+            }
+            $raw = @file_get_contents(PipelineManager::receiverStatsPath((int)substr($item['key'], 1)));
+            $data = $raw ? json_decode($raw, true) : null;
+            if (is_array($data) && (microtime(true) - (float)($data['time'] ?? 0)) < 6) {
+                $items[$i]['srt'] = $data;
+            }
+        }
+    }
+
     /** Startet alle Auswertungen gleichzeitig und sammelt die Ergebnisse. */
     private static function runProbes(array &$items, array $previous): void
     {
         $script = __DIR__ . '/../scripts/ts_probe.py';
         $procs = [];
         foreach ($items as $i => $item) {
-            if ($item['direction'] !== 'sender') {
+            if ($item['port'] === null) {
                 continue;
             }
             $proc = proc_open(
