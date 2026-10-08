@@ -61,6 +61,8 @@ def build(a):
     #   A  = unveraendert (Quelle bereits Halbbild, oder der Ausgangsmodus ist progressiv)
     #   B1 = progressiv mit Halbbildrate (50p/59,94p/60p): jedes zweite Bild wird ein Halbbild (1:1)
     #   B2 = progressiv mit Vollbildrate (25p/23,98p/30p ...): auf die Bildrate des Modus bringen, Halbbilder 2:2
+    # Zusaetzlich: MPEG-2-Decoder melden den Zeilensprung als "mixed" (je Bild); der DeckLink-Ausgang im
+    # Halbbild-Modus nimmt nur "interleaved" an, deshalb wird das Caps-Event in on_video_pad umgeschrieben.
     rates = interlaced_mode_rates(a.mode)
     video = (
         "queue name=vq ! decodebin name=vdec  "
@@ -154,6 +156,27 @@ def build(a):
         way = "A"
         if rates and (mode or "progressive") == "progressive" and pipe.get_by_name("thB1") is not None:
             way = "B1" if fps > 40 else "B2"
+        elif rates and mode == "mixed":
+            def mixed_to_interleaved(src_pad, info):
+                ev = info.get_event()
+                try:
+                    is_caps = ev is not None and ev.type == Gst.EventType.CAPS
+                except ValueError:  # Ereignistyp, den die Python-Enum nicht kennt
+                    return Gst.PadProbeReturn.OK
+                if is_caps:
+                    caps = ev.parse_caps()
+                    st0 = caps.get_structure(0)
+                    if st0 is not None and st0.get_string("interlace-mode") == "mixed":
+                        new_st = st0.copy()
+                        new_st.set_value("interlace-mode", "interleaved")
+                        new_st.set_value("field-order", "top-field-first")
+                        new = Gst.Caps.new_empty()
+                        new.append_structure(new_st)
+                        src_pad.push_event(Gst.Event.new_caps(new))
+                        return Gst.PadProbeReturn.DROP
+                return Gst.PadProbeReturn.OK
+
+            pad.add_probe(Gst.PadProbeType.EVENT_DOWNSTREAM, mixed_to_interleaved)
         head = pipe.get_by_name("th" + way)
         hsink = head.get_static_pad("sink")
         old = hsink.get_peer()

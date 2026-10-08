@@ -119,8 +119,50 @@ class PipelineManager
         }
     }
 
+    /**
+     * Prueft Zahlenbereiche, Aufzaehlungen und die Zieladresse. Nur vorhandene Felder werden geprueft.
+     * Wichtig auch fuer die Sicherheit: die Zieladresse landet im Shell-Befehl der Pipeline (srt://HOST:PORT),
+     * ein Wert wie $(...) wuerde dort ausgefuehrt. Darum nur Hostnamen und IP-Adressen zulassen.
+     */
+    private function validateSettings(array $data): void
+    {
+        $ranges = [
+            'srt_port' => ['SRT-Port', 1, 65535],
+            'srt_latency' => ['SRT-Latenz', 20, 30000],
+            'bitrate' => ['Video-Bitrate', 100, 100000],
+            'audio_bitrate' => ['Audio-Bitrate', 32, 2048],
+            'width' => ['Breite', 64, 8192],
+            'height' => ['Hoehe', 64, 8192],
+            'framerate' => ['Bildrate', 1, 120],
+            'video_keyframe_interval' => ['Keyframe-Intervall', 0, 1000],
+            'decklink_device_number' => ['SDI-Anschluss', 0, 3],
+        ];
+        foreach ($ranges as $key => [$label, $min, $max]) {
+            if (!array_key_exists($key, $data) || $data[$key] === null || $data[$key] === '') {
+                continue;
+            }
+            if (!is_numeric($data[$key]) || (float)$data[$key] != (int)$data[$key] || (int)$data[$key] < $min || (int)$data[$key] > $max) {
+                throw new RuntimeException("{$label} muss eine ganze Zahl zwischen {$min} und {$max} sein");
+            }
+        }
+        if (isset($data['srt_mode']) && !in_array($data['srt_mode'], ['listener', 'caller'], true)) {
+            throw new RuntimeException("SRT-Modus muss 'listener' oder 'caller' sein");
+        }
+        $host = $data['srt_target_host'] ?? null;
+        if ($host !== null && $host !== '' &&
+            !preg_match('/^[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?$/', (string)$host)) {
+            throw new RuntimeException("Ziel-Adresse darf nur Buchstaben, Ziffern, Punkt, Doppelpunkt und Bindestrich enthalten");
+        }
+        foreach (['name' => 100, 'target_name' => 100, 'srt_streamid' => 512] as $key => $max) {
+            if (isset($data[$key]) && strlen((string)$data[$key]) > $max) {
+                throw new RuntimeException("{$key} ist zu lang (maximal {$max} Zeichen)");
+            }
+        }
+    }
+
     public function create(array $data): int
     {
+        $this->validateSettings($data);
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
         $audio = $this->sanitizeAudio($data);
@@ -773,9 +815,14 @@ class PipelineManager
             return;
         }
         posix_kill($pid, SIGTERM);
-        usleep(500000);
+        // Die DeckLink-Karte wird erst frei, wenn der Prozess sauber beendet ist; ein zu frueher SIGKILL oder ein
+        // sofortiger Neustart liess den naechsten Start sporadisch scheitern ("Failed to stop streams").
+        for ($i = 0; $i < 40 && $this->isProcRunning($pid); $i++) {
+            usleep(100000);
+        }
         if ($this->isProcRunning($pid)) {
             posix_kill($pid, SIGKILL);
+            usleep(500000);
         }
     }
 
@@ -801,22 +848,36 @@ class PipelineManager
         $cmd = $this->buildDistributorCommand($p);
         $logFile = __DIR__ . "/../data/distributor_{$p['id']}.log";
         $fullCmd = "nohup {$cmd} > " . escapeshellarg($logFile) . " 2>&1 & echo $!";
-        $pid = (int)shell_exec($fullCmd);
 
-        $stmt = $this->db->prepare("UPDATE pipelines SET distributor_status = 'running', distributor_pid = :pid WHERE id = :id");
-        $stmt->execute([':pid' => $pid, ':id' => $p['id']]);
+        // Zwei Versuche: direkt nach dem Beenden einer vorherigen Aufnahme ist die Karte manchmal noch kurz belegt
+        // und der Verteiler bricht sofort ab (Logzeile "Failed to stop streams ... 0x80000009").
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $pid = (int)shell_exec($fullCmd);
 
-        // Auf die shm-Sockets warten, statt blind eine feste Zeit zu schlafen - eine feste Wartezeit
-        // war zu kurz und fuehrte zu "Connection refused" beim ersten Ziel (Race Condition,
-        // beobachtet 2026-09-30). Timeout nach 5s mit klarer Fehlermeldung statt endlosem Warten.
-        $waitedMs = 0;
-        while ((!file_exists($videoShmFile) || !file_exists($audioShmFile)) && $waitedMs < 5000) {
-            usleep(100000);
-            $waitedMs += 100;
+            $stmt = $this->db->prepare("UPDATE pipelines SET distributor_status = 'running', distributor_pid = :pid WHERE id = :id");
+            $stmt->execute([':pid' => $pid, ':id' => $p['id']]);
+
+            // Auf die shm-Sockets warten, statt blind eine feste Zeit zu schlafen - eine feste Wartezeit
+            // war zu kurz und fuehrte zu "Connection refused" beim ersten Ziel (Race Condition,
+            // beobachtet 2026-09-30). Timeout nach 5s; stirbt der Prozess vorher, nicht weiter warten.
+            $waitedMs = 0;
+            while ((!file_exists($videoShmFile) || !file_exists($audioShmFile)) && $waitedMs < 5000 && $this->isProcRunning($pid)) {
+                usleep(100000);
+                $waitedMs += 100;
+            }
+            if (file_exists($videoShmFile) && file_exists($audioShmFile)) {
+                return;
+            }
+            $this->stopProcess($pid);
+            @unlink($videoShmFile);
+            @unlink($audioShmFile);
+            if ($attempt === 1) {
+                sleep(2);
+            }
         }
-        if (!file_exists($videoShmFile) || !file_exists($audioShmFile)) {
-            throw new RuntimeException("Verteiler-Prozess hat die Shared-Memory-Sockets nicht rechtzeitig angelegt - siehe distributor_{$p['id']}.log");
-        }
+        $stmt = $this->db->prepare("UPDATE pipelines SET distributor_status = 'stopped', distributor_pid = NULL WHERE id = :id");
+        $stmt->execute([':id' => $p['id']]);
+        throw new RuntimeException("Verteiler-Prozess hat die Shared-Memory-Sockets nicht rechtzeitig angelegt - siehe distributor_{$p['id']}.log");
     }
 
     private function anyTargetRunning(int $pipelineId): bool
@@ -896,6 +957,7 @@ class PipelineManager
         if (!$this->isMultiTargetEligible($p)) {
             throw new RuntimeException("Zusaetzliche SRT-Ziele sind nur fuer SDI-Eingangs-Pipelines moeglich.");
         }
+        $this->validateSettings($data);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
@@ -942,6 +1004,7 @@ class PipelineManager
         if ($target['status'] === 'running') {
             throw new RuntimeException("Laufendes Ziel kann nicht bearbeitet werden. Bitte zuerst stoppen.");
         }
+        $this->validateSettings($data);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
@@ -1354,6 +1417,7 @@ class PipelineManager
 
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
+        $this->validateSettings($data);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
@@ -1506,7 +1570,7 @@ class PipelineManager
         return self::$cpuCoreCount;
     }
 
-    public function probeDecklinkSignal(int $deviceNumber, string $connection): array
+    public function probeDecklinkSignal(int $deviceNumber, string $connection, bool $fresh = false): array
     {
         if ($deviceNumber < 0 || $deviceNumber > 3) {
             $deviceNumber = 0;
@@ -1515,11 +1579,42 @@ class PipelineManager
             $connection = 'auto';
         }
 
+        // Eine Probe oeffnet die Karte fuer bis zu 4,7 s und belegt dabei einen der wenigen PHP-Worker. Mehrere offene
+        // Seiten fragen alle 15 s je Eingang nach: darum Ergebnis 12 s zwischenspeichern, und waehrend schon eine Probe
+        // laeuft das letzte Ergebnis liefern, statt eine zweite zu starten ($fresh = true: Schaltflaeche "Signal pruefen").
+        $cacheFile = __DIR__ . "/../data/probe_{$deviceNumber}.json";
+        $lockFile = __DIR__ . "/../data/probe_{$deviceNumber}.lock";
+        $cached = null;
+        if (is_file($cacheFile)) {
+            $c = json_decode((string)@file_get_contents($cacheFile), true);
+            if (is_array($c) && isset($c['result'], $c['time'])) {
+                $cached = $c;
+                if (!$fresh && time() - (int)$c['time'] < 12) {
+                    return $c['result'];
+                }
+            }
+        }
+        $lock = @fopen($lockFile, 'c');
+        if ($lock !== false && !flock($lock, LOCK_EX | LOCK_NB)) {
+            fclose($lock);
+            if ($cached !== null) {
+                return $cached['result'];
+            }
+            return ['signal' => false, 'width' => null, 'height' => null, 'framerate' => null, 'error' => 'Pruefung laeuft gerade'];
+        }
+
         $script = escapeshellarg(__DIR__ . '/../scripts/probe_decklink.py');
         $cmd = "timeout 6 python3 {$script} " . (int)$deviceNumber . " " . escapeshellarg($connection) . " 4 2>&1";
         $output = shell_exec($cmd);
 
         $json = json_decode(trim((string)$output), true);
+        if (is_array($json) && !isset($json['error'])) {
+            @file_put_contents($cacheFile, json_encode(['time' => time(), 'result' => $json]));
+        }
+        if ($lock !== false) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
         if (!is_array($json)) {
             return [
                 'signal' => false,

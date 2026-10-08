@@ -106,7 +106,7 @@ try {
         case 'decklink_probe':
             $device = (int)($_GET['device'] ?? 0);
             $connection = $_GET['connection'] ?? 'auto';
-            echo json_encode($manager->probeDecklinkSignal($device, $connection));
+            echo json_encode($manager->probeDecklinkSignal($device, $connection, ($_GET['fresh'] ?? '') === '1'));
             break;
 
         case 'decklink_ports_list':

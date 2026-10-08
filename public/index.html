@@ -369,7 +369,7 @@
         <div class="hint" x-show="port.role === 'input' && port.mode === 'auto'">"Auto" erkennt Auflösung/Framerate automatisch anhand des anliegenden Signals.</div>
 
         <div x-show="port.role === 'input'" style="margin-top: 0.5rem;">
-          <button type="button" class="btn-secondary" @click="checkPortSignal(port)" :disabled="port.checking">
+          <button type="button" class="btn-secondary" @click="checkPortSignal(port, true)" :disabled="port.checking">
             <span x-text="port.checking ? 'Prüfe...' : 'Signal prüfen'"></span>
           </button>
           <template x-if="port.signalResult">
@@ -2371,12 +2371,13 @@ function app() {
       }
     },
 
-    async checkPortSignal(port) {
+    async checkPortSignal(port, manual = false) {
       port.checking = true;
       port.signalResult = null;
       this.errorMsg = '';
       try {
         const params = new URLSearchParams({ device: port.device_number, connection: 'auto' });
+        if (manual) params.set('fresh', '1');
         const res = await fetch('api.php?action=decklink_probe&' + params.toString());
         port.signalResult = await res.json();
       } catch (e) {
@@ -2388,8 +2389,10 @@ function app() {
 
     isPortBusy(port) {
       // Ein laufender Capture-Prozess belegt die Karte - parallel per Probe-Skript draufzugreifen könnte den Stream stören
-      return this.pipelines.some(p => p.status === 'running' && p.source_type === 'decklink' &&
-        p.pipeline_direction !== 'srt_to_sdi' && p.decklink_device_number === port.device_number);
+      // Auch ein Verteiler (laeuft fuer weitere SRT-Ziele weiter, wenn Ziel 1 gestoppt ist) haelt die Karte offen
+      return this.pipelines.some(p => (p.status === 'running' || p.distributor_status === 'running') &&
+        p.source_type === 'decklink' && p.pipeline_direction !== 'srt_to_sdi' &&
+        p.decklink_device_number === port.device_number);
     },
 
     ledClass(port) {
@@ -2415,6 +2418,7 @@ function app() {
       }
       let anyError = false;
       for (const port of this.decklinkPorts) {
+        if (port.role === 'input' && this.isPortBusy(port)) port.signalResult = null; // altes Ergebnis nicht stehen lassen
         if (port.role === 'input' && !port.checking && !this.isPortBusy(port)) {
           await this.checkPortSignal(port);
           if (port.signalResult && port.signalResult.error) anyError = true;

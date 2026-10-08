@@ -21,3 +21,5 @@ data/sessions/
 data/streamstats.lock
 data/streamstats_cache.json
 data/rxstats_*.json
+data/probe_*.json
+data/probe_*.lock

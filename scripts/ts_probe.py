@@ -175,6 +175,46 @@ def is_keyframe(head):
         i += 3
 
 
+MPEG2_FPS = {1: 24000 / 1001, 2: 24.0, 3: 25.0, 4: 30000 / 1001, 5: 30.0, 6: 50.0, 7: 60000 / 1001, 8: 60.0}
+MPEG2_PROFILES = {5: 'Simple', 4: 'Main', 3: 'SNR', 2: 'Spatial', 1: 'High'}
+MPEG2_LEVELS = {10: 'Low', 8: 'Main', 6: 'High-1440', 4: 'High'}
+
+
+def is_keyframe_mpeg2(head):
+    """Sequenzkopf (B3), GOP-Kopf (B8) oder I-Bild (picture_coding_type 1) am Anfang des Bildes."""
+    i = 0
+    while True:
+        i = head.find(b'\x00\x00\x01', i)
+        if i < 0 or i + 3 >= len(head):
+            return False
+        code = head[i + 3]
+        if code in (0xB3, 0xB8):
+            return True
+        if code == 0x00 and i + 5 < len(head) and (head[i + 5] >> 3) & 7 == 1:
+            return True
+        i += 3
+
+
+def find_seq_mpeg2(buf):
+    """Breite, Hoehe, Bildrate, Profil und Zeilensprung aus Sequenzkopf (B3) und Sequenzerweiterung (B5)."""
+    i = buf.find(b'\x00\x00\x01\xb3')
+    if i < 0 or i + 11 > len(buf):
+        return None
+    b = buf[i + 4:]
+    width = (b[0] << 4) | (b[1] >> 4)
+    height = ((b[1] & 0x0F) << 8) | b[2]
+    fps = MPEG2_FPS.get(b[3] & 0x0F)
+    profile, level, interlaced = 'MPEG-2', '', None
+    j = buf.find(b'\x00\x00\x01\xb5', i)
+    if j >= 0 and j + 8 < len(buf) and (buf[j + 4] >> 4) == 1:
+        pl = ((buf[j + 4] & 0x0F) << 4) | (buf[j + 5] >> 4)
+        profile = MPEG2_PROFILES.get((pl >> 4) & 7, 'MPEG-2')
+        level = MPEG2_LEVELS.get(pl & 0x0F, '')
+        interlaced = not ((buf[j + 5] >> 3) & 1)
+    return {'profile': profile, 'level': level, 'width': width, 'height': height,
+            'interlaced': bool(interlaced), 'sps_fps': fps}
+
+
 def find_sps(buf):
     i = 0
     while True:
@@ -323,6 +363,8 @@ def analyse(packets):
     es_first = {}          # pid -> erste Nutzdaten (fuer Audio-Header)
     video_buf = bytearray()
     video_pid = audio_pid = None
+    video_type = None
+    mpeg2_seq = None
     audio_pids = []        # alle Audio-Spuren (z. B. mehrere Stereo-Paare)
     cur_pes = {}           # pid -> bytearray des laufenden PES (Anfang)
     vhead = None           # Anfang des laufenden Videobildes
@@ -392,6 +434,7 @@ def analyse(packets):
             for st in streams:
                 if st['type'] in VIDEO_TYPES and video_pid is None:
                     video_pid = st['pid']
+                    video_type = st['type']
                 elif st['type'] in AUDIO_TYPES:
                     audio_pids.append(st['pid'])
                     if audio_pid is None:
@@ -411,7 +454,9 @@ def analyse(packets):
             if pid == video_pid:
                 if pusi:
                     if vhead is not None:
-                        vframes.append(is_keyframe(bytes(vhead)))
+                        vframes.append((is_keyframe_mpeg2 if video_type == 2 else is_keyframe)(bytes(vhead)))
+                        if video_type == 2 and mpeg2_seq is None:
+                            mpeg2_seq = find_seq_mpeg2(bytes(vhead))
                     vhead = bytearray(payload[9 + payload[8]:]) if len(payload) > 9 else bytearray()
                 elif vhead is not None and len(vhead) < 2500:
                     vhead += payload
@@ -449,7 +494,7 @@ def analyse(packets):
     # Video
     if video_pid is not None:
         v = {'pid': video_pid}
-        sps = find_sps(bytes(video_buf)) if video_buf else None
+        sps = (mpeg2_seq or find_seq_mpeg2(bytes(video_buf))) if video_type == 2 else (find_sps(bytes(video_buf)) if video_buf else None)
         if sps:
             v.update({k: sps[k] for k in ('profile', 'level', 'width', 'height', 'interlaced')})
         iv = intervals(pes.get(video_pid, []))
