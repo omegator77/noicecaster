@@ -41,6 +41,9 @@ class PipelineManager
     ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
     private const VIDEO_RATE_CONTROLS = ['cbr', 'vbr'];
+    // Chroma-Subsampling und Bittiefe des Videostroms (H.264/H.265; MPEG-2 nur 8 Bit)
+    private const VIDEO_CHROMA = ['420', '422'];
+    private const VIDEO_BITDEPTHS = [8, 10];
     // x264enc/x265enc speed-preset - nur bis 'medium' erlaubt, langsamere Presets (slow/slower/
     // veryslow/placebo) schaffen es bei 1080i/1080p-Echtzeitkodierung typischerweise nicht mehr
     // rechtzeitig und wuerden Frames droppen statt Latenz/Qualitaet zu verbessern.
@@ -177,14 +180,15 @@ class PipelineManager
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
+        $vf = $this->sanitizeVideoFormat($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $keyframeInterval = (int)($data['video_keyframe_interval'] ?? 0);
         $scaleEnabled = (int)($data['video_scale_enabled'] ?? 0) === 1 ? 1 : 0;
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -211,6 +215,8 @@ class PipelineManager
             ':ts_audio_pid' => $ts['audio'],
             ':ts_pmt_pid' => $ts['pmt'],
             ':ts_program' => $ts['program'],
+            ':video_chroma' => $vf['chroma'],
+            ':video_bitdepth' => $vf['depth'],
             ':video_codec' => $videoCodec,
             ':audio_bitrate' => $audio['bitrate'],
             ':video_rate_control' => $rateControl,
@@ -321,8 +327,28 @@ class PipelineManager
         return in_array($codec, self::VIDEO_CODECS, true) ? $codec : 'h264';
     }
 
-    private function videoFormatForCodec(string $codec): string
+    /** @return array{chroma: string, depth: int} gueltige Kombination aus Chroma-Subsampling und Bittiefe fuer den Codec */
+    private function sanitizeVideoFormat(array $data, string $codec): array
     {
+        $chroma = (string)($data['video_chroma'] ?? '420');
+        if (!in_array($chroma, self::VIDEO_CHROMA, true)) {
+            $chroma = '420';
+        }
+        $depth = (int)($data['video_bitdepth'] ?? 8);
+        if (!in_array($depth, self::VIDEO_BITDEPTHS, true) || $codec === 'mpeg2') {
+            $depth = 8; // avenc_mpeg2video kennt nur 8 Bit
+        }
+        return ['chroma' => $chroma, 'depth' => $depth];
+    }
+
+    private function videoFormatForCodec(string $codec, array $vf = ['chroma' => '420', 'depth' => 8]): string
+    {
+        if ($vf['depth'] === 10) {
+            return $vf['chroma'] === '422' ? 'I422_10LE' : 'I420_10LE';
+        }
+        if ($vf['chroma'] === '422') {
+            return 'Y42B';
+        }
         // x265enc/avenc_mpeg2video akzeptieren kein NV12, nur planare Formate wie I420
         return $codec === 'h264' ? 'NV12' : 'I420';
     }
@@ -749,7 +775,7 @@ class PipelineManager
         $rawCaps = $this->rawCapsStringForMode($decklinkMode);
 
         $videoCodec = $this->sanitizeVideoCodec($target);
-        $videoFormat = $this->videoFormatForCodec($videoCodec);
+        $videoFormat = $this->videoFormatForCodec($videoCodec, $this->sanitizeVideoFormat($target, $videoCodec));
         $bitrate = (int)($target['bitrate'] ?? 2000);
         $framerate = self::HD_MODE_CAPS[$decklinkMode]['fps_num'] / self::HD_MODE_CAPS[$decklinkMode]['fps_den'];
         $keyframeInterval = $this->sanitizeKeyframeInterval($target, (int)round($framerate));
@@ -982,12 +1008,13 @@ class PipelineManager
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
+        $vf = $this->sanitizeVideoFormat($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, audio_bitrate, video_speed_preset)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :audio_bitrate, :video_speed_preset)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, audio_bitrate, video_speed_preset)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :audio_bitrate, :video_speed_preset)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -1013,6 +1040,8 @@ class PipelineManager
             ':ts_audio_pid' => $ts['audio'],
             ':ts_pmt_pid' => $ts['pmt'],
             ':ts_program' => $ts['program'],
+            ':video_chroma' => $vf['chroma'],
+            ':video_bitdepth' => $vf['depth'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -1029,6 +1058,7 @@ class PipelineManager
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
+        $vf = $this->sanitizeVideoFormat($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
@@ -1056,6 +1086,8 @@ class PipelineManager
                 ts_audio_pid = :ts_audio_pid,
                 ts_pmt_pid = :ts_pmt_pid,
                 ts_program = :ts_program,
+                video_chroma = :video_chroma,
+                video_bitdepth = :video_bitdepth,
                 audio_bitrate = :audio_bitrate,
                 video_speed_preset = :video_speed_preset
             WHERE id = :id
@@ -1084,6 +1116,8 @@ class PipelineManager
             ':ts_audio_pid' => $ts['audio'],
             ':ts_pmt_pid' => $ts['pmt'],
             ':ts_program' => $ts['program'],
+            ':video_chroma' => $vf['chroma'],
+            ':video_bitdepth' => $vf['depth'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -1227,7 +1261,7 @@ class PipelineManager
         $mode = $p['srt_mode'] ?? 'listener';
         $sourceType = $p['source_type'] ?? 'videotestsrc';
         $videoCodec = $this->sanitizeVideoCodec($p);
-        $videoFormat = $this->videoFormatForCodec($videoCodec);
+        $videoFormat = $this->videoFormatForCodec($videoCodec, $this->sanitizeVideoFormat($p, $videoCodec));
         $keyframeInterval = $this->sanitizeKeyframeInterval($p, $framerate);
         $rateControl = $this->sanitizeVideoRateControl($p);
         $speedPreset = $this->sanitizeSpeedPreset($p);
@@ -1450,6 +1484,7 @@ class PipelineManager
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
+        $vf = $this->sanitizeVideoFormat($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $keyframeInterval = (int)($data['video_keyframe_interval'] ?? 0);
         $scaleEnabled = (int)($data['video_scale_enabled'] ?? 0) === 1 ? 1 : 0;
@@ -1481,6 +1516,8 @@ class PipelineManager
                 ts_audio_pid = :ts_audio_pid,
                 ts_pmt_pid = :ts_pmt_pid,
                 ts_program = :ts_program,
+                video_chroma = :video_chroma,
+                video_bitdepth = :video_bitdepth,
                 audio_bitrate = :audio_bitrate,
                 video_codec = :video_codec,
                 video_rate_control = :video_rate_control,
@@ -1523,6 +1560,8 @@ class PipelineManager
             ':ts_audio_pid' => $ts['audio'],
             ':ts_pmt_pid' => $ts['pmt'],
             ':ts_program' => $ts['program'],
+            ':video_chroma' => $vf['chroma'],
+            ':video_bitdepth' => $vf['depth'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_codec' => $videoCodec,
             ':video_rate_control' => $rateControl,

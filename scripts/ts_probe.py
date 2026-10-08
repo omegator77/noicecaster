@@ -101,6 +101,10 @@ class Bits:
         return (k + 1) // 2 if k & 1 else -(k // 2)
 
 
+CHROMA_NAMES = {0: '4:0:0', 1: '4:2:0', 2: '4:2:2', 3: '4:4:4'}
+HEVC_PROFILES = {1: 'Main', 2: 'Main 10', 3: 'Main Still Picture', 4: 'RExt', 9: 'SCC'}
+
+
 def parse_sps(nal):
     """H.264-SPS: Profil, Level, Aufloesung, progressiv/interlaced, optional Bildrate aus VUI."""
     b = Bits(unescape(nal[1:]))
@@ -109,11 +113,13 @@ def parse_sps(nal):
     level = b.u(8)
     b.ue()
     chroma = 1
+    depth = 8
     if profile in (100, 110, 122, 244, 44, 83, 86, 118, 128):
         chroma = b.ue()
         if chroma == 3:
             b.u(1)
-        b.ue(); b.ue(); b.u(1)
+        depth = b.ue() + 8
+        b.ue(); b.u(1)
         if b.u(1):
             for i in range(8 if chroma != 3 else 12):
                 if b.u(1):
@@ -159,7 +165,8 @@ def parse_sps(nal):
             units, scale = b.u(32), b.u(32)
             if units:
                 fps = scale / (2.0 * units)
-    return {'profile': PROFILES.get(profile, str(profile)), 'level': '%.1f' % (level / 10.0),
+    name = PROFILES.get(profile, str(profile))
+    return {'chroma': CHROMA_NAMES.get(chroma, '?'), 'bit_depth': depth, 'profile': name, 'level': '%.1f' % (level / 10.0),
             'width': w, 'height': h, 'interlaced': not frame_mbs_only, 'sps_fps': fps}
 
 
@@ -204,15 +211,66 @@ def find_seq_mpeg2(buf):
     width = (b[0] << 4) | (b[1] >> 4)
     height = ((b[1] & 0x0F) << 8) | b[2]
     fps = MPEG2_FPS.get(b[3] & 0x0F)
-    profile, level, interlaced = 'MPEG-2', '', None
+    profile, level, interlaced, chroma = 'MPEG-2', '', None, None
     j = buf.find(b'\x00\x00\x01\xb5', i)
     if j >= 0 and j + 8 < len(buf) and (buf[j + 4] >> 4) == 1:
         pl = ((buf[j + 4] & 0x0F) << 4) | (buf[j + 5] >> 4)
         profile = MPEG2_PROFILES.get((pl >> 4) & 7, 'MPEG-2')
         level = MPEG2_LEVELS.get(pl & 0x0F, '')
         interlaced = not ((buf[j + 5] >> 3) & 1)
-    return {'profile': profile, 'level': level, 'width': width, 'height': height,
+        chroma = CHROMA_NAMES.get((buf[j + 5] >> 1) & 3, '?')
+    return {'profile': profile, 'level': level, 'width': width, 'height': height, 'chroma': chroma, 'bit_depth': 8,
             'interlaced': bool(interlaced), 'sps_fps': fps}
+
+
+def is_keyframe_hevc(head):
+    """IDR/CRA-Bild (NAL 19-21) oder Parametersatz (VPS/SPS/PPS 32-34) am Anfang des Bildes."""
+    i = 0
+    while True:
+        i = head.find(b'\x00\x00\x01', i)
+        if i < 0 or i + 3 >= len(head):
+            return False
+        if ((head[i + 3] >> 1) & 0x3f) in (19, 20, 21, 32, 33, 34):
+            return True
+        i += 3
+
+
+def find_sps_hevc(buf):
+    """H.265-SPS (NAL 33): Profil, Level, Groesse, Farbformat, Bittiefe (nur ohne Teilschichten, wie x265 sie schreibt)."""
+    i = 0
+    while True:
+        i = buf.find(b'\x00\x00\x01', i)
+        if i < 0 or i + 6 >= len(buf):
+            return None
+        if ((buf[i + 3] >> 1) & 0x3f) == 33:
+            end = buf.find(b'\x00\x00\x01', i + 5)
+            try:
+                b = Bits(unescape(buf[i + 5:end if end > 0 else len(buf)][:120]))
+                b.u(4)
+                if b.u(3) != 0:
+                    return None
+                b.u(1)
+                b.u(2)
+                b.u(1)
+                prof = b.u(5)
+                for _ in range(5):
+                    b.u(16)
+                level = b.u(8)
+                b.ue()
+                chroma = b.ue()
+                if chroma == 3:
+                    b.u(1)
+                w, h = b.ue(), b.ue()
+                if b.u(1):
+                    l, r, t, bm = b.ue(), b.ue(), b.ue(), b.ue()
+                    w -= (l + r) * (2 if chroma in (1, 2) else 1)
+                    h -= (t + bm) * (2 if chroma == 1 else 1)
+                depth = b.ue() + 8
+                return {'profile': HEVC_PROFILES.get(prof, str(prof)), 'level': '%.1f' % (level / 30.0), 'width': w, 'height': h,
+                        'chroma': CHROMA_NAMES.get(chroma, '?'), 'bit_depth': depth, 'interlaced': False, 'sps_fps': None}
+            except Exception:
+                return None
+        i += 3
 
 
 def find_sps(buf):
@@ -454,7 +512,7 @@ def analyse(packets):
             if pid == video_pid:
                 if pusi:
                     if vhead is not None:
-                        vframes.append((is_keyframe_mpeg2 if video_type == 2 else is_keyframe)(bytes(vhead)))
+                        vframes.append((is_keyframe_mpeg2 if video_type == 2 else (is_keyframe_hevc if video_type == 0x24 else is_keyframe))(bytes(vhead)))
                         if video_type == 2 and mpeg2_seq is None:
                             mpeg2_seq = find_seq_mpeg2(bytes(vhead))
                     vhead = bytearray(payload[9 + payload[8]:]) if len(payload) > 9 else bytearray()
@@ -494,9 +552,9 @@ def analyse(packets):
     # Video
     if video_pid is not None:
         v = {'pid': video_pid}
-        sps = (mpeg2_seq or find_seq_mpeg2(bytes(video_buf))) if video_type == 2 else (find_sps(bytes(video_buf)) if video_buf else None)
+        sps = (mpeg2_seq or find_seq_mpeg2(bytes(video_buf))) if video_type == 2 else ((find_sps_hevc if video_type == 0x24 else find_sps)(bytes(video_buf)) if video_buf else None)
         if sps:
-            v.update({k: sps[k] for k in ('profile', 'level', 'width', 'height', 'interlaced')})
+            v.update({k: sps[k] for k in ('profile', 'level', 'width', 'height', 'interlaced', 'chroma', 'bit_depth') if k in sps})
         iv = intervals(pes.get(video_pid, []))
         if len(iv) >= 3:
             med = statistics.median(iv)

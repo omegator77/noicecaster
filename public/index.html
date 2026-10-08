@@ -1019,6 +1019,23 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Chroma-Subsampling</label>
+    <select x-model="tileForms[n].video_chroma">
+      <option value="420">4:2:0 (kompatibel)</option>
+      <option value="422">4:2:2 (Broadcast)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bittiefe</label>
+    <select x-model.number="tileForms[n].video_bitdepth">
+      <option value="8">8 Bit</option>
+      <option value="10" :disabled="tileForms[n].video_codec === 'mpeg2'">10 Bit</option>
+    </select>
+  </div>
+</div>
+<div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1279,6 +1296,23 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Chroma-Subsampling</label>
+    <select x-model="target.video_chroma">
+      <option value="420">4:2:0 (kompatibel)</option>
+      <option value="422">4:2:2 (Broadcast)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bittiefe</label>
+    <select x-model.number="target.video_bitdepth">
+      <option value="8">8 Bit</option>
+      <option value="10" :disabled="target.video_codec === 'mpeg2'">10 Bit</option>
+    </select>
+  </div>
+</div>
+<div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1511,6 +1545,23 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Chroma-Subsampling</label>
+    <select x-model="form.video_chroma">
+      <option value="420">4:2:0 (kompatibel)</option>
+      <option value="422">4:2:2 (Broadcast)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bittiefe</label>
+    <select x-model.number="form.video_bitdepth">
+      <option value="8">8 Bit</option>
+      <option value="10" :disabled="form.video_codec === 'mpeg2'">10 Bit</option>
+    </select>
+  </div>
+</div>
+<div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1582,6 +1633,23 @@
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Chroma-Subsampling</label>
+    <select x-model="form.video_chroma">
+      <option value="420">4:2:0 (kompatibel)</option>
+      <option value="422">4:2:2 (Broadcast)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bittiefe</label>
+    <select x-model.number="form.video_bitdepth">
+      <option value="8">8 Bit</option>
+      <option value="10" :disabled="form.video_codec === 'mpeg2'">10 Bit</option>
+    </select>
+  </div>
+</div>
+<div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1703,7 +1771,7 @@ function defaultTileForm(deviceNumber) {
     audio_codec: 'aac',
     audio_output_channels: 2,
     audio_track_mode: 'multi',
-    ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0,
+    ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8,
     audio_bitrate: 192,
     srt_port: 9000 + deviceNumber,
     srt_mode: 'listener',
@@ -1809,7 +1877,7 @@ function app() {
       audio_codec: 'aac',
       audio_output_channels: 2,
       audio_track_mode: 'multi',
-      ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0,
+      ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8,
       audio_bitrate: 192,
       audio_test_wave: 'sine',
       video_codec: 'h264',
@@ -1994,7 +2062,10 @@ function app() {
       const v = it.probe.video;
       if (!v) return '';
       const parts = [];
-      if (v.profile) parts.push('H.264 ' + v.profile + '@' + v.level + (v.interlaced ? ', Halbbilder' : ', progressiv'));
+      const vs = ((it.probe.streams || []).find(x => x.role === 'video') || {}).name || '';
+      const codec = vs.replace(/ Video$/, '') || 'H.264';
+      if (v.profile) parts.push(codec + ' ' + v.profile + (v.level ? '@' + v.level : '') + (v.interlaced ? ', Halbbilder' : ', progressiv'));
+      if (v.chroma) parts.push(v.chroma + (v.bit_depth ? ' · ' + v.bit_depth + ' Bit' : ''));
       const c = it.config;
       const sizeApplies = it.direction === 'sender' && c && (c.scaled || (c.source_type && c.source_type !== 'decklink'));
       if (sizeApplies && c.width && c.height && v.width && (c.width !== v.width || c.height !== v.height)) {
@@ -2331,7 +2402,7 @@ function app() {
           audio_codec: p.audio_codec || 'aac',
           audio_output_channels: p.audio_output_channels ?? 2,
           audio_track_mode: p.audio_track_mode || 'multi',
-          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0,
+          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0, video_chroma: p.video_chroma || '420', video_bitdepth: p.video_bitdepth ?? 8,
           audio_bitrate: p.audio_bitrate ?? 192,
           srt_port: p.srt_port ?? (9000 + n),
           srt_mode: p.srt_mode || 'listener',
@@ -2390,7 +2461,7 @@ function app() {
         audio_codec: tf.audio_codec,
         audio_output_channels: tf.audio_output_channels,
         audio_track_mode: tf.audio_track_mode,
-        ts_video_pid: tf.ts_video_pid, ts_audio_pid: tf.ts_audio_pid, ts_pmt_pid: tf.ts_pmt_pid, ts_program: tf.ts_program,
+        ts_video_pid: tf.ts_video_pid, ts_audio_pid: tf.ts_audio_pid, ts_pmt_pid: tf.ts_pmt_pid, ts_program: tf.ts_program, video_chroma: tf.video_chroma, video_bitdepth: tf.video_bitdepth,
         audio_bitrate: tf.audio_bitrate,
         srt_port: tf.srt_port,
         srt_mode: tf.srt_mode,
@@ -2459,7 +2530,7 @@ function app() {
         name: 'Ziel', srt_mode: 'listener', srt_port: 9000, srt_target_host: '', srt_latency: 120,
         video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_speed_preset: 'veryfast', video_keyframe_interval: 0,
         video_scale_enabled: false, width: 1920, height: 1080,
-        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, audio_bitrate: 192,
+        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, audio_bitrate: 192,
         srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
       };
     },
@@ -3010,7 +3081,7 @@ function app() {
         audio_codec: p.audio_codec || 'aac',
         audio_output_channels: p.audio_output_channels ?? 2,
           audio_track_mode: p.audio_track_mode || 'multi',
-          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0,
+          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0, video_chroma: p.video_chroma || '420', video_bitdepth: p.video_bitdepth ?? 8,
         audio_bitrate: p.audio_bitrate ?? 192,
         audio_test_wave: p.audio_test_wave || 'sine',
         video_codec: p.video_codec || 'h264',
@@ -3051,7 +3122,7 @@ function app() {
         audio_codec: 'aac',
         audio_output_channels: 2,
         audio_track_mode: 'multi',
-        ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0,
+        ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8,
         audio_bitrate: 192,
         audio_test_wave: 'sine',
         video_codec: 'h264',
