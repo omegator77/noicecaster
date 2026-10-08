@@ -8,6 +8,7 @@ require_once __DIR__ . '/../src/NetworkManager.php';
 require_once __DIR__ . '/../src/Auth.php';
 require_once __DIR__ . '/../src/FirewallManager.php';
 require_once __DIR__ . '/../src/StreamStats.php';
+require_once __DIR__ . '/../src/PeerInfo.php';
 
 header('Content-Type: application/json');
 
@@ -23,6 +24,10 @@ try {
     switch ($action) {
         case 'list':
             echo json_encode($manager->list());
+            break;
+
+        case 'system_info':
+            echo json_encode(PeerInfo::get());
             break;
 
         case 'create':

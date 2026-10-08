@@ -23,3 +23,7 @@ data/streamstats_cache.json
 data/rxstats_*.json
 data/probe_*.json
 data/probe_*.lock
+
+# Kennung/Partnersystem je Rechner
+data/peer.json
+data/peer_status.json

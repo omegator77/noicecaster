@@ -3,11 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SDI-to-SRT Gateway</title>
+<title>Noicecaster</title>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   body {
@@ -20,42 +17,53 @@
   .container { max-width: 900px; margin: 0 auto; }
   h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #fff; }
 
-  .retro-banner {
-    background: repeating-linear-gradient(180deg, #1a1042 0px, #1a1042 2px, #140b33 2px, #140b33 4px);
-    border: 3px solid #6d28d9;
-    border-radius: 4px;
-    box-shadow: 0 0 0 1px #000, 0 0 24px rgba(124, 58, 237, 0.45), inset 0 0 30px rgba(124, 58, 237, 0.15);
-    padding: 1.5rem 1rem 1.25rem;
-    margin-bottom: 1.75rem;
-    text-align: center;
-    overflow: hidden;
+  .topbar {
+    --sys-accent: #38bdf8;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    background: #14171d;
+    border: 1px solid #2a2e37;
+    border-top: 3px solid var(--sys-accent);
+    border-radius: 10px;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 1.25rem;
   }
-  .retro-logo {
-    font-family: 'Press Start 2P', monospace;
-    font-size: clamp(1.3rem, 6vw, 2.6rem);
-    letter-spacing: 0.08em;
-    margin: 0;
-    line-height: 1.3;
-    display: inline-block;
-    background: linear-gradient(180deg, #ffffff 0%, #7dd3fc 18%, #3b82f6 38%, #a855f7 58%, #f97316 78%, #fde047 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    filter: drop-shadow(3px 3px 0 #000) drop-shadow(-1px -1px 0 #4c1d95);
-    animation: retro-shine 4s ease-in-out infinite;
+  .brand { display: flex; align-items: center; gap: 0.7rem; margin-right: auto; min-width: 0; }
+  .brand-mark { width: 30px; height: 30px; flex: none; color: var(--sys-accent); }
+  .brand-name { font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; color: #f1f5f9; line-height: 1.2; }
+  .brand-sub { font-size: 0.75rem; color: #8b93a1; letter-spacing: 0.04em; }
+  .sys-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    color: #f8fafc;
+    background: color-mix(in srgb, var(--sys-accent) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--sys-accent) 55%, transparent);
+    white-space: nowrap;
   }
-  .retro-sub {
-    font-family: 'Press Start 2P', monospace;
-    font-size: 0.6rem;
-    letter-spacing: 0.15em;
-    color: #7dd3fc;
-    margin-top: 0.6rem;
-    text-shadow: 2px 2px 0 #000;
+  .sys-chip b { font-size: 1rem; font-weight: 650; }
+  .sys-chip small { font-size: 0.75rem; color: #aab2bf; }
+  .peer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid #2a2e37;
+    color: #cbd5e1;
+    text-decoration: none;
+    font-size: 0.85rem;
+    white-space: nowrap;
   }
-  @keyframes retro-shine {
-    0%, 100% { filter: drop-shadow(3px 3px 0 #000) drop-shadow(-1px -1px 0 #4c1d95) brightness(1); }
-    50% { filter: drop-shadow(3px 3px 0 #000) drop-shadow(-1px -1px 0 #4c1d95) brightness(1.25); }
-  }
+  .peer-link:hover { background: #1a1d24; border-color: #475569; color: #fff; }
+  .peer-link small { color: #8b93a1; font-size: 0.75rem; }
+  .peer-dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; flex: none; }
+  .peer-dot.up { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.6); }
+  .peer-dot.down { background: #f87171; }
   h2 { font-size: 1.1rem; margin: 2rem 0 1rem; color: #cbd5e1; }
   .sys-status {
     display: flex;
@@ -189,12 +197,23 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
     gap: 0.5rem;
-    margin: 2rem 0 1rem;
+    margin: 1.1rem 0 0.6rem;
+    padding: 0.5rem 0.9rem;
+    background: #14171d;
+    border: 1px solid #2a2e37;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s;
   }
-  .section-header h2 { margin: 0; }
-  .section-header-title { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
+  .section-header:hover { background: #181c23; border-color: #3b4150; }
+  .section-header:focus-visible { outline: 2px solid var(--sys-accent, #38bdf8); outline-offset: 2px; }
+  .section-header h2 { margin: 0; font-size: 0.95rem; font-weight: 600; letter-spacing: 0.01em; color: #cbd5e1; }
+  .section-header-title { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .section-header .chev { width: 18px; height: 18px; flex: none; color: #8b93a1; transition: transform 0.15s; }
+  .section-header .chev.open { transform: rotate(180deg); }
+  .section-header:hover .chev { color: #e4e6eb; }
   .led {
     display: inline-block;
     width: 10px;
@@ -220,7 +239,20 @@
   #login-overlay { position: fixed; inset: 0; background: rgba(10, 12, 16, 0.96); z-index: 1000; display: flex; align-items: center; justify-content: center; }
   #login-overlay[hidden] { display: none; }
   #login-form { width: min(360px, 90vw); }
-  .logout-link { float: right; font-size: 0.8rem; }
+  .logout-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid #2a2e37;
+    color: #8b93a1;
+    font-size: 0.85rem;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .logout-btn:hover { color: #e4e6eb; background: #1a1d24; border-color: #475569; }
+  .logout-btn svg { width: 15px; height: 15px; }
 </style>
 </head>
 <body>
@@ -285,22 +317,45 @@
   }).catch(() => {});
 })();
 </script>
-<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
-  <div class="retro-banner">
-    <div class="retro-logo">NOICECASTER</div>
-    <div class="retro-sub">*** SDI ⇄ SRT GATEWAY ***</div>
-  </div>
+<div class="container" x-data="app()" x-init="loadFiles(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
+  <header class="topbar" :style="sysInfo ? '--sys-accent:' + sysInfo.self.accent : ''">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="16" cy="16" r="2.6" fill="currentColor" stroke="none"/>
+        <path d="M10.5 10.5a7.8 7.8 0 0 0 0 11M21.5 10.5a7.8 7.8 0 0 1 0 11"/>
+        <path d="M6.2 6.2a14 14 0 0 0 0 19.6M25.8 6.2a14 14 0 0 1 0 19.6" opacity="0.55"/>
+      </svg>
+      <div>
+        <div class="brand-name">Noicecaster</div>
+        <div class="brand-sub">SDI ⇄ SRT Gateway</div>
+      </div>
+    </div>
+    <div class="sys-chip" x-show="sysInfo" title="Dieses System">
+      <b x-text="sysInfo?.self.label"></b>
+      <small x-text="sysInfo?.self.host"></small>
+    </div>
+    <a class="peer-link" x-show="sysInfo && sysInfo.peer.url" :href="sysInfo?.peer.url" target="_blank" rel="noopener"
+       :title="'Zum anderen System wechseln (' + (sysInfo?.peer.url || '') + ')'">
+      <span class="peer-dot" :class="sysInfo?.peer.reachable === true ? 'up' : (sysInfo?.peer.reachable === false ? 'down' : '')"></span>
+      <span x-text="sysInfo?.peer.label"></span>
+      <small x-text="sysInfo?.peer.reachable === true ? ('erreichbar · ' + sysInfo.peer.via + (sysInfo.peer.ms != null ? ' · ' + sysInfo.peer.ms + ' ms' : '')) : (sysInfo?.peer.reachable === false ? 'nicht erreichbar (' + sysInfo.peer.via + ')' : '')"></small>
+      <span aria-hidden="true">↗</span>
+    </a>
+    <div x-data="{ a: window.gwAuth || null }" @gw-auth.window="a = $event.detail" x-show="a && a.configured && a.logged_in">
+      <a href="#" class="logout-btn" @click.prevent="gwLogout()" title="Vom Gateway abmelden">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M12 7l3 3-3 3M15 10H8"/></svg>
+        Abmelden
+      </a>
+    </div>
+  </header>
 
   <div x-data="{ a: window.gwAuth || null }" @gw-auth.window="a = $event.detail">
-    <template x-if="a && a.configured && a.logged_in">
-      <a href="#" class="logout-link" @click.prevent="gwLogout()">Abmelden</a>
-    </template>
     <template x-if="a && !a.configured">
       <div class="error-msg" style="border-color: #d9a400;">Kein Passwort gesetzt: Das Gateway ist für jeden im Netz bedienbar. Auf dem Server <code>php /opt/broadcast-gateway/scripts/set-password.php</code> ausführen.</div>
     </template>
   </div>
 
-  <div class="sys-status" x-show="systemStats">
+  <div class="sys-status">
     <span><span class="sys-label">HOST</span><span class="sys-value" x-text="srtHost()"></span></span>
     <span><span class="sys-label">CPU</span><span class="sys-value" x-text="(systemStats?.cpu_percent ?? '–') + '%'"></span></span>
     <span><span class="sys-label">RAM</span><span class="sys-value" x-text="formatBytes((systemStats?.mem_used_kb ?? 0) * 1024) + ' / ' + formatBytes((systemStats?.mem_total_kb ?? 0) * 1024)"></span></span>
@@ -313,14 +368,14 @@
     <div class="error-msg" x-text="errorMsg"></div>
   </template>
 
-  <div class="section-header">
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!portsCollapsed" @click="togglePortsCollapsed()" @keydown.enter.prevent="togglePortsCollapsed()" @keydown.space.prevent="togglePortsCollapsed()">
     <div class="section-header-title">
       <h2>SDI-Anschlüsse</h2>
       <template x-for="port in decklinkPorts.filter(p => p.role === 'input')" :key="port.device_number">
         <span class="led" :class="ledClass(port)" :title="'Anschluss ' + (port.device_number + 1) + (port.label ? ' (' + port.label + ')' : '') + ': ' + ledTitle(port)"></span>
       </template>
     </div>
-    <button type="button" class="btn-secondary" @click="togglePortsCollapsed()" x-text="portsCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+    <svg class="chev" :class="{ open: !portsCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
   </div>
   <div class="card" x-show="!portsCollapsed">
     <div class="hint" style="margin-bottom: 0.75rem;">Legt fest, welcher der 4 physischen SDI-Anschlüsse als Eingang bzw. Ausgang genutzt werden darf, inkl. Video-Modus. Nur passend konfigurierte Anschlüsse stehen unten in den Pipeline-Formularen zur Auswahl. Die LEDs zeigen dauerhaft (alle 15s aktualisiert), ob an einem Eingang ein Signal anliegt.</div>
@@ -401,14 +456,14 @@
     </div>
   </div>
 
-  <div class="section-header" style="margin-top: 2rem;">
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!networkCollapsed" @click="toggleNetworkCollapsed()" @keydown.enter.prevent="toggleNetworkCollapsed()" @keydown.space.prevent="toggleNetworkCollapsed()">
     <div class="section-header-title">
       <h2>Netzwerk</h2>
       <template x-for="nic in network.interfaces" :key="'nled-' + nic.name">
         <span class="led" :class="nicLed(nic)" :title="nic.name + ': ' + (nic.is_vpn ? vpnLabel() : (nic.carrier ? 'Link aktiv' : 'kein Link'))"></span>
       </template>
     </div>
-    <button type="button" class="btn-secondary" @click="toggleNetworkCollapsed()" x-text="networkCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+    <svg class="chev" :class="{ open: !networkCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
   </div>
   <template x-if="network.pending">
     <div class="error-msg" style="border-color: #d9a400;">
@@ -474,12 +529,12 @@
     </div>
   </div>
 
-  <div class="section-header" style="margin-top: 2rem;">
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!firewallCollapsed" @click="toggleFirewallCollapsed()" @keydown.enter.prevent="toggleFirewallCollapsed()" @keydown.space.prevent="toggleFirewallCollapsed()">
     <div class="section-header-title">
       <h2>Firewall</h2>
       <span class="badge" :class="firewall.active ? 'running' : ''" x-show="firewall.available" x-text="firewall.active ? 'aktiv' : 'AUS'"></span>
     </div>
-    <button type="button" class="btn-secondary" @click="toggleFirewallCollapsed()" x-text="firewallCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+    <svg class="chev" :class="{ open: !firewallCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
   </div>
   <template x-if="firewall.pending">
     <div class="error-msg" style="border-color: #d9a400;">
@@ -561,12 +616,12 @@
     </template>
   </div>
 
-  <div class="section-header" style="margin-top: 2rem;">
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!statsCollapsed" @click="toggleStatsCollapsed()" @keydown.enter.prevent="toggleStatsCollapsed()" @keydown.space.prevent="toggleStatsCollapsed()">
     <div class="section-header-title">
       <h2>Statistik</h2>
       <span class="badge" x-show="!statsCollapsed" x-text="statsView.items.length + (statsView.items.length === 1 ? ' Stream' : ' Streams')"></span>
     </div>
-    <button type="button" class="btn-secondary" @click="toggleStatsCollapsed()" x-text="statsCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+    <svg class="chev" :class="{ open: !statsCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
   </div>
   <div x-show="!statsCollapsed">
     <div class="card" x-show="!statsView.items.length">
@@ -1273,9 +1328,9 @@
     </div>
   </template>
 
-  <div style="display: flex; justify-content: space-between; align-items: center;">
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!newFormCollapsed" @click="toggleNewFormCollapsed()" @keydown.enter.prevent="toggleNewFormCollapsed()" @keydown.space.prevent="toggleNewFormCollapsed()">
     <h2 x-text="editingId ? 'Pipeline bearbeiten' : 'Neue Pipeline'"></h2>
-    <button type="button" class="btn-secondary" @click="toggleNewFormCollapsed()" x-text="newFormCollapsed ? 'Aufklappen' : 'Einklappen'"></button>
+    <svg class="chev" :class="{ open: !newFormCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
   </div>
 
   <form class="card" x-show="!newFormCollapsed" @submit.prevent="save()">
@@ -1613,6 +1668,7 @@ function app() {
     pollBackoff: 15000,
     pollTimer: null,
     previewTick: 0,
+    sysInfo: null,
     loadLoopRunning: false,
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
@@ -2438,6 +2494,23 @@ function app() {
         }
       });
       this.pollPortSignals();
+    },
+
+    async pollSystemInfo(first = false) {
+      // Kennung dieses Systems und Erreichbarkeit des anderen (alle 20 s, nur bei sichtbarem Tab; der erste Abruf
+      // laeuft immer, damit auch ein im Hintergrund geoeffneter Tab sofort seine Kennung zeigt)
+      if (first || !document.hidden) {
+        try {
+          const res = await fetch('api.php?action=system_info');
+          if (res.ok) {
+            this.sysInfo = await res.json();
+            document.title = this.sysInfo.self.label + ' \u00b7 Noicecaster';
+          }
+        } catch (e) {
+          // naechster Versuch in 20 s
+        }
+      }
+      setTimeout(() => this.pollSystemInfo(), 20000);
     },
 
     async pollSystemStats() {
