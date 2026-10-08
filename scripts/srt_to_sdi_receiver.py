@@ -14,6 +14,7 @@ SRT-Verbindung sauber.
 import argparse
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -39,16 +40,43 @@ def pad_info(name: str):
         return 0, name
 
 
+def interlaced_mode_rates(mode: str):
+    """Fuer Halbbild-Modi wie 1080i50 / 1080i5994 / 1080i60: (Halbbildrate, Bildrate) als Bruch-Text, sonst None."""
+    m = re.search(r"\d{3,4}i(\d{2,4})$", mode or "")
+    if not m:
+        return None
+    return {"50": ("50/1", "25/1"), "5994": ("60000/1001", "30000/1001"), "60": ("60/1", "30/1")}.get(m.group(1))
+
+
 def build(a):
     # --null-sinks: fakesink statt DeckLink-Ausgabe, nur zum Entwickeln und Testen ohne Karte
     vsink = ("fakesink name=vsink sync=true" if a.null_sinks
              else f"decklinkvideosink name=vsink device-number={a.device} mode={a.mode} profile={a.profile}")
     asink = ("fakesink name=asink sync=true" if a.null_sinks
              else f"decklinkaudiosink name=asink device-number={a.device}")
+    # Videozweig: Der Ausgang laeuft in einem Halbbild-Modus (z. B. 1080i50), die Quelle kann aber progressiv sein
+    # (1080p50, 1080p25, 23,98p ...). Ein DeckLink-Ausgang mit Halbbild-Modus nimmt kein progressives Bild an
+    # ("not-negotiated"). Darum drei Wege, die input-selector vor dem Ausgang zusammenfuehrt; welcher gilt,
+    # entscheidet on_video_pad nach dem Zeilensprung-Modus und der Bildrate der dekodierten Quelle:
+    #   A  = unveraendert (Quelle bereits Halbbild, oder der Ausgangsmodus ist progressiv)
+    #   B1 = progressiv mit Halbbildrate (50p/59,94p/60p): jedes zweite Bild wird ein Halbbild (1:1)
+    #   B2 = progressiv mit Vollbildrate (25p/23,98p/30p ...): auf die Bildrate des Modus bringen, Halbbilder 2:2
+    rates = interlaced_mode_rates(a.mode)
     video = (
-        "queue name=vq ! decodebin ! videoconvert ! videoscale ! videorate ! "
-        f"{vsink}"
+        "queue name=vq ! decodebin name=vdec  "
+        f"input-selector name=vsel ! {vsink}  "
+        "videoconvert name=thA ! videoscale ! videorate name=tlastA ! vsel.  "
     )
+    if rates:
+        field_rate, frame_rate = rates
+        video += (
+            "videoconvert name=thB1 ! videoscale ! videorate ! "
+            f"capsfilter caps=video/x-raw,framerate={field_rate} ! "
+            "interlace name=tlastB1 field-pattern=0 top-field-first=true ! vsel.  "
+            "videoconvert name=thB2 ! videoscale ! videorate ! "
+            f"capsfilter caps=video/x-raw,framerate={frame_rate} ! "
+            "interlace name=tlastB2 field-pattern=1 top-field-first=true ! vsel.  "
+        )
     # Die DeckLink-Ausgabe kennt nur 2, 8 oder 16 Kanaele. Bei mehr als 2 Ausgabekanaelen den Ton DISKRET
     # abbilden (Kanal 1..N des Stroms auf Ausgang 1..N, der Rest bleibt still): ein reines audioconvert rechnet
     # 4.0 nach 7.1 um und verteilt den Ton als Lautsprecher-Signal auf alle Ausgaenge. channel-mask=0 =
@@ -110,6 +138,35 @@ def build(a):
             peer.unlink(sink)
         res = pad.link(sink)
         log(f"Pad {pad.get_name()} -> {tgt.get_name()}: {res.value_nick}")
+
+    vdec = pipe.get_by_name("vdec")
+    vsel = pipe.get_by_name("vsel")
+
+    def on_video_pad(_el, pad):
+        caps = pad.get_current_caps() or pad.query_caps(None)
+        st = caps.get_structure(0) if caps is not None and caps.get_size() else None
+        mode = st.get_string("interlace-mode") if st is not None else None
+        fps = 0.0
+        if st is not None:
+            ok, num, den = st.get_fraction("framerate")
+            if ok and den:
+                fps = num / den
+        way = "A"
+        if rates and (mode or "progressive") == "progressive" and pipe.get_by_name("thB1") is not None:
+            way = "B1" if fps > 40 else "B2"
+        head = pipe.get_by_name("th" + way)
+        hsink = head.get_static_pad("sink")
+        old = hsink.get_peer()
+        if old is not None:
+            old.unlink(hsink)
+        res = pad.link(hsink)
+        last = pipe.get_by_name("tlast" + way)
+        selpad = last.get_static_pad("src").get_peer()
+        if selpad is not None:
+            vsel.set_property("active-pad", selpad)
+        log(f"Video {mode or '?'} {fps:.2f} fps -> Weg {way}: {res.value_nick}")
+
+    vdec.connect("pad-added", on_video_pad)
 
     demux.connect("pad-added", on_pad_added)
     demux.connect("pad-removed", lambda _e, pad: log(f"Pad entfernt: {pad.get_name()}"))
