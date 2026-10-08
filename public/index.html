@@ -285,7 +285,7 @@
   }).catch(() => {});
 })();
 </script>
-<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
   <div class="retro-banner">
     <div class="retro-logo">NOICECASTER</div>
     <div class="retro-sub">*** SDI ⇄ SRT GATEWAY ***</div>
@@ -1613,6 +1613,7 @@ function app() {
     pollBackoff: 15000,
     pollTimer: null,
     previewTick: 0,
+    loadLoopRunning: false,
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
     tileSavedForms: {},
@@ -1690,8 +1691,20 @@ function app() {
       } catch (e) {
         this.errorMsg = 'Fehler beim Laden: ' + e.message;
       }
-      // Alle 3 Sekunden Status aktualisieren
-      setTimeout(() => this.load(), 3000);
+    },
+
+    // Genau EINE Abfrage-Kette fuer den Status (alle 3 s, im Hintergrund-Tab seltener). load() wird auch nach
+    // Start/Stopp/Speichern direkt aufgerufen und darf sich deshalb nicht selbst neu einplanen: jeder dieser
+    // Aufrufe haette sonst eine weitere dauerhafte Kette gestartet, die Abfragen vervielfachten sich mit jeder
+    // Aktion und das Fenster wurde traege.
+    startLoadLoop() {
+      if (this.loadLoopRunning) return;
+      this.loadLoopRunning = true;
+      const tick = async () => {
+        if (!document.hidden) await this.load();
+        setTimeout(tick, document.hidden ? 10000 : 3000);
+      };
+      setTimeout(tick, 3000);
     },
 
     async loadStats() {
