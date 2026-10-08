@@ -546,7 +546,7 @@
     </div>
   </template>
   <div class="card" x-show="!firewallCollapsed">
-    <div class="hint" style="margin-bottom: 0.75rem;">Hier lassen sich Ports freigeben (nur erlauben, keine Sperren). Bearbeiten kann man nur Regeln, die das Gateway selbst angelegt hat ("Gateway"). Alle anderen ("System", z. B. SSH, Weboberfläche, VPN) sind nur sichtbar. Nach jeder Änderung bleiben 90 s zum Bestätigen, sonst wird sie automatisch zurückgenommen.</div>
+    <div class="hint" style="margin-bottom: 0.75rem;">Hier lassen sich Ports freigeben (nur erlauben, keine Sperren). Löschen kann man Regeln, die das Gateway angelegt hat ("Gateway"), und alle UDP-Regeln (Stream-Ports). TCP-Regeln anderer Herkunft ("System", z. B. SSH und Weboberfläche) sind nur sichtbar. Nach jeder Änderung bleiben 90 s zum Bestätigen, sonst wird sie automatisch zurückgenommen.</div>
     <template x-if="!firewall.available">
       <div class="hint">Nur Anzeige nicht möglich: Der Firewall-Helfer ist nicht installiert. Einmalig auf dem Server <code>sudo /opt/broadcast-gateway/deploy/install-netconfig.sh</code> ausführen.</div>
     </template>
@@ -577,7 +577,7 @@
             <span x-text="fwRuleLabel(r)"></span>
             <span class="hint" style="margin: 0; flex: 1;" x-text="r.label"></span>
             <span class="badge" :class="r.managed ? 'running' : ''" x-text="r.managed ? 'Gateway' : 'System'"></span>
-            <button type="button" class="btn-secondary" x-show="r.managed" :disabled="fwBusy || !!firewall.pending" @click="fwDelete(r)">Löschen</button>
+            <button type="button" class="btn-secondary" x-show="r.managed || r.deletable" :disabled="fwBusy || !!firewall.pending" @click="fwDelete(r)">Löschen</button>
           </div>
         </template>
         <div class="hint" x-show="firewall.unparsed.length" style="margin-top: 0.4rem;" x-text="firewall.unparsed.length + ' Regel(n) in einem unbekannten Format werden nicht angezeigt.'"></div>

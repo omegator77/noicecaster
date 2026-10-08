@@ -10,12 +10,14 @@ Aktionen:
             "iface": "enp7s0", "comment": "..."}  (iface optional: nur auf dieser NIC)
             legt eine ERLAUBEN-Regel an, markiert mit "gw:" im Kommentar
   delete    JSON von stdin: {"proto": "udp", "port": "9999", "source": "any", "iface": ""}
-            loescht eine Regel, aber nur, wenn sie mit "gw:" markiert ist
+            loescht eine Regel, aber nur, wenn sie mit "gw:" markiert ist oder eine UDP-Regel ist
+            (UDP = Stream-Ports; TCP-Regeln wie SSH und Weboberflaeche bleiben geschuetzt)
   confirm   Aenderungen bestaetigen, Rueckfall-Timer stoppen
   rollback  alten Stand sofort wiederherstellen
 
-Absicherung gegen Aussperren: Nur eigene (markierte) Regeln sind aenderbar, es gibt
-nur "erlauben", und jede Aenderung startet einen Rueckfall-Timer. Ohne "confirm"
+Absicherung gegen Aussperren: Nur eigene (markierte) Regeln und UDP-Regeln sind loeschbar
+(TCP-Regeln anderer Herkunft, also SSH und Weboberflaeche, nicht), es gibt nur "erlauben",
+und jede Aenderung startet einen Rueckfall-Timer. Ohne "confirm"
 innerhalb von TIMEOUT Sekunden werden die gesicherten Regeldateien wiederhergestellt.
 """
 import ipaddress
@@ -125,6 +127,7 @@ def read_rules():
             continue
         r = dict(r)
         r['managed'] = r['comment'].startswith(MARK)
+        r['deletable'] = r['managed'] or r['proto'] == 'udp'
         r['label'] = r['comment'][len(MARK):] if r['managed'] else r['comment']
         seen[key] = r
         merged.append(r)
@@ -270,8 +273,8 @@ def cmd_delete():
     hit = [r for r in rules if same(r, proto, port, source, iface)]
     if not hit:
         fail('Regel nicht gefunden')
-    if not all(r['managed'] for r in hit):
-        fail('Nur vom Gateway angelegte Regeln koennen geloescht werden')
+    if not all(r['managed'] or r['proto'] == 'udp' for r in hit):
+        fail('Nur vom Gateway angelegte Regeln und UDP-Regeln (Stream-Ports) koennen geloescht werden')
     change(['--force', 'delete', 'allow'] + spec(proto, port, source, iface))
 
 
