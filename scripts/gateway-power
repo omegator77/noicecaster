@@ -40,8 +40,8 @@ def read_state():
             st = json.load(f)
     except (OSError, ValueError):
         return None
-    # ein Eintrag, dessen Zeit laengst vorbei ist, ohne dass das System runterfuhr (z. B. fehlgeschlagen), ist veraltet
-    if time.time() > st.get('deadline', 0) + 120:
+    # ein Eintrag, dessen Zeit vorbei ist, ohne dass das System runterfuhr (abgebrochen oder fehlgeschlagen), ist veraltet
+    if time.time() > st.get('deadline', 0) + 30:
         return None
     return st
 
@@ -91,9 +91,16 @@ def cmd_cancel():
     if not read_state():
         fail('Es ist keine Aktion geplant')
     try:
-        sh('systemctl', 'stop', UNIT + '.timer', UNIT + '.service')
+        sh('systemctl', 'stop', UNIT + '.timer')
     except RuntimeError as e:
-        fail(str(e))
+        # ein Timer, der gar nicht (mehr) geladen ist, muss nicht gestoppt werden: dann nur den Eintrag aufraeumen
+        if 'not loaded' not in str(e):
+            fail(str(e))
+    try:
+        # der Dienst ist vor Ablauf des Timers noch gar nicht geladen: ein Fehler hier ist normal
+        sh('systemctl', 'stop', UNIT + '.service')
+    except RuntimeError:
+        pass
     try:
         os.remove(STATE)
     except OSError:

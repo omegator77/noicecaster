@@ -16,7 +16,7 @@ class PowerManager
     {
         $res = ['available' => is_executable(self::HELPER), 'pending' => false, 'action' => null, 'deadline' => null];
         $st = is_file(self::STATE) ? json_decode((string)@file_get_contents(self::STATE), true) : null;
-        if (is_array($st) && isset($st['action'], $st['deadline']) && time() <= (int)$st['deadline'] + 120) {
+        if (is_array($st) && isset($st['action'], $st['deadline']) && time() <= (int)$st['deadline'] + 30) {
             $res['pending'] = true;
             $res['action'] = $st['action'];
             $res['deadline'] = (int)$st['deadline'];
