@@ -31,6 +31,18 @@ try {
             echo json_encode(PeerInfo::get() + ['power' => PowerManager::status()]);
             break;
 
+        case 'testsignal':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            $info = PeerInfo::get();
+            $manager->setTestSignal((int)($data['device'] ?? -1), !empty($data['on']), $info['self']['label']);
+            echo json_encode(['success' => true]);
+            break;
+
         case 'power_schedule':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
                 http_response_code(405);

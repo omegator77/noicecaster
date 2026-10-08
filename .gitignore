@@ -27,3 +27,4 @@ data/probe_*.lock
 # Kennung/Partnersystem je Rechner
 data/peer.json
 data/peer_status.json
+data/testsignal_*.json

@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/TestSignal.php';
+
 class PipelineManager
 {
     private PDO $db;
@@ -87,6 +89,9 @@ class PipelineManager
                 $this->updateStatus((int)$p['id'], 'stopped', null);
                 $p['status'] = 'stopped';
                 $p['pid'] = null;
+            }
+            if (($p['pipeline_direction'] ?? '') === 'srt_to_sdi') {
+                $p['testsignal_running'] = TestSignal::isRunning((int)$p['decklink_device_number']);
             }
         }
 
@@ -1143,6 +1148,11 @@ class PipelineManager
             throw new RuntimeException("Pipeline läuft bereits");
         }
 
+        // Ein Testsignal auf dieser Karte beenden, bevor die Pipeline die Karte braucht
+        if (($p['pipeline_direction'] ?? '') === 'srt_to_sdi') {
+            TestSignal::stop((int)$p['decklink_device_number']);
+        }
+
         if ($this->isMultiTargetEligible($p)) {
             // "Ziel 1" ist die Pipeline selbst - laeuft wie jedes andere Ziel per shmsrc gegen den
             // gemeinsamen Verteiler, damit weitere Ziele jederzeit unabhaengig dazukommen koennen.
@@ -1587,6 +1597,29 @@ class PipelineManager
             self::$cpuCoreCount = $nproc > 0 ? $nproc : 1;
         }
         return self::$cpuCoreCount;
+    }
+
+    /** Testsignal (16 Toene) auf einem Ausgang ein- oder ausschalten. */
+    public function setTestSignal(int $device, bool $on, string $systemLabel): void
+    {
+        if ($device < 0 || $device > 3) {
+            throw new RuntimeException('Ungültiger Anschluss');
+        }
+        if (!$on) {
+            TestSignal::stop($device);
+            return;
+        }
+        $this->ports->assertRole($device, 'output');
+        foreach ($this->list() as $p) {
+            if (($p['pipeline_direction'] ?? '') === 'srt_to_sdi' && (int)$p['decklink_device_number'] === $device && $p['status'] === 'running') {
+                throw new RuntimeException('Auf diesem Anschluss läuft eine Pipeline. Erst stoppen, dann das Testsignal einschalten.');
+            }
+        }
+        $mode = $this->ports->getMode($device);
+        if ($mode === 'auto') {
+            $mode = DecklinkPortManager::DEFAULT_OUTPUT_MODE;
+        }
+        TestSignal::start($device, $mode, strtoupper($systemLabel) . ', ANSCHLUSS ' . ($device + 1) . ', 16 TOENE');
     }
 
     public function probeDecklinkSignal(int $deviceNumber, string $connection, bool $fresh = false): array

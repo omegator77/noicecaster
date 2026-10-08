@@ -884,6 +884,13 @@
           <template x-if="tilePipelineFor(n) && !tileCollapsed[n] && tileDirection(portFor(n)) === 'sdi_to_srt'">
             <button type="button" class="btn-secondary" @click="toggleTargetsExpanded(n)" x-text="targetsExpanded[n] ? 'Ziele einklappen' : 'Ziele aufklappen'"></button>
           </template>
+          <template x-if="tilePipelineFor(n) && tileDirection(portFor(n)) === 'srt_to_sdi'">
+            <button type="button" :class="tilePipelineFor(n).testsignal_running ? 'btn-stop' : 'btn-secondary'"
+                    :disabled="tilePipelineFor(n).status === 'running' || !!testSignalBusy[n]"
+                    :title="tilePipelineFor(n).status === 'running' ? 'Erst die Pipeline stoppen' : 'Bewegtes Bild und 16 Töne in unterschiedlichen Pegeln auf diesen Ausgang geben'"
+                    @click="toggleTestSignal(n)"
+                    x-text="testSignalBusy[n] ? '...' : (tilePipelineFor(n).testsignal_running ? 'Testsignal aus' : 'Testsignal an')"></button>
+          </template>
           <button type="button" class="btn-secondary" @click="toggleTileCollapsed(n)" x-text="tileCollapsed[n] ? 'Aufklappen' : 'Einklappen'"></button>
         </span>
       </div>
@@ -1752,6 +1759,7 @@ function app() {
     previewTick: 0,
     sysInfo: null,
     peerHref: '',
+    testSignalBusy: {},
     sysInfoAt: 0,
     powerWentDown: false,
     powerOpen: false,
@@ -2607,6 +2615,27 @@ function app() {
       if (once) return;
       const pending = this.sysInfo && this.sysInfo.power && this.sysInfo.power.pending;
       setTimeout(() => this.pollSystemInfo(), pending ? 3000 : 20000);
+    },
+
+    async toggleTestSignal(n) {
+      const p = this.tilePipelineFor(n);
+      if (!p || this.testSignalBusy[n]) return;
+      this.testSignalBusy[n] = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=testsignal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: p.decklink_device_number, on: !p.testsignal_running })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.load();
+      } catch (e) {
+        this.errorMsg = 'Testsignal: ' + e.message;
+      } finally {
+        this.testSignalBusy[n] = false;
+      }
     },
 
     openPower() {
