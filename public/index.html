@@ -380,8 +380,11 @@
               <template x-if="port.signalResult && !port.signalResult.error">
                 <span>
                   Signal: <strong x-text="port.signalResult?.signal ? 'vorhanden' : 'kein Signal erkannt'"></strong>
-                  <template x-if="port.signalResult?.width && port.signalResult?.height">
-                    <span> &middot; erkannt: <span x-text="port.signalResult?.width"></span>x<span x-text="port.signalResult?.height"></span>
+                  <template x-if="port.signalResult?.signal && port.signalResult?.format">
+                    <span> &middot; Format: <strong x-text="port.signalResult?.format"></strong></span>
+                  </template>
+                  <template x-if="port.signalResult?.signal && port.signalResult?.width && port.signalResult?.height">
+                    <span> &middot; <span x-text="port.signalResult?.width"></span>x<span x-text="port.signalResult?.height"></span>
                       <template x-if="port.signalResult?.framerate"> @ <span x-text="formatFramerate(port.signalResult?.framerate)"></span></template>
                     </span>
                   </template>
@@ -2388,7 +2391,7 @@ function app() {
       if (!port.signalResult) return 'noch nicht geprüft';
       if (port.signalResult.error) return 'Prüfung fehlgeschlagen: ' + port.signalResult.error;
       if (!port.signalResult.signal) return 'kein Signal erkannt';
-      return 'Signal vorhanden' + (port.signalResult.width ? (' (' + port.signalResult.width + 'x' + port.signalResult.height + ')') : '');
+      return 'Signal vorhanden' + (port.signalResult.format ? (' (' + port.signalResult.format + ')') : (port.signalResult.width ? (' (' + port.signalResult.width + 'x' + port.signalResult.height + ')') : ''));
     },
 
     async pollPortSignals() {
