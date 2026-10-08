@@ -563,7 +563,11 @@ class PipelineManager
                 break;
         }
 
-        return "audio/x-raw,channels={$channels} ! {$encoder} ! {$muxPad}";
+        // AAC mit 4 Kanaelen immer als 4.0 (FL FR FC RC, Maske 0x107 = AAC-Standardkonfiguration 4). Ohne
+        // Angabe waehlt GStreamer "quadro" (0x33), dafuer gibt es keine Standardkonfiguration: der Empfaenger
+        // bekommt dann keinen dekodierbaren Ton (bei Datei- und Testquelle trat das auf).
+        $layout = ($audio['codec'] === 'aac' && $channels === 4) ? ',channel-mask=(bitmask)0x107' : '';
+        return "\"audio/x-raw,channels={$channels}{$layout}\" ! {$encoder} ! {$muxPad}";
     }
 
     // --- Mehrere SRT-Ziele pro SDI-Eingang (Advanced-Menue) ---
@@ -1212,7 +1216,10 @@ class PipelineManager
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} {$tap}";
 
             $audio = $this->sanitizeAudio($p);
-            $audioBranch = "demux.audio_0 ! queue ! decodebin ! audioconvert ! audioresample ! " .
+            // Mehr als 2 Ausgabekanaele: die ersten N Kanaele der Datei, der Rest bleibt still (wie beim
+            // SDI-Eingang). Ein reines audioconvert mischt Stereo auf "quadro" hoch und verteilt den Ton.
+            $fileChannelSelect = $audio['channels'] > 2 ? "audiomixmatrix mode=first-channels channel-mask=-1 ! " : "";
+            $audioBranch = "demux.audio_0 ! queue ! decodebin ! audioconvert ! audioresample ! {$fileChannelSelect}" .
                 $this->buildAudioEncoderChain($audio, $mux['audioPad'](0));
 
             return $prefix . "filesrc location={$fileArg} ! qtdemux name=demux " . $videoBranch . $audioBranch;
