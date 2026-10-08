@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Privilegierter Helfer fuer Neustart und Herunterfahren aus dem Webinterface.
+
+Wird per sudo vom Gateway aufgerufen, liegt root-eigen unter /usr/local/sbin
+(siehe deploy/install-netconfig.sh).
+
+Aktionen:
+  status    JSON mit der geplanten Aktion (lesend)
+  schedule  JSON von stdin: {"action": "reboot" | "poweroff"}
+            plant die Aktion in DELAY Sekunden (systemd-Timer); bis dahin abbrechbar
+  cancel    bricht eine geplante Aktion ab
+
+Die geplante Aktion steht in /run/gateway-power.json (lesbar fuer alle, verschwindet beim Neustart).
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+
+DELAY = 15
+UNIT = 'gateway-power'
+STATE = os.environ.get('GW_POWER_STATE', '/run/gateway-power.json')
+DRYRUN = os.environ.get('GW_DRYRUN') == '1'
+ACTIONS = {'reboot': '/usr/bin/systemctl reboot', 'poweroff': '/usr/bin/systemctl poweroff'}
+
+
+def out(obj):
+    print(json.dumps(obj))
+
+
+def fail(msg):
+    out({'error': msg})
+    sys.exit(1)
+
+
+def read_state():
+    try:
+        with open(STATE) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return None
+    # ein Eintrag, dessen Zeit laengst vorbei ist, ohne dass das System runterfuhr (z. B. fehlgeschlagen), ist veraltet
+    if time.time() > st.get('deadline', 0) + 120:
+        return None
+    return st
+
+
+def sh(*args):
+    if DRYRUN:
+        return
+    res = subprocess.run(args, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError((res.stderr or res.stdout).strip() or 'Befehl fehlgeschlagen')
+
+
+def cmd_status():
+    st = read_state()
+    out({'pending': bool(st), 'action': st['action'] if st else None, 'deadline': st['deadline'] if st else None})
+
+
+def cmd_schedule():
+    try:
+        req = json.load(sys.stdin)
+    except ValueError:
+        fail('Ungueltige Anfrage')
+    action = req.get('action')
+    if action not in ACTIONS:
+        fail('Aktion muss reboot oder poweroff sein')
+    if read_state():
+        fail('Es ist bereits eine Aktion geplant')
+    deadline = int(time.time()) + DELAY
+    try:
+        sh('systemctl', 'stop', UNIT + '.timer', UNIT + '.service')  # Reste eines frueheren Laufs
+    except RuntimeError:
+        pass
+    try:
+        sh('systemd-run', '--unit=' + UNIT, '--on-active=%d' % DELAY, '--timer-property=AccuracySec=1s',
+           '--description=Gateway ' + action, *ACTIONS[action].split())
+    except RuntimeError as e:
+        fail(str(e))
+    tmp = STATE + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump({'action': action, 'deadline': deadline}, f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, STATE)
+    out({'success': True, 'action': action, 'deadline': deadline, 'delay': DELAY})
+
+
+def cmd_cancel():
+    if not read_state():
+        fail('Es ist keine Aktion geplant')
+    try:
+        sh('systemctl', 'stop', UNIT + '.timer', UNIT + '.service')
+    except RuntimeError as e:
+        fail(str(e))
+    try:
+        os.remove(STATE)
+    except OSError:
+        pass
+    out({'success': True})
+
+
+def main():
+    actions = {'status': cmd_status, 'schedule': cmd_schedule, 'cancel': cmd_cancel}
+    if len(sys.argv) < 2 or sys.argv[1] not in actions:
+        fail('Aktion: status | schedule | cancel')
+    actions[sys.argv[1]]()
+
+
+if __name__ == '__main__':
+    main()

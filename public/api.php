@@ -9,6 +9,7 @@ require_once __DIR__ . '/../src/Auth.php';
 require_once __DIR__ . '/../src/FirewallManager.php';
 require_once __DIR__ . '/../src/StreamStats.php';
 require_once __DIR__ . '/../src/PeerInfo.php';
+require_once __DIR__ . '/../src/PowerManager.php';
 
 header('Content-Type: application/json');
 
@@ -27,7 +28,26 @@ try {
             break;
 
         case 'system_info':
-            echo json_encode(PeerInfo::get());
+            echo json_encode(PeerInfo::get() + ['power' => PowerManager::status()]);
+            break;
+
+        case 'power_schedule':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode(PowerManager::schedule(is_array($data) ? $data : []));
+            break;
+
+        case 'power_cancel':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            echo json_encode(PowerManager::cancel());
             break;
 
         case 'create':

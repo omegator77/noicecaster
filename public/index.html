@@ -253,6 +253,38 @@
   }
   .logout-btn:hover { color: #e4e6eb; background: #1a1d24; border-color: #475569; }
   .logout-btn svg { width: 15px; height: 15px; }
+  [x-cloak] { display: none !important; }
+  .bar-actions { display: flex; gap: 0.5rem; align-items: center; }
+  .power-btn { cursor: pointer; background: transparent; font-family: inherit; }
+  .power-btn:hover { color: #fca5a5; border-color: #7f1d1d; background: #1f1416; }
+  .power-banner {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
+    background: #2a1a0a; border: 1px solid #b45309; border-radius: 8px;
+    padding: 0.7rem 1rem; margin-bottom: 1rem; color: #fde68a;
+  }
+  .power-banner strong { color: #fff; }
+  .power-banner .power-count { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: rgba(8, 10, 14, 0.72); padding: 1rem;
+  }
+  .modal-card {
+    width: 100%; max-width: 460px; background: #1a1d24; border: 1px solid #2a2e37;
+    border-top: 3px solid #dc2626; border-radius: 10px; padding: 1.25rem 1.4rem; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-card h3 { margin: 0 0 0.75rem; font-size: 1.1rem; color: #f1f5f9; }
+  .modal-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-bottom: 0.9rem; }
+  .modal-choice label {
+    display: block; padding: 0.6rem 0.75rem; border: 1px solid #2a2e37; border-radius: 8px; cursor: pointer; background: #14171d;
+  }
+  .modal-choice label.on { border-color: #dc2626; background: #2a1416; }
+  .modal-choice input { display: none; }
+  .modal-choice b { display: block; color: #f1f5f9; }
+  .modal-choice small { color: #8b93a1; }
+  .modal-warn { font-size: 0.85rem; color: #fdba74; background: #231a10; border: 1px solid #7c4a12; border-radius: 6px; padding: 0.55rem 0.7rem; margin-bottom: 0.9rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 1rem; }
+  .btn-danger { background: #dc2626; color: #fff; }
+  .btn-danger:disabled { background: #3b2326; color: #8b6e70; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -341,13 +373,62 @@
       <small x-text="sysInfo?.peer.reachable === true ? ('erreichbar · ' + sysInfo.peer.via + (sysInfo.peer.ms != null ? ' · ' + sysInfo.peer.ms + ' ms' : '')) : (sysInfo?.peer.reachable === false ? 'nicht erreichbar (' + sysInfo.peer.via + ')' : '')"></small>
       <span aria-hidden="true">↗</span>
     </a>
+    <div class="bar-actions">
+    <button type="button" class="logout-btn power-btn" x-show="sysInfo && sysInfo.power" @click="openPower()" title="Neustarten oder Herunterfahren">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v7M5.6 5.8a6 6 0 1 0 8.8 0"/></svg>
+      Energie
+    </button>
     <div x-data="{ a: window.gwAuth || null }" @gw-auth.window="a = $event.detail" x-show="a && a.configured && a.logged_in">
       <a href="#" class="logout-btn" @click.prevent="gwLogout()" title="Vom Gateway abmelden">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3M12 7l3 3-3 3M15 10H8"/></svg>
         Abmelden
       </a>
     </div>
+    </div>
   </header>
+
+  <div class="power-banner" x-show="sysInfo && sysInfo.power && sysInfo.power.pending" x-cloak>
+    <span x-show="powerSecondsLeft() > 0">
+      <strong x-text="sysInfo?.self.label"></strong> wird in <span class="power-count" x-text="powerSecondsLeft()"></span> s
+      <strong x-text="sysInfo?.power.action === 'poweroff' ? 'heruntergefahren' : 'neu gestartet'"></strong>.
+    </span>
+    <span x-show="powerSecondsLeft() <= 0">
+      <strong x-text="sysInfo?.power.action === 'poweroff' ? 'Das System fährt herunter.' : 'Das System startet neu.'"></strong>
+      <span x-text="sysInfo?.power.action === 'poweroff' ? 'Diese Seite ist danach nicht mehr erreichbar.' : 'Die Seite lädt automatisch neu, sobald es wieder da ist.'"></span>
+    </span>
+    <button type="button" class="btn-secondary" x-show="powerSecondsLeft() > 0" @click="cancelPower()" :disabled="powerBusy">Abbrechen</button>
+  </div>
+
+  <div class="modal-overlay" x-show="powerOpen" x-cloak @keydown.escape.window="powerOpen = false" @click.self="powerOpen = false">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="power-title">
+      <h3 id="power-title"><span x-text="sysInfo?.self.label"></span>: Energie</h3>
+      <template x-if="sysInfo && !sysInfo.power.available">
+        <div class="modal-warn">Der Helfer ist nicht installiert. Einmalig auf dem Server <code>sudo /opt/broadcast-gateway/deploy/install-netconfig.sh</code> ausführen.</div>
+      </template>
+      <div class="modal-choice">
+        <label :class="{ on: powerAction === 'reboot' }"><input type="radio" value="reboot" x-model="powerAction"><b>Neustarten</b><small>fährt herunter und startet wieder</small></label>
+        <label :class="{ on: powerAction === 'poweroff' }"><input type="radio" value="poweroff" x-model="powerAction"><b>Herunterfahren</b><small>schaltet den Rechner aus</small></label>
+      </div>
+      <div class="modal-warn">
+        <template x-if="runningNames().length">
+          <div>Beendet <strong x-text="runningNames().length"></strong> laufende(n) Stream(s):
+            <span x-text="runningNames().join(', ')"></span>. Sie werden nach dem Start <strong>nicht</strong> automatisch wieder gestartet.</div>
+        </template>
+        <template x-if="!runningNames().length"><div>Es laufen gerade keine Streams.</div></template>
+        <div x-show="powerAction === 'poweroff'" style="margin-top: 0.4rem;">Zum Wiedereinschalten ist ein Eingriff am Gerät nötig (Netzschalter).</div>
+      </div>
+      <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.3rem;">
+        Zur Bestätigung <strong x-text="sysInfo?.self.label"></strong> eintippen:
+      </label>
+      <input type="text" x-model="powerConfirm" autocomplete="off" spellcheck="false" :placeholder="sysInfo?.self.label" @keydown.enter.prevent="powerReady() && schedulePower()">
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" @click="powerOpen = false">Abbrechen</button>
+        <button type="button" class="btn-danger" :disabled="!powerReady() || powerBusy" @click="schedulePower()"
+                x-text="powerBusy ? 'Plane...' : (powerAction === 'poweroff' ? 'Herunterfahren einleiten' : 'Neustart einleiten')"></button>
+      </div>
+      <div class="hint" style="margin-top: 0.6rem;">Nach dem Bestätigen bleiben 15 Sekunden, um den Vorgang abzubrechen.</div>
+    </div>
+  </div>
 
   <div x-data="{ a: window.gwAuth || null }" @gw-auth.window="a = $event.detail">
     <template x-if="a && !a.configured">
@@ -1670,6 +1751,14 @@ function app() {
     previewTick: 0,
     sysInfo: null,
     peerHref: '',
+    sysInfoAt: 0,
+    powerWentDown: false,
+    powerOpen: false,
+    powerAction: 'reboot',
+    powerConfirm: '',
+    powerBusy: false,
+    powerTick: 0,
+    powerReloadTimer: null,
     loadLoopRunning: false,
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
@@ -2497,7 +2586,7 @@ function app() {
       this.pollPortSignals();
     },
 
-    async pollSystemInfo(first = false) {
+    async pollSystemInfo(first = false, once = false) {
       // Kennung dieses Systems und Erreichbarkeit des anderen (alle 20 s, nur bei sichtbarem Tab; der erste Abruf
       // laeuft immer, damit auch ein im Hintergrund geoeffneter Tab sofort seine Kennung zeigt)
       if (first || !document.hidden) {
@@ -2505,6 +2594,8 @@ function app() {
           const res = await fetch('api.php?action=system_info');
           if (res.ok) {
             this.sysInfo = await res.json();
+            this.sysInfoAt = Date.now();
+            if (this.sysInfo.power && this.sysInfo.power.pending) this.watchPower();
             document.title = this.sysInfo.self.label + ' \u00b7 Noicecaster';
             this.resolvePeerHref();
           }
@@ -2512,7 +2603,100 @@ function app() {
           // naechster Versuch in 20 s
         }
       }
-      setTimeout(() => this.pollSystemInfo(), 20000);
+      if (once) return;
+      const pending = this.sysInfo && this.sysInfo.power && this.sysInfo.power.pending;
+      setTimeout(() => this.pollSystemInfo(), pending ? 3000 : 20000);
+    },
+
+    openPower() {
+      this.powerAction = 'reboot';
+      this.powerConfirm = '';
+      this.powerOpen = true;
+    },
+
+    runningNames() {
+      const names = this.pipelines.filter(p => p.status === 'running').map(p => p.name);
+      for (const id of Object.keys(this.targets || {})) {
+        for (const t of (this.targets[id] || [])) {
+          if (t.status === 'running') names.push(t.name);
+        }
+      }
+      return names;
+    },
+
+    powerReady() {
+      return !!this.sysInfo && this.sysInfo.power && this.sysInfo.power.available &&
+        this.powerConfirm.trim().toLowerCase() === String(this.sysInfo.self.label).toLowerCase();
+    },
+
+    powerSecondsLeft() {
+      void this.powerTick;
+      const pw = this.sysInfo && this.sysInfo.power;
+      if (!pw || !pw.pending) return 0;
+      // Zeit des Servers statt der des Browsers verwenden (die Uhren koennen abweichen)
+      const left = pw.deadline - (pw.now + Math.round((Date.now() - this.sysInfoAt) / 1000));
+      return Math.max(0, left);
+    },
+
+    async schedulePower() {
+      if (!this.powerReady() || this.powerBusy) return;
+      this.powerBusy = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=power_schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: this.powerAction, confirm: this.powerConfirm })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        this.powerOpen = false;
+        await this.pollSystemInfo(true, true);
+        this.watchPower();
+      } catch (e) {
+        this.errorMsg = 'Energie: ' + e.message;
+      } finally {
+        this.powerBusy = false;
+      }
+    },
+
+    async cancelPower() {
+      this.powerBusy = true;
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=power_cancel', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        await this.pollSystemInfo(true, true);
+      } catch (e) {
+        this.errorMsg = 'Abbrechen fehlgeschlagen: ' + e.message;
+      } finally {
+        this.powerBusy = false;
+      }
+    },
+
+    watchPower() {
+      // Sekundentakt fuer den Countdown; nach Ablauf bei einem Neustart pruefen, ob das System wieder antwortet
+      if (this.powerReloadTimer) return;
+      this.powerReloadTimer = setInterval(async () => {
+        const pw = this.sysInfo && this.sysInfo.power;
+        if (!pw || !pw.pending) {
+          clearInterval(this.powerReloadTimer);
+          this.powerReloadTimer = null;
+          return;
+        }
+        this.powerTick++;
+        if (this.powerSecondsLeft() > 0) return;
+        if (pw.action === 'reboot') {
+          try {
+            const r = await fetch('api.php?action=auth_status', { cache: 'no-store' });
+            // laeuft ein Neustart, kommt die Antwort erst nach dem Hochfahren; dann hat das System eine neue Uptime
+            if (r.ok && this.powerWentDown) window.location.reload();
+          } catch (e) {
+            this.powerWentDown = true;
+          }
+        }
+      }, 1000);
     },
 
     async resolvePeerHref() {
