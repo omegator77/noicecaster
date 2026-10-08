@@ -24,6 +24,10 @@ class PipelineManager
     // Technisch moegliche Obergrenzen je Codec (spaeter wieder freigeben): aac/opus 2,4,8,16 - pcm 2,4,6,8 -
     // ac3 2,4,6 - mp2 2.
     private const AUDIO_OUTPUT_CHANNELS = [2, 4];
+    // Stereo-Spuren (je 2 Kanaele eine eigene Spur, eigene PID) haben die Probleme der Mehrkanal-Spur nicht (kein
+    // LFE-Platz, kein PCE): jede Spur ist ein normales Stereo-Paar. Hier sind alle geraden Kanalzahlen bis 16
+    // (8 Spuren) frei; mehr als der Aufnahme (decklink_audio_channels) gibt es nicht.
+    private const AUDIO_PAIR_CHANNELS = [2, 4, 6, 8, 10, 12, 14, 16];
     // Kanalzahlen, die der jeweilige Encoder tatsaechlich unterstuetzt (Codec-Spezifikation) -
     // z.B. akzeptiert avenc_mp2 nur Mono/Stereo, avenc_s302m (PCM) max. 8 Kanaele.
     private const AUDIO_CODEC_CHANNELS = [
@@ -251,7 +255,13 @@ class PipelineManager
         }
 
         $audioChannels = (int)($data['decklink_audio_channels'] ?? 2);
-        if (!in_array($audioChannels, self::DECKLINK_AUDIO_CHANNELS, true)) {
+        // Aufnahme (SDI -> SRT): die Karte kennt nur 2, 8 oder 16 Kanaele. Ausgabe (SRT -> SDI): jede gerade Zahl
+        // bis 16 ist waehlbar, die Karte bekommt dann die naechstgroessere Kanalzahl (2/8/16) und die ueberzaehligen
+        // Kanaele bleiben still (siehe deviceAudioChannels und --audio-used).
+        $allowed = ($data['pipeline_direction'] ?? '') === 'srt_to_sdi'
+            ? [0, 2, 4, 6, 8, 10, 12, 14, 16]
+            : self::DECKLINK_AUDIO_CHANNELS;
+        if (!in_array($audioChannels, $allowed, true)) {
             $audioChannels = 2;
         }
 
@@ -261,6 +271,12 @@ class PipelineManager
             'profile' => $profile,
             'audio_channels' => $audioChannels,
         ];
+    }
+
+    /** Kanalzahl, die der DeckLink-Treiber tatsaechlich oeffnet: 2, 8 oder 16 (die naechstgroessere zur gewaehlten). */
+    private function deviceAudioChannels(int $used): int
+    {
+        return $used <= 2 ? 2 : ($used <= 8 ? 8 : 16);
     }
 
     private function sanitizeAudio(array $data): array
@@ -274,7 +290,7 @@ class PipelineManager
         // Stereo-Spur (4/8/16 Kanaele ergeben 2/4/8 Spuren, fuer jeden Codec moeglich)
         $trackMode = ($data['audio_track_mode'] ?? 'multi') === 'pairs' ? 'pairs' : 'multi';
         $allowedChannels = $trackMode === 'pairs'
-            ? self::AUDIO_OUTPUT_CHANNELS
+            ? self::AUDIO_PAIR_CHANNELS
             : (self::AUDIO_CODEC_CHANNELS[$codec] ?? self::AUDIO_OUTPUT_CHANNELS);
         $channels = (int)($data['audio_output_channels'] ?? 2);
         if (!in_array($channels, $allowedChannels, true)) {
@@ -445,7 +461,7 @@ class PipelineManager
             return $audio;
         }
         $allowed = ($audio['track_mode'] ?? 'multi') === 'pairs'
-            ? self::AUDIO_OUTPUT_CHANNELS
+            ? self::AUDIO_PAIR_CHANNELS
             : (self::AUDIO_CODEC_CHANNELS[$audio['codec']] ?? self::AUDIO_OUTPUT_CHANNELS);
         $fit = array_filter($allowed, fn($c) => $c <= $captureChannels);
         $audio['channels'] = $fit ? max($fit) : 2;
@@ -1278,7 +1294,7 @@ class PipelineManager
                 "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
                 "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} {$tap}";
 
-            $audio = $this->sanitizeAudio($p);
+            $audio = $this->sanitizeAudio(array_merge($p, ['audio_track_mode' => 'multi']));
             // Mehr als 2 Ausgabekanaele: die ersten N Kanaele der Datei, der Rest bleibt still (wie beim
             // SDI-Eingang). Ein reines audioconvert mischt Stereo auf "quadro" hoch und verteilt den Ton.
             $fileChannelSelect = $audio['channels'] > 2 ? "audiomixmatrix mode=first-channels channel-mask=-1 ! " : "";
@@ -1299,7 +1315,7 @@ class PipelineManager
             "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
             "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
 
-        $audio = $this->sanitizeAudio($p);
+        $audio = $this->sanitizeAudio(array_merge($p, ['audio_track_mode' => 'multi']));
         $audioTestWave = $this->sanitizeAudioTestWave($p);
         $audioBranch = "audiotestsrc wave={$audioTestWave} freq=1000 is-live=true ! " . $this->buildAudioEncoderChain($audio, $mux['audioPad'](0));
 
@@ -1313,6 +1329,7 @@ class PipelineManager
             'decklink_connection' => $p['decklink_connection'] ?? 'auto',
             'decklink_profile' => $p['decklink_profile'] ?? 'default',
             'decklink_audio_channels' => $p['decklink_audio_channels'] ?? 2,
+            'pipeline_direction' => 'srt_to_sdi',
         ]);
         $this->ports->assertRole($decklink['device_number'], 'output');
         $outputMode = $this->ports->getMode($decklink['device_number']);
@@ -1360,6 +1377,7 @@ class PipelineManager
             'decklink_connection' => $p['decklink_connection'] ?? 'auto',
             'decklink_profile' => $p['decklink_profile'] ?? 'default',
             'decklink_audio_channels' => $p['decklink_audio_channels'] ?? 2,
+            'pipeline_direction' => 'srt_to_sdi',
         ]);
         $this->ports->assertRole($decklink['device_number'], 'output');
         $outputMode = $this->ports->getMode($decklink['device_number']);
@@ -1382,7 +1400,8 @@ class PipelineManager
             ' --device ' . (int)$decklink['device_number'] .
             ' --mode ' . escapeshellarg($outputMode) .
             ' --profile ' . escapeshellarg($decklink['profile']) .
-            ' --audio-channels ' . (int)$decklink['audio_channels'] .
+            ' --audio-channels ' . $this->deviceAudioChannels((int)$decklink['audio_channels']) .
+            ' --audio-used ' . max(2, (int)$decklink['audio_channels']) .
             ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id'])) .
             ' --tap-port ' . self::tapPort('receiver', (int)$p['id']);
         if ($srtSecurity['passphrase'] !== null) {

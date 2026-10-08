@@ -83,16 +83,29 @@ def build(a):
     # abbilden (Kanal 1..N des Stroms auf Ausgang 1..N, der Rest bleibt still): ein reines audioconvert rechnet
     # 4.0 nach 7.1 um und verteilt den Ton als Lautsprecher-Signal auf alle Ausgaenge. channel-mask=0 =
     # unpositioniert, wie es der DeckLink-Treiber selbst fuer 8/16 Kanaele liefert.
+    used = a.audio_used if 0 < a.audio_used <= a.audio_channels else a.audio_channels
     if a.audio_channels > 2:
         mix = "audiomixmatrix mode=first-channels channel-mask=0 ! "
+        if used < a.audio_channels:
+            # Kanaele ueber der gewaehlten Zahl stumm schalten (Diagonalmatrix mit Einsen nur fuer die ersten `used`)
+            d = a.audio_channels
+            rows = ["<" + ",".join("(double)" + ("1.0" if c == r and r < used else "0.0") for c in range(d)) + ">" for r in range(d)]
+            mix += (f"audiomixmatrix in-channels={d} out-channels={d} mode=manual channel-mask=0 "
+                    f"matrix=\"<{','.join(rows)}>\" ! ")
         caps = f"audio/x-raw,format=S16LE,rate=48000,channels={a.audio_channels},channel-mask=(bitmask)0"
     else:
         mix = ""
         caps = f"audio/x-raw,format=S16LE,rate=48000,channels={a.audio_channels}"
+    # Mehrere Stereo-Spuren (je eigene PID, z. B. 66 = Kanal 1+2, 67 = Kanal 3+4): sie werden nach PID geordnet und
+    # in build_multi_audio() zu EINEM Mehrkanal-Ton zusammengesetzt. Der Weg ueber "aq" ist die Einzelspur
+    # (wie bisher), beide muenden im input-selector asel vor dem Ausgang.
+    out_caps = caps
     audio = (
         "queue name=aq max-size-time=1000000000 ! decodebin ! audioconvert ! audioresample ! "
-        f"{mix}{caps} ! "
-        f"{asink}"
+        f"{mix}{caps} ! asel.  "
+        "input-selector name=asel ! "
+        + ("level name=lvl interval=1000000000 post-messages=true ! " if a.audio_levels else "")
+        + f"{asink}"
     )
     # Abgriff fuer die Statistik: Kopie des empfangenen Transportstroms auf 127.0.0.1 (leckere Queue, damit ein
     # fehlender oder langsamer Leser den Empfang nie bremst; tsparse buendelt 7 TS-Pakete je Datagramm).
@@ -117,12 +130,116 @@ def build(a):
 
     demux = pipe.get_by_name("demux")
     targets = {"video": pipe.get_by_name("vq"), "audio": pipe.get_by_name("aq")}
+    asel = pipe.get_by_name("asel")
+    ast = {"gen": -1, "pads": {}, "timer": 0, "multi": False}
+
+    def request_pad(el, tmpl):
+        return el.request_pad_simple(tmpl) if hasattr(el, "request_pad_simple") else el.get_request_pad(tmpl)
+
+    def build_multi_audio(items):
+        """items = [(pid, demux_pad)] nach PID sortiert: Spur k belegt die Ausgangskanaele 2k+1 und 2k+2."""
+        n = a.audio_channels
+        # Mischer und Ausgangsformat direkt in der Pipeline (Pads in einer Bin waeren "falsche Hierarchie")
+        amix = Gst.ElementFactory.make("audiomixer", "amix")
+        conv = Gst.ElementFactory.make("audioconvert", "amixconv")
+        cf = Gst.ElementFactory.make("capsfilter", "amixcaps")
+        cf.set_property("caps", Gst.Caps.from_string(out_caps))
+        for el in (amix, conv, cf):
+            pipe.add(el)
+        amix.link(conv)
+        conv.link(cf)
+        sel_pad = request_pad(asel, "sink_%u")
+        cf.get_static_pad("src").link(sel_pad)
+        branches = []
+        for k, (pid, dpad) in enumerate(items):
+            rows = []
+            for out in range(n):
+                row = [0.0, 0.0]
+                if out == 2 * k:
+                    row[0] = 1.0
+                elif out == 2 * k + 1:
+                    row[1] = 1.0
+                rows.append("<" + ",".join(f"(double){v}" for v in row) + ">")
+            matrix = "<" + ",".join(rows) + ">"
+            # Ghost-Pads von Hand: die automatischen haengen wegen des spaet verbundenen decodebin am falschen Element
+            br = Gst.parse_bin_from_description(
+                "queue name=bq max-size-time=1000000000 ! decodebin ! audioconvert ! audioresample ! "
+                "audio/x-raw,format=F32LE,rate=48000,channels=2 ! "
+                f"audiomixmatrix in-channels=2 out-channels={n} mode=manual channel-mask=0 matrix=\"{matrix}\" ! "
+                f"capsfilter name=bout caps=\"audio/x-raw,format=F32LE,rate=48000,channels={n},channel-mask=(bitmask)0\"", False)
+            br.add_pad(Gst.GhostPad.new("sink", br.get_by_name("bq").get_static_pad("sink")))
+            br.add_pad(Gst.GhostPad.new("src", br.get_by_name("bout").get_static_pad("src")))
+            pipe.add(br)
+            br.get_static_pad("src").link(request_pad(amix, "sink_%u"))
+            branches.append((pid, dpad, br))
+        for el in [amix, conv, cf] + [b for _p, _d, b in branches]:
+            el.sync_state_with_parent()
+        asel.set_property("active-pad", sel_pad)
+        for k, (pid, dpad, br) in enumerate(branches):
+            res = dpad.link(br.get_static_pad("sink"))
+            log(f"Pad {dpad.get_name()} -> Mehrspur {2 * k + 1}+{2 * k + 2}: {res.value_nick}")
+
+    def finalize_audio():
+        ast["timer"] = 0
+        pads = [ast["pads"][k] for k in sorted(ast["pads"])]
+        used = a.audio_used if 0 < a.audio_used <= a.audio_channels else a.audio_channels
+        if len(pads) > 1 and used > 2 and a.audio_channels > 2:
+            keep = pads[: used // 2]
+            for extra in pads[len(keep):]:
+                log(f"Pad {extra.get_name()} ignoriert (mehr Spuren als Ausgangskanaele)")
+            ast["multi"] = True
+            # die zuerst gemeldete Spur ist schon auf den Einzelspur-Weg gelinkt: dort loesen
+            sink = targets["audio"].get_static_pad("sink")
+            peer = sink.get_peer()
+            if peer is not None:
+                peer.unlink(sink)
+            build_multi_audio([(pad_info(pd.get_name())[1], pd) for pd in keep])
+        else:
+            for extra in pads[1:]:
+                log(f"Pad {extra.get_name()} ignoriert (weitere audio-Spur, ausgegeben wird {pads[0].get_name()})")
+        return False
+
+    def audio_pad_added(pad):
+        gen, pid = pad_info(pad.get_name())
+        if gen < ast["gen"]:
+            log(f"Pad {pad.get_name()} ignoriert (alte Generation)")
+            return
+        if gen > ast["gen"]:
+            if ast["multi"]:
+                # Mehrspur-Aufbau ist fest verdrahtet: bei neuem Strom die ganze Pipeline neu aufbauen
+                log("Neuer Strom bei Mehrspur-Ton: Pipeline wird neu aufgebaut")
+                state["fail"] = True
+                if state["loop"] is not None:
+                    GLib.idle_add(state["loop"].quit)
+                return
+            ast["gen"] = gen
+            ast["pads"] = {}
+            # erste Spur eines Stroms sofort auf den Einzelspur-Weg legen (tsdemux braucht ein Ziel, sonst
+            # meldet es "not-linked"); gibt es mehr Spuren, wird in finalize_audio auf den Mehrspur-Weg umgestellt
+            tgt = targets["audio"]
+            sink = tgt.get_static_pad("sink")
+            peer = sink.get_peer()
+            if peer is not None:
+                peer.unlink(sink)
+            res = pad.link(sink)
+            sel = asel.get_static_pad("sink_0")
+            if sel is not None:
+                asel.set_property("active-pad", sel)
+            log(f"Pad {pad.get_name()} -> {tgt.get_name()}: {res.value_nick}")
+        ast["pads"][pid] = pad
+        if ast["timer"]:
+            GLib.source_remove(ast["timer"])
+        # Die Spuren eines Stroms melden sich innerhalb von Millisekunden; kurz sammeln, dann entscheiden
+        ast["timer"] = GLib.timeout_add(250, finalize_audio)
 
     def on_pad_added(_el, pad):
         kind = pad.get_name().split("_", 1)[0]
         tgt = targets.get(kind)
         if tgt is None:
             log(f"Pad {pad.get_name()} ignoriert")
+            return
+        if kind == "audio":
+            audio_pad_added(pad)
             return
         sink = tgt.get_static_pad("sink")
         peer = sink.get_peer()
@@ -264,6 +381,13 @@ def run_once(a) -> int:
             loop.quit()
         elif msg.type == Gst.MessageType.EOS:
             loop.quit()
+        elif msg.type == Gst.MessageType.ELEMENT and a.audio_levels:
+            st = msg.get_structure()
+            if st is not None and st.get_name() == "level":
+                try:
+                    log("PEGEL rms dB: " + " ".join(str(round(v)) for v in st.get_value("rms")))
+                except Exception:
+                    pass
 
     bus = pipe.get_bus()
     bus.add_signal_watch()
@@ -277,7 +401,7 @@ def run_once(a) -> int:
         pipe.set_state(Gst.State.NULL)  # schliesst die SRT-Verbindung sauber, gibt die Karte frei
         bus.remove_signal_watch()
         state["loop"] = None
-    return code["value"]
+    return 1 if state.pop("fail", False) else code["value"]
 
 
 def pause(seconds: float) -> None:
@@ -296,13 +420,15 @@ def main() -> int:
     ap.add_argument("--device", type=int, required=True)
     ap.add_argument("--mode", required=True)
     ap.add_argument("--profile", default="default")
-    ap.add_argument("--audio-channels", type=int, default=2)
+    ap.add_argument("--audio-channels", type=int, default=2, help="Kanaele, die die DeckLink-Karte oeffnet (2, 8 oder 16)")
+    ap.add_argument("--audio-used", type=int, default=0, help="davon genutzte Kanaele (gerade, <= audio-channels), der Rest bleibt still")
     ap.add_argument("--passphrase")
     ap.add_argument("--pbkeylen", type=int, default=0)
     ap.add_argument("--streamid")
     ap.add_argument("--stats-file", help="JSON-Datei fuer SRT-Zahlen und Ausgabe-Zaehler (jede Sekunde neu)")
     ap.add_argument("--tap-port", type=int, default=0, help="UDP-Port auf 127.0.0.1 fuer den Stromabgriff (Statistik)")
     ap.add_argument("--null-sinks", action="store_true", help="fakesink statt DeckLink (nur Tests ohne Karte)")
+    ap.add_argument("--audio-levels", action="store_true", help="Pegel je Ausgangskanal jede Sekunde ins Log (Tests)")
     a = ap.parse_args()
     Gst.init(None)
 

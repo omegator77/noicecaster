@@ -1003,7 +1003,7 @@
                 <div>
                   <label>Ausgabe-Kanäle (für Encoding)</label>
                   <select x-model.number="tileForms[n].audio_output_channels">
-                    <template x-for="ch in audioChannelOptions(tileForms[n].audio_codec, tileForms[n].audio_track_mode)" :key="ch">
+                    <template x-for="ch in audioChannelOptions(tileForms[n].audio_codec, tileForms[n].audio_track_mode, tileForms[n].decklink_audio_channels)" :key="ch">
                       <option :value="ch" x-text="ch"></option>
                     </template>
                   </select>
@@ -1087,10 +1087,11 @@
                 <label>SDI-Ausgabekanäle (eingebettetes Audio)</label>
                 <select x-model.number="tileForms[n].decklink_audio_channels">
                   <option value="2">2 (Stereo)</option>
-                  <option value="8">8 (Kanal 1 bis N des Stroms diskret, Rest still – z. B. für 4 Töne)</option>
-                  <option value="16">16 (wie 8, mit 16 Ausgängen)</option>
+                  <template x-for="c in [4, 6, 8, 10, 12, 14, 16]" :key="c">
+                    <option :value="c" x-text="c"></option>
+                  </template>
                 </select>
-                <div class="hint">Die DeckLink-Karte gibt 2, 8 oder 16 Kanäle aus. Bei 8 oder 16 liegen die Kanäle des Stroms 1:1 auf den Ausgängen 1 bis N, die übrigen bleiben still.</div>
+                <div class="hint">Wie viele Kanäle ausgegeben werden (gerade Zahlen bis 16). Die DeckLink-Karte öffnet dafür 2, 8 oder 16 Kanäle (die nächstgrößere Zahl), die nicht genutzten Ausgänge bleiben still. Bei mehr als 2 liegen die Kanäle des Stroms 1:1 auf den Ausgängen 1 bis N. Enthält der Strom mehrere Stereo-Spuren (je eigene PID), werden sie nach PID sortiert auf die Paare gelegt: niedrigste PID auf 1+2, die nächste auf 3+4 usw. Bei 2 Kanälen wird nur die erste Spur ausgegeben.</div>
               </div>
 
               <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">SRT-Sicherheit (optional)</h2>
@@ -2831,20 +2832,23 @@ function app() {
       return text.replace('.', ',');
     },
 
-    audioChannelOptions(codec, trackMode) {
+    audioChannelOptions(codec, trackMode, capture) {
       // Mehrkanal-Spur: Kanalzahlen, die der jeweilige Encoder tatsaechlich hergibt (Codec-Spezifikation,
       // nicht frei waehlbar) - MP2 z.B. nur Mono/Stereo, PCM/SMPTE-302M max. 8 Kanaele.
       // Stereo-Spuren: je 2 Kanaele eine eigene Spur, fuer jeden Codec moeglich (4 Kanaele = 2 Spuren).
-      // VORERST nur 2 und 4 (4 = 4.0, vollbandig). Mehr Kanaele siehe Kommentar bei AUDIO_OUTPUT_CHANNELS in
-      // src/PipelineManager.php (LFE-Platz bei AAC 5.1/7.1, Magewell). Spaeter freigeben: aac/opus 2,4,8,16 -
-      // pcm 2,4,6,8 - ac3 2,4,6 - mp2 2.
-      if (trackMode === 'pairs') return [2, 4];
+      // Mehrkanal-Spur VORERST nur 2 und 4 (4 = 4.0, vollbandig). Mehr Kanaele siehe Kommentar bei
+      // AUDIO_OUTPUT_CHANNELS in src/PipelineManager.php (LFE-Platz bei AAC 5.1/7.1, Magewell).
+      // Stereo-Spuren haben das Problem nicht: alle geraden Kanalzahlen bis 16, begrenzt durch die Aufnahmekanaele.
+      if (trackMode === 'pairs') {
+        const all = [2, 4, 6, 8, 10, 12, 14, 16];
+        return capture ? all.filter(c => c <= capture) : all;
+      }
       const byCodec = { aac: [2, 4], opus: [2, 4], pcm: [2, 4], ac3: [2, 4], mp2: [2] };
       return byCodec[codec] || [2];
     },
 
     clampAudioChannels(target) {
-      const allowed = this.audioChannelOptions(target.audio_codec, target.audio_track_mode);
+      const allowed = this.audioChannelOptions(target.audio_codec, target.audio_track_mode, target.decklink_audio_channels);
       if (!allowed.includes(target.audio_output_channels)) {
         target.audio_output_channels = allowed[0];
       }
