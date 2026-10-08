@@ -946,7 +946,7 @@
               </div>
               <div class="form-row" style="margin-top: 0.5rem;">
                 <div>
-                  <label>Keyframe-Intervall (Bilder)</label>
+                  <label>GOP-Größe / Keyframe-Intervall (Bilder)</label>
                   <input type="number" x-model.number="tileForms[n].video_keyframe_interval" placeholder="0 = automatisch (1s)">
                 </div>
                 <div>
@@ -1036,6 +1036,40 @@
   </div>
 </div>
 <div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Framing</label>
+    <select x-model="tileForms[n].video_framing">
+      <option value="I">I (nur I-Bilder, geringste Verzögerung)</option>
+      <option value="IP">IP (nur I und P)</option>
+      <option value="IBP">IBP (1 B-Bild)</option>
+      <option value="IBBP">IBBP (2 B-Bilder)</option>
+      <option value="IBBBP">IBBBP (3 B-Bilder)</option>
+      <option value="IBBBBP">IBBBBP (4 B-Bilder, höchste Verzögerung)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bildrate</label>
+    <input type="number" min="0" max="60" x-model.number="tileForms[n].video_framerate" placeholder="0 = wie der Eingang">
+  </div>
+</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Szenenwechsel-Keyframes</label>
+    <select x-model.number="tileForms[n].video_scenecut">
+      <option value="1">an (Standard)</option>
+      <option value="0">aus (feste GOP-Größe)</option>
+    </select>
+  </div>
+  <div>
+    <label>GOP-Art</label>
+    <select x-model.number="tileForms[n].video_open_gop" :disabled="!/B/.test(tileForms[n].video_framing || '')">
+      <option value="0">geschlossen</option>
+      <option value="1">offen</option>
+    </select>
+  </div>
+</div>
+<div class="hint">Die GOP-Größe steht im Feld oben (Keyframe-Intervall, 1 bis 1000 Bilder). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern, "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1313,6 +1347,40 @@
   </div>
 </div>
 <div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Framing</label>
+    <select x-model="target.video_framing">
+      <option value="I">I (nur I-Bilder, geringste Verzögerung)</option>
+      <option value="IP">IP (nur I und P)</option>
+      <option value="IBP">IBP (1 B-Bild)</option>
+      <option value="IBBP">IBBP (2 B-Bilder)</option>
+      <option value="IBBBP">IBBBP (3 B-Bilder)</option>
+      <option value="IBBBBP">IBBBBP (4 B-Bilder, höchste Verzögerung)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bildrate</label>
+    <input type="number" min="0" max="60" x-model.number="target.video_framerate" placeholder="0 = wie der Eingang">
+  </div>
+</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Szenenwechsel-Keyframes</label>
+    <select x-model.number="target.video_scenecut">
+      <option value="1">an (Standard)</option>
+      <option value="0">aus (feste GOP-Größe)</option>
+    </select>
+  </div>
+  <div>
+    <label>GOP-Art</label>
+    <select x-model.number="target.video_open_gop" :disabled="!/B/.test(target.video_framing || '')">
+      <option value="0">geschlossen</option>
+      <option value="1">offen</option>
+    </select>
+  </div>
+</div>
+<div class="hint">Die GOP-Größe steht im Feld oben (Keyframe-Intervall, 1 bis 1000 Bilder). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern, "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1482,7 +1550,7 @@
 
     <div class="form-row">
       <div>
-        <label>Keyframe-Intervall (Bilder)</label>
+        <label>GOP-Größe / Keyframe-Intervall (Bilder)</label>
         <input type="number" x-model.number="form.video_keyframe_interval" placeholder="0 = automatisch (1s)">
         <div class="hint">0 = automatisch, entspricht 1 Sekunde GOP bei der gewählten Framerate.</div>
       </div>
@@ -1562,6 +1630,40 @@
   </div>
 </div>
 <div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Framing</label>
+    <select x-model="form.video_framing">
+      <option value="I">I (nur I-Bilder, geringste Verzögerung)</option>
+      <option value="IP">IP (nur I und P)</option>
+      <option value="IBP">IBP (1 B-Bild)</option>
+      <option value="IBBP">IBBP (2 B-Bilder)</option>
+      <option value="IBBBP">IBBBP (3 B-Bilder)</option>
+      <option value="IBBBBP">IBBBBP (4 B-Bilder, höchste Verzögerung)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bildrate</label>
+    <input type="number" min="0" max="60" x-model.number="form.video_framerate" placeholder="0 = wie der Eingang">
+  </div>
+</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Szenenwechsel-Keyframes</label>
+    <select x-model.number="form.video_scenecut">
+      <option value="1">an (Standard)</option>
+      <option value="0">aus (feste GOP-Größe)</option>
+    </select>
+  </div>
+  <div>
+    <label>GOP-Art</label>
+    <select x-model.number="form.video_open_gop" :disabled="!/B/.test(form.video_framing || '')">
+      <option value="0">geschlossen</option>
+      <option value="1">offen</option>
+    </select>
+  </div>
+</div>
+<div class="hint">Die GOP-Größe steht im Feld oben (Keyframe-Intervall, 1 bis 1000 Bilder). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern, "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1650,6 +1752,40 @@
   </div>
 </div>
 <div class="hint">4:2:2 und 10 Bit brauchen Decoder, die H.264 High 4:2:2 / High 10 (bzw. H.265 Main 4:2:2 10) können. MPEG-2 kennt nur 8 Bit. Die Aufnahme von der SDI-Karte ist 8 Bit, 10 Bit entsteht erst beim Encodieren.</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Framing</label>
+    <select x-model="form.video_framing">
+      <option value="I">I (nur I-Bilder, geringste Verzögerung)</option>
+      <option value="IP">IP (nur I und P)</option>
+      <option value="IBP">IBP (1 B-Bild)</option>
+      <option value="IBBP">IBBP (2 B-Bilder)</option>
+      <option value="IBBBP">IBBBP (3 B-Bilder)</option>
+      <option value="IBBBBP">IBBBBP (4 B-Bilder, höchste Verzögerung)</option>
+    </select>
+  </div>
+  <div>
+    <label>Bildrate</label>
+    <input type="number" min="0" max="60" x-model.number="form.video_framerate" placeholder="0 = wie der Eingang">
+  </div>
+</div>
+<div class="form-row" style="margin-top: 0.5rem;">
+  <div>
+    <label>Szenenwechsel-Keyframes</label>
+    <select x-model.number="form.video_scenecut">
+      <option value="1">an (Standard)</option>
+      <option value="0">aus (feste GOP-Größe)</option>
+    </select>
+  </div>
+  <div>
+    <label>GOP-Art</label>
+    <select x-model.number="form.video_open_gop" :disabled="!/B/.test(form.video_framing || '')">
+      <option value="0">geschlossen</option>
+      <option value="1">offen</option>
+    </select>
+  </div>
+</div>
+<div class="hint">Die GOP-Größe steht im Feld oben (Keyframe-Intervall, 1 bis 1000 Bilder). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern, "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
 <details style="margin-top: 0.6rem;">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
@@ -1771,7 +1907,7 @@ function defaultTileForm(deviceNumber) {
     audio_codec: 'aac',
     audio_output_channels: 2,
     audio_track_mode: 'multi',
-    ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8,
+    ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, video_framing: 'IP', video_framerate: 0, video_scenecut: 1, video_open_gop: 0,
     audio_bitrate: 192,
     srt_port: 9000 + deviceNumber,
     srt_mode: 'listener',
@@ -1877,7 +2013,7 @@ function app() {
       audio_codec: 'aac',
       audio_output_channels: 2,
       audio_track_mode: 'multi',
-      ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8,
+      ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, video_framing: 'IP', video_framerate: 0, video_scenecut: 1, video_open_gop: 0,
       audio_bitrate: 192,
       audio_test_wave: 'sine',
       video_codec: 'h264',
@@ -2402,7 +2538,7 @@ function app() {
           audio_codec: p.audio_codec || 'aac',
           audio_output_channels: p.audio_output_channels ?? 2,
           audio_track_mode: p.audio_track_mode || 'multi',
-          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0, video_chroma: p.video_chroma || '420', video_bitdepth: p.video_bitdepth ?? 8,
+          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0, video_chroma: p.video_chroma || '420', video_bitdepth: p.video_bitdepth ?? 8, video_framing: p.video_framing || 'IP', video_framerate: p.video_framerate ?? 0, video_scenecut: p.video_scenecut ?? 1, video_open_gop: p.video_open_gop ?? 0,
           audio_bitrate: p.audio_bitrate ?? 192,
           srt_port: p.srt_port ?? (9000 + n),
           srt_mode: p.srt_mode || 'listener',
@@ -2461,7 +2597,7 @@ function app() {
         audio_codec: tf.audio_codec,
         audio_output_channels: tf.audio_output_channels,
         audio_track_mode: tf.audio_track_mode,
-        ts_video_pid: tf.ts_video_pid, ts_audio_pid: tf.ts_audio_pid, ts_pmt_pid: tf.ts_pmt_pid, ts_program: tf.ts_program, video_chroma: tf.video_chroma, video_bitdepth: tf.video_bitdepth,
+        ts_video_pid: tf.ts_video_pid, ts_audio_pid: tf.ts_audio_pid, ts_pmt_pid: tf.ts_pmt_pid, ts_program: tf.ts_program, video_chroma: tf.video_chroma, video_bitdepth: tf.video_bitdepth, video_framing: tf.video_framing, video_framerate: tf.video_framerate, video_scenecut: tf.video_scenecut, video_open_gop: tf.video_open_gop,
         audio_bitrate: tf.audio_bitrate,
         srt_port: tf.srt_port,
         srt_mode: tf.srt_mode,
@@ -2530,7 +2666,7 @@ function app() {
         name: 'Ziel', srt_mode: 'listener', srt_port: 9000, srt_target_host: '', srt_latency: 120,
         video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_speed_preset: 'veryfast', video_keyframe_interval: 0,
         video_scale_enabled: false, width: 1920, height: 1080,
-        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, audio_bitrate: 192,
+        audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, video_framing: 'IP', video_framerate: 0, video_scenecut: 1, video_open_gop: 0, audio_bitrate: 192,
         srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
       };
     },
@@ -3081,7 +3217,7 @@ function app() {
         audio_codec: p.audio_codec || 'aac',
         audio_output_channels: p.audio_output_channels ?? 2,
           audio_track_mode: p.audio_track_mode || 'multi',
-          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0, video_chroma: p.video_chroma || '420', video_bitdepth: p.video_bitdepth ?? 8,
+          ts_video_pid: p.ts_video_pid ?? 0, ts_audio_pid: p.ts_audio_pid ?? 0, ts_pmt_pid: p.ts_pmt_pid ?? 0, ts_program: p.ts_program ?? 0, video_chroma: p.video_chroma || '420', video_bitdepth: p.video_bitdepth ?? 8, video_framing: p.video_framing || 'IP', video_framerate: p.video_framerate ?? 0, video_scenecut: p.video_scenecut ?? 1, video_open_gop: p.video_open_gop ?? 0,
         audio_bitrate: p.audio_bitrate ?? 192,
         audio_test_wave: p.audio_test_wave || 'sine',
         video_codec: p.video_codec || 'h264',
@@ -3122,7 +3258,7 @@ function app() {
         audio_codec: 'aac',
         audio_output_channels: 2,
         audio_track_mode: 'multi',
-        ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8,
+        ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, video_framing: 'IP', video_framerate: 0, video_scenecut: 1, video_open_gop: 0,
         audio_bitrate: 192,
         audio_test_wave: 'sine',
         video_codec: 'h264',

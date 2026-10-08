@@ -53,6 +53,10 @@ class Database
             'audio_track_mode' => "TEXT DEFAULT 'multi'",
             'video_chroma' => "TEXT DEFAULT '420'",
             'video_bitdepth' => "INTEGER DEFAULT 8",
+            'video_framing' => "TEXT DEFAULT 'IP'",
+            'video_framerate' => "INTEGER DEFAULT 0",
+            'video_scenecut' => "INTEGER DEFAULT 1",
+            'video_open_gop' => "INTEGER DEFAULT 0",
             'ts_video_pid' => "INTEGER DEFAULT 0",
             'ts_audio_pid' => "INTEGER DEFAULT 0",
             'ts_pmt_pid' => "INTEGER DEFAULT 0",
@@ -162,6 +166,10 @@ class Database
                 audio_track_mode TEXT DEFAULT 'multi',
                 video_chroma TEXT DEFAULT '420',
                 video_bitdepth INTEGER DEFAULT 8,
+                video_framing TEXT DEFAULT 'IP',
+                video_framerate INTEGER DEFAULT 0,
+                video_scenecut INTEGER DEFAULT 1,
+                video_open_gop INTEGER DEFAULT 0,
                 ts_video_pid INTEGER DEFAULT 0,
                 ts_audio_pid INTEGER DEFAULT 0,
                 ts_pmt_pid INTEGER DEFAULT 0,
@@ -181,7 +189,9 @@ class Database
         if (!in_array('audio_track_mode', $existingTargetColumns, true)) {
             $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN audio_track_mode TEXT DEFAULT 'multi'");
         }
-        foreach (['video_bitdepth' => 'INTEGER DEFAULT 8', 'video_chroma' => "TEXT DEFAULT '420'"] as $vfColumn => $vfType) {
+        foreach (['video_bitdepth' => 'INTEGER DEFAULT 8', 'video_chroma' => "TEXT DEFAULT '420'",
+                  'video_framing' => "TEXT DEFAULT 'IP'", 'video_framerate' => 'INTEGER DEFAULT 0', 'video_scenecut' => 'INTEGER DEFAULT 1',
+                  'video_open_gop' => 'INTEGER DEFAULT 0'] as $vfColumn => $vfType) {
             if (!in_array($vfColumn, $existingTargetColumns, true)) {
                 $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN {$vfColumn} {$vfType}");
             }

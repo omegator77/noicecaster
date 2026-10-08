@@ -44,6 +44,7 @@ class PipelineManager
     // Chroma-Subsampling und Bittiefe des Videostroms (H.264/H.265; MPEG-2 nur 8 Bit)
     private const VIDEO_CHROMA = ['420', '422'];
     private const VIDEO_BITDEPTHS = [8, 10];
+    private const VIDEO_FRAMINGS = ['I', 'IP', 'IBP', 'IBBP', 'IBBBP', 'IBBBBP'];
     // x264enc/x265enc speed-preset - nur bis 'medium' erlaubt, langsamere Presets (slow/slower/
     // veryslow/placebo) schaffen es bei 1080i/1080p-Echtzeitkodierung typischerweise nicht mehr
     // rechtzeitig und wuerden Frames droppen statt Latenz/Qualitaet zu verbessern.
@@ -181,14 +182,15 @@ class PipelineManager
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $vf = $this->sanitizeVideoFormat($data, $videoCodec);
+        $gop = $this->sanitizeGop($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $keyframeInterval = (int)($data['video_keyframe_interval'] ?? 0);
         $scaleEnabled = (int)($data['video_scale_enabled'] ?? 0) === 1 ? 1 : 0;
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -217,6 +219,10 @@ class PipelineManager
             ':ts_program' => $ts['program'],
             ':video_chroma' => $vf['chroma'],
             ':video_bitdepth' => $vf['depth'],
+            ':video_framing' => $gop['framing'],
+            ':video_framerate' => $gop['framerate'],
+            ':video_scenecut' => $gop['scenecut'],
+            ':video_open_gop' => $gop['open'],
             ':video_codec' => $videoCodec,
             ':audio_bitrate' => $audio['bitrate'],
             ':video_rate_control' => $rateControl,
@@ -341,6 +347,34 @@ class PipelineManager
         return ['chroma' => $chroma, 'depth' => $depth];
     }
 
+    /**
+     * Framing (wie bei Hardware-Encodern): I, IP, IBP, IBBP, IBBBP oder IBBBBP, dazu Bildrate (0 = wie der Eingang)
+     * sowie Szenenwechsel-Keyframes und offene/geschlossene GOP. Die GOP-Groesse ist das Keyframe-Intervall.
+     * Standard (IP, Bildrate automatisch, Szenenwechsel an, geschlossen) = bisheriges Verhalten.
+     * @return array{framing: string, bframes: int, intra: bool, framerate: int, scenecut: int, open: int}
+     */
+    private function sanitizeGop(array $data, string $codec): array
+    {
+        $framing = strtoupper((string)($data['video_framing'] ?? 'IP'));
+        if (!in_array($framing, self::VIDEO_FRAMINGS, true)) {
+            $framing = 'IP';
+        }
+        $bframes = substr_count($framing, 'B');
+        $framerate = (int)($data['video_framerate'] ?? 0);
+        if ($framerate < 0 || $framerate > 60) {
+            $framerate = 0;
+        }
+        return [
+            'framing' => $framing,
+            'bframes' => $bframes,
+            'intra' => $framing === 'I',
+            'framerate' => $framerate,
+            'scenecut' => (int)($data['video_scenecut'] ?? 1) === 0 ? 0 : 1,
+            // offen oder geschlossen gibt es nur mit B-Frames
+            'open' => ($bframes > 0 && (int)($data['video_open_gop'] ?? 0) === 1) ? 1 : 0,
+        ];
+    }
+
     private function videoFormatForCodec(string $codec, array $vf = ['chroma' => '420', 'depth' => 8]): string
     {
         if ($vf['depth'] === 10) {
@@ -417,29 +451,82 @@ class PipelineManager
     }
 
 
-    private function buildVideoEncoder(string $codec, int $bitrate, int $keyframeInterval, string $rateControl, string $speedPreset = 'veryfast'): string
+    /** Optionale Bildraten-Reduzierung (nur Bilder weglassen) und der Encoder dahinter. */
+    private function buildVideoEncoder(string $codec, int $bitrate, int $keyframeInterval, string $rateControl, string $speedPreset = 'veryfast', array $gop = ['framing' => 'IP', 'bframes' => 0, 'intra' => false, 'framerate' => 0, 'scenecut' => 1, 'open' => 0]): string
     {
+        $rate = ((int)($gop['framerate'] ?? 0)) > 0 ? "videorate ! video/x-raw,framerate={$gop['framerate']}/1 ! " : '';
+        return $rate . $this->buildVideoEncoderCore($codec, $bitrate, $keyframeInterval, $rateControl, $speedPreset, $gop);
+    }
+
+    private function buildVideoEncoderCore(string $codec, int $bitrate, int $keyframeInterval, string $rateControl, string $speedPreset = 'veryfast', array $gop = ['framing' => 'IP', 'bframes' => 0, 'intra' => false, 'framerate' => 0, 'scenecut' => 1, 'open' => 0]): string
+    {
+        $bf = (int)$gop['bframes'];
+        if (!empty($gop['intra'])) {
+            $keyframeInterval = 1; // nur I-Bilder: jede GOP hat die Groesse 1
+        }
         switch ($codec) {
             case 'h265':
-                $chain = "x265enc tune=zerolatency speed-preset={$speedPreset} bitrate={$bitrate} key-int-max={$keyframeInterval}";
+                // Mit B-Frames kein zerolatency-Tuning (es schaltet B-Frames ab); feste Struktur ohne Vorausschau
+                $chain = "x265enc " . ($bf > 0 ? '' : 'tune=zerolatency ') . "speed-preset={$speedPreset} bitrate={$bitrate} key-int-max={$keyframeInterval}";
+                $opts = [];
                 if ($rateControl === 'cbr') {
                     // x265 hat keine eigene VBV-Property, daher ueber die x265-Optionszeile erzwungen
-                    $chain .= " option-string=\"vbv-bufsize={$bitrate}:vbv-maxrate={$bitrate}\"";
+                    $opts[] = "vbv-bufsize={$bitrate}";
+                    $opts[] = "vbv-maxrate={$bitrate}";
+                }
+                if ($bf > 0) {
+                    $opts[] = "bframes={$bf}";
+                    $opts[] = 'b-adapt=0';
+                    $opts[] = 'rc-lookahead=' . ($bf + 4);
+                    $opts[] = 'open-gop=' . ($gop['open'] ? '1' : '0');
+                }
+                if (!$gop['scenecut']) {
+                    $opts[] = 'scenecut=0';
+                }
+                if ($opts) {
+                    $chain .= ' option-string=\"' . implode(':', $opts) . '\"';
                 }
                 return $chain . " ! h265parse config-interval=-1";
             case 'mpeg2':
                 // avenc_mpeg2video kennt kein speed-preset - Parameter wird fuer diesen Codec ignoriert
                 $bps = $bitrate * 1000;
                 $chain = "avenc_mpeg2video bitrate={$bps} gop-size={$keyframeInterval}";
+                // sc-threshold=1000000000 schaltet die Szenenwechsel-Erkennung ab; mit geschlossener GOP ist das Pflicht
+                // (libavcodec: "closed gop with scene change detection are not supported yet")
+                $noScenecut = !$gop['scenecut'];
+                if ($bf > 0) {
+                    $chain .= " max-bframes={$bf}";
+                    if (!$gop['open']) {
+                        $chain .= ' flags=cgop';
+                        $noScenecut = true;
+                    }
+                }
+                if ($noScenecut) {
+                    $chain .= ' sc-threshold=1000000000';
+                }
                 if ($rateControl === 'cbr') {
                     $chain .= " bufsize={$bps} maxrate={$bps} minrate={$bps}";
                 }
                 return $chain . " ! mpegvideoparse";
             default:
-                $chain = "x264enc tune=zerolatency speed-preset={$speedPreset} bitrate={$bitrate} key-int-max={$keyframeInterval}";
+                $chain = "x264enc " . ($bf > 0 ? '' : 'tune=zerolatency ') . "speed-preset={$speedPreset} bitrate={$bitrate} key-int-max={$keyframeInterval}";
+                if ($bf > 0) {
+                    // feste Struktur (I B B P ...) ohne Vorausschau, damit die Verzoegerung klein und vorhersagbar bleibt
+                    $chain .= " bframes={$bf} b-adapt=false rc-lookahead=0";
+                }
                 if ($rateControl === 'cbr') {
                     // 1s VBV-Puffer erzwingt eine echte Konstant-Bitrate statt nur eines Zielwerts
                     $chain .= " vbv-buf-capacity=1000";
+                }
+                $opts = [];
+                if (!$gop['scenecut']) {
+                    $opts[] = 'scenecut=0';
+                }
+                if ($gop['open']) {
+                    $opts[] = 'open-gop=1';
+                }
+                if ($opts) {
+                    $chain .= ' option-string=\"' . implode(':', $opts) . '\"';
                 }
                 return $chain . " ! h264parse config-interval=-1";
         }
@@ -781,7 +868,7 @@ class PipelineManager
         $keyframeInterval = $this->sanitizeKeyframeInterval($target, (int)round($framerate));
         $rateControl = $this->sanitizeVideoRateControl($target);
         $speedPreset = $this->sanitizeSpeedPreset($target);
-        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset);
+        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset, $this->sanitizeGop($target, $videoCodec));
 
         $audio = $this->clampAudioToCapture($this->sanitizeAudio($target), (int)$decklink['audio_channels']);
         $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels'], $audio['codec']);
@@ -1009,12 +1096,13 @@ class PipelineManager
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $vf = $this->sanitizeVideoFormat($data, $videoCodec);
+        $gop = $this->sanitizeGop($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, audio_bitrate, video_speed_preset)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :audio_bitrate, :video_speed_preset)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_speed_preset)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_speed_preset)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -1042,6 +1130,10 @@ class PipelineManager
             ':ts_program' => $ts['program'],
             ':video_chroma' => $vf['chroma'],
             ':video_bitdepth' => $vf['depth'],
+            ':video_framing' => $gop['framing'],
+            ':video_framerate' => $gop['framerate'],
+            ':video_scenecut' => $gop['scenecut'],
+            ':video_open_gop' => $gop['open'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -1059,6 +1151,7 @@ class PipelineManager
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $vf = $this->sanitizeVideoFormat($data, $videoCodec);
+        $gop = $this->sanitizeGop($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
@@ -1088,6 +1181,10 @@ class PipelineManager
                 ts_program = :ts_program,
                 video_chroma = :video_chroma,
                 video_bitdepth = :video_bitdepth,
+                video_framing = :video_framing,
+                video_framerate = :video_framerate,
+                video_scenecut = :video_scenecut,
+                video_open_gop = :video_open_gop,
                 audio_bitrate = :audio_bitrate,
                 video_speed_preset = :video_speed_preset
             WHERE id = :id
@@ -1118,6 +1215,10 @@ class PipelineManager
             ':ts_program' => $ts['program'],
             ':video_chroma' => $vf['chroma'],
             ':video_bitdepth' => $vf['depth'],
+            ':video_framing' => $gop['framing'],
+            ':video_framerate' => $gop['framerate'],
+            ':video_scenecut' => $gop['scenecut'],
+            ':video_open_gop' => $gop['open'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
         ]);
@@ -1148,6 +1249,7 @@ class PipelineManager
         $logFile = __DIR__ . "/../data/target_{$targetId}.log";
         $fullCmd = "nohup {$cmd} > " . escapeshellarg($logFile) . " 2>&1 & echo $!";
         $pid = (int)shell_exec($fullCmd);
+        $pid = $this->relaunchIfShmRace($pid, $fullCmd, $logFile);
 
         $stmt = $this->db->prepare("UPDATE srt_targets SET status = 'running', pid = :pid, started_at = CURRENT_TIMESTAMP WHERE id = :id");
         $stmt->execute([':pid' => $pid, ':id' => $targetId]);
@@ -1172,6 +1274,25 @@ class PipelineManager
             $target['started_at'],
             __DIR__ . "/../data/target_{$targetId}.log"
         );
+    }
+
+    /**
+     * Das Ziel verbindet sich per shmsrc mit dem Verteiler. Direkt nach dessen Start kann das scheitern ("Internal data
+     * stream error" nach wenigen Millisekunden), weil noch keine Bilder da sind. Dann bis zu zweimal neu starten.
+     */
+    private function relaunchIfShmRace(int $pid, string $fullCmd, string $logFile): int
+    {
+        for ($try = 0; $try < 2; $try++) {
+            usleep(1500000);
+            if ($this->isProcRunning($pid)) {
+                return $pid;
+            }
+            if (strpos((string)@file_get_contents($logFile), 'shmsrc') === false) {
+                return $pid;
+            }
+            $pid = (int)shell_exec($fullCmd);
+        }
+        return $pid;
     }
 
     public function start(int $id): void
@@ -1201,6 +1322,9 @@ class PipelineManager
         $fullCmd = "nohup {$cmd} > " . escapeshellarg($logFile) . " 2>&1 & echo $!";
 
         $pid = (int)shell_exec($fullCmd);
+        if ($this->isMultiTargetEligible($p)) {
+            $pid = $this->relaunchIfShmRace($pid, $fullCmd, $logFile);
+        }
 
         $stmt = $this->db->prepare("UPDATE pipelines SET status = 'running', pid = :pid, started_at = CURRENT_TIMESTAMP WHERE id = :id");
         $stmt->execute([':pid' => $pid, ':id' => $id]);
@@ -1265,7 +1389,7 @@ class PipelineManager
         $keyframeInterval = $this->sanitizeKeyframeInterval($p, $framerate);
         $rateControl = $this->sanitizeVideoRateControl($p);
         $speedPreset = $this->sanitizeSpeedPreset($p);
-        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset);
+        $videoEncoder = $this->buildVideoEncoder($videoCodec, $bitrate, $keyframeInterval, $rateControl, $speedPreset, $this->sanitizeGop($p, $videoCodec));
         $srtSecurity = $this->sanitizeSrtSecurity($p);
         $srtSecurityProps = $this->buildSrtSecurityProps($srtSecurity);
         $clockOverlayElement = $this->buildClockOverlayElement($p);
@@ -1485,6 +1609,7 @@ class PipelineManager
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
         $vf = $this->sanitizeVideoFormat($data, $videoCodec);
+        $gop = $this->sanitizeGop($data, $videoCodec);
         $rateControl = $this->sanitizeVideoRateControl($data);
         $keyframeInterval = (int)($data['video_keyframe_interval'] ?? 0);
         $scaleEnabled = (int)($data['video_scale_enabled'] ?? 0) === 1 ? 1 : 0;
@@ -1518,6 +1643,10 @@ class PipelineManager
                 ts_program = :ts_program,
                 video_chroma = :video_chroma,
                 video_bitdepth = :video_bitdepth,
+                video_framing = :video_framing,
+                video_framerate = :video_framerate,
+                video_scenecut = :video_scenecut,
+                video_open_gop = :video_open_gop,
                 audio_bitrate = :audio_bitrate,
                 video_codec = :video_codec,
                 video_rate_control = :video_rate_control,
@@ -1562,6 +1691,10 @@ class PipelineManager
             ':ts_program' => $ts['program'],
             ':video_chroma' => $vf['chroma'],
             ':video_bitdepth' => $vf['depth'],
+            ':video_framing' => $gop['framing'],
+            ':video_framerate' => $gop['framerate'],
+            ':video_scenecut' => $gop['scenecut'],
+            ':video_open_gop' => $gop['open'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_codec' => $videoCodec,
             ':video_rate_control' => $rateControl,
