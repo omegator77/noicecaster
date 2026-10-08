@@ -334,8 +334,8 @@
       <b x-text="sysInfo?.self.label"></b>
       <small x-text="sysInfo?.self.host"></small>
     </div>
-    <a class="peer-link" x-show="sysInfo && sysInfo.peer.url" :href="sysInfo?.peer.url" target="_blank" rel="noopener"
-       :title="'Zum anderen System wechseln (' + (sysInfo?.peer.url || '') + ')'">
+    <a class="peer-link" x-show="sysInfo && sysInfo.peer.url" :href="peerHref || sysInfo?.peer.url" target="_blank" rel="noopener"
+       :title="'Zum anderen System wechseln (' + (peerHref || sysInfo?.peer.url || '') + ')'">
       <span class="peer-dot" :class="sysInfo?.peer.reachable === true ? 'up' : (sysInfo?.peer.reachable === false ? 'down' : '')"></span>
       <span x-text="sysInfo?.peer.label"></span>
       <small x-text="sysInfo?.peer.reachable === true ? ('erreichbar · ' + sysInfo.peer.via + (sysInfo.peer.ms != null ? ' · ' + sysInfo.peer.ms + ' ms' : '')) : (sysInfo?.peer.reachable === false ? 'nicht erreichbar (' + sysInfo.peer.via + ')' : '')"></small>
@@ -1669,6 +1669,7 @@ function app() {
     pollTimer: null,
     previewTick: 0,
     sysInfo: null,
+    peerHref: '',
     loadLoopRunning: false,
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
@@ -2505,12 +2506,46 @@ function app() {
           if (res.ok) {
             this.sysInfo = await res.json();
             document.title = this.sysInfo.self.label + ' \u00b7 Noicecaster';
+            this.resolvePeerHref();
           }
         } catch (e) {
           // naechster Versuch in 20 s
         }
       }
       setTimeout(() => this.pollSystemInfo(), 20000);
+    },
+
+    async resolvePeerHref() {
+      // Welche Adresse des anderen Systems erreicht DIESER Browser? Der Name (z. B. openbroadcast2) loest nur im
+      // gleichen Netz auf; liegt das andere System in einem anderen LAN, geht nur die VPN-IP. Wer das Gateway selbst
+      // ueber eine IP aus dem VPN-Netz geoeffnet hat, bekommt die VPN-Adresse zuerst.
+      const peer = this.sysInfo && this.sysInfo.peer;
+      if (!peer || !peer.urls || !peer.urls.length || this.peerResolving) return;
+      this.peerResolving = true;
+      try {
+        let cand = peer.urls.slice();
+        const vpnHost = peer.vpn_url ? new URL(peer.vpn_url).hostname : '';
+        const net = h => h.split('.').slice(0, 3).join('.');
+        if (vpnHost && /^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname) && net(window.location.hostname) === net(vpnHost)) {
+          cand = [peer.vpn_url].concat(cand.filter(u => u !== peer.vpn_url));
+        }
+        for (const url of cand) {
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), 2500);
+          try {
+            await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: ctl.signal });
+            this.peerHref = url;
+            return;
+          } catch (e) {
+            // diese Adresse ist von hier aus nicht erreichbar, die naechste probieren
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        this.peerHref = cand[0];
+      } finally {
+        this.peerResolving = false;
+      }
     },
 
     async pollSystemStats() {

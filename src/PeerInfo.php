@@ -52,6 +52,16 @@ class PeerInfo
         $probe = $vpn !== '' ? $vpn : $peer['host'];
 
         $peer['url'] = $peer['host'] !== '' ? "http://{$peer['host']}:{$port}/" : ($probe !== '' ? "http://{$probe}:{$port}/" : '');
+        // Kandidaten fuer den Link im Browser: der Name (nur im gleichen Netz aufloesbar) und die VPN-Adresse
+        // (funktioniert, wenn das andere System in einem anderen LAN liegt). Der Browser waehlt die erreichbare.
+        $urls = [];
+        foreach ([$peer['host'], $vpn] as $a) {
+            if ($a !== '' && $port > 0 && $port < 65536) {
+                $urls[] = "http://{$a}:{$port}/";
+            }
+        }
+        $peer['urls'] = array_values(array_unique($urls));
+        $peer['vpn_url'] = $vpn !== '' ? "http://{$vpn}:{$port}/" : '';
         $peer['via'] = $vpn !== '' ? 'VPN' : 'Netz';
         $peer['reachable'] = null;
         $peer['ms'] = null;
