@@ -10,6 +10,7 @@ require_once __DIR__ . '/../src/FirewallManager.php';
 require_once __DIR__ . '/../src/StreamStats.php';
 require_once __DIR__ . '/../src/PeerInfo.php';
 require_once __DIR__ . '/../src/PowerManager.php';
+require_once __DIR__ . '/../src/PresetManager.php';
 
 header('Content-Type: application/json');
 
@@ -60,6 +61,21 @@ try {
                 break;
             }
             echo json_encode(PowerManager::cancel());
+            break;
+
+        // Presets: komplette Anschluss-Einstellungen unter einem Namen (siehe PresetManager)
+        case 'presets_list':
+            echo json_encode((new PresetManager($db->pdo()))->list());
+            break;
+
+        case 'preset_save':
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode(['success' => true] + (new PresetManager($db->pdo()))->save(is_array($data) ? $data : []));
+            break;
+
+        case 'preset_delete':
+            (new PresetManager($db->pdo()))->delete((int)($_GET['id'] ?? 0));
+            echo json_encode(['success' => true]);
             break;
 
         case 'create':

@@ -349,7 +349,7 @@
   }).catch(() => {});
 })();
 </script>
-<div class="container" x-data="app()" x-init="loadFiles(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); loadPresets(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
   <header class="topbar" :style="sysInfo ? '--sys-accent:' + sysInfo.self.accent : ''">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -848,6 +848,46 @@
     </div>
   </div>
 
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!presetsCollapsed" @click="togglePresetsCollapsed()" @keydown.enter.prevent="togglePresetsCollapsed()" @keydown.space.prevent="togglePresetsCollapsed()">
+    <div class="section-header-title">
+      <h2>Presets</h2>
+      <span class="badge" x-show="presets.length" x-text="presets.length"></span>
+    </div>
+    <svg class="chev" :class="{ open: !presetsCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="card" x-show="!presetsCollapsed">
+    <div class="hint" style="margin-bottom: 0.75rem;">Ein Preset enthält alle Einstellungen eines Anschlusses (Ziel 1 und alle weiteren Ziele). Anlegen: im Anschluss unten „Als Preset speichern …“. Laden: im Anschluss das Preset wählen und „Laden“; das füllt nur das Formular, mit „Speichern“ wird es übernommen. Ein Preset passt nur zu Anschlüssen derselben Richtung. Hier lassen sich Presets löschen sowie als Datei exportieren und auf dem anderen System importieren.</div>
+    <div class="hint" style="margin-bottom: 0.75rem; color: #d9a400;">Achtung: Presets enthalten die SRT-Passphrase im Klartext, auch in Exportdateien. Port und Ziel-Adresse stehen ebenfalls im Preset; auf zwei Anschlüssen geladen belegt das den Port doppelt.</div>
+    <template x-if="!presets.length">
+      <div class="hint">Noch keine Presets angelegt.</div>
+    </template>
+    <template x-if="presets.length">
+      <table class="st-table">
+        <thead><tr><th>Name</th><th>Richtung</th><th>Inhalt</th><th>Stand</th><th></th></tr></thead>
+        <tbody>
+          <template x-for="pr in presets" :key="pr.id">
+            <tr>
+              <td x-text="pr.name"></td>
+              <td x-text="pr.direction === 'srt_to_sdi' ? 'Ausgang' : 'Eingang'"></td>
+              <td x-text="presetSummary(pr)"></td>
+              <td x-text="(pr.updated_at || '').slice(0, 16)"></td>
+              <td style="white-space: nowrap;">
+                <button type="button" class="btn-secondary" @click="exportPresets([pr])">Export</button>
+                <button type="button" class="btn-secondary" @click="deletePreset(pr)">Löschen</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </template>
+    <div class="actions" style="margin-top: 0.75rem;">
+      <button type="button" class="btn-secondary" :disabled="!presets.length" @click="exportPresets(presets)">Alle exportieren</button>
+      <button type="button" class="btn-secondary" @click="$refs.presetFile.click()">Importieren …</button>
+      <input type="file" accept="application/json,.json" x-ref="presetFile" style="display: none;" @change="importPresets($event)">
+    </div>
+    <div class="hint" x-show="presetsMsg" x-text="presetsMsg" style="margin-top: 0.5rem;"></div>
+  </div>
+
   <h2 style="margin: 2rem 0 1rem;">SDI-Anschluss-Pipelines</h2>
   <div class="hint" style="margin-bottom: 0.75rem;">Jeder der 4 Anschlüsse hat eine feste, zugehörige Pipeline. Richtung ergibt sich automatisch aus der oben gewählten Rolle.</div>
 
@@ -901,6 +941,20 @@
 
       <template x-if="tileDirection(portFor(n)) && !tileCollapsed[n]">
         <div style="margin-top: 0.75rem;">
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem;">
+            <span style="color: #8b93a1; font-size: 0.85rem;">Preset</span>
+            <select x-model="presetSelected[n]" style="flex: 1 1 14rem; min-width: 0;">
+              <option value="">– Preset wählen –</option>
+              <template x-for="pr in presetsFor(n)" :key="pr.id">
+                <option :value="String(pr.id)" x-text="pr.name + ' · ' + presetSummary(pr)"></option>
+              </template>
+            </select>
+            <button type="button" class="btn-secondary" :disabled="!presetSelected[n] || presetBlocked(n)"
+                    :title="presetBlocked(n) ? 'Erst die laufenden Ziele dieses Anschlusses stoppen' : 'Füllt das Formular mit dem Preset; mit „Speichern“ übernehmen'"
+                    @click="loadPreset(n)">Laden</button>
+            <button type="button" class="btn-secondary" title="Aktuelle Einstellungen dieses Anschlusses inklusive aller Ziele als Preset ablegen" @click="saveTileAsPreset(n)">Als Preset speichern …</button>
+          </div>
+          <div class="hint" x-show="presetMsg[n]" x-text="presetMsg[n]" style="margin: -0.4rem 0 0.75rem;"></div>
           <div class="meta" style="margin-bottom: 0.75rem;">
             Modus: <span x-text="portMode(n)"></span> &middot;
             SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span>
@@ -1977,6 +2031,14 @@ function app() {
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
     tileSavedForms: {},
     savingTile: { 0: false, 1: false, 2: false, 3: false },
+    presets: [],
+    presetSelected: { 0: '', 1: '', 2: '', 3: '' },
+    presetPending: { 0: null, 1: null, 2: null, 3: null },
+    presetMsg: { 0: '', 1: '', 2: '', 3: '' },
+    presetsMsg: '',
+    presetsCollapsed: (() => {
+      try { const v = localStorage.getItem('presetsCollapsed'); return v === null ? true : v === '1'; } catch (e) { return true; }
+    })(),
     srtLinkInput: '',
     srtLinkMessage: '',
     tileSrtLinkInput: { 0: '', 1: '', 2: '', 3: '' },
@@ -2040,7 +2102,7 @@ function app() {
         for (const n of [0, 1, 2, 3]) {
           const p = this.tilePipelineFor(n);
           if (!p) continue;
-          if (!this.targetsExpanded[n]) {
+          if (!this.targetsExpanded[n] || this.targets[p.id] === undefined) {
             await this.loadTargets(p.id);
           } else {
             const hasRunning = (this.targets[p.id] || []).some(t => t.status === 'running');
@@ -2554,7 +2616,211 @@ function app() {
     },
 
     tileIsDirty(n) {
-      return JSON.stringify(this.tileForms[n]) !== this.tileSavedForms[n];
+      return JSON.stringify(this.tileForms[n]) !== this.tileSavedForms[n] || this.presetPending[n] !== null;
+    },
+
+    // --- Presets: komplette Anschluss-Einstellungen unter einem Namen ---
+    togglePresetsCollapsed() {
+      this.presetsCollapsed = !this.presetsCollapsed;
+      try { localStorage.setItem('presetsCollapsed', this.presetsCollapsed ? '1' : '0'); } catch (e) {}
+    },
+
+    async loadPresets() {
+      try {
+        const res = await fetch('api.php?action=presets_list');
+        const data = await res.json();
+        if (Array.isArray(data)) this.presets = data;
+      } catch (e) {
+        // naechster Versuch beim naechsten Speichern/Oeffnen
+      }
+    },
+
+    presetsFor(n) {
+      const dir = this.tileDirection(this.portFor(n));
+      return this.presets.filter(p => p.direction === dir);
+    },
+
+    presetSummary(pr) {
+      const t = (pr.data && pr.data.tile) || {};
+      const extra = ((pr.data && pr.data.targets) || []).length;
+      const video = (t.video_codec || 'h264').toUpperCase() + ' ' + (t.bitrate || 0) + ' kbit/s';
+      return video + ', ' + (t.audio_codec || 'aac').toUpperCase() + (extra ? ', +' + extra + (extra === 1 ? ' Ziel' : ' Ziele') : '');
+    },
+
+    async presetTargetsOf(p) {
+      if (!p) return [];
+      if (this.targets[p.id] !== undefined) return this.targets[p.id];
+      try {
+        const r = await (await fetch('api.php?action=targets_list&pipeline_id=' + p.id)).json();
+        return Array.isArray(r) ? r : [];
+      } catch (e) {
+        return [];
+      }
+    },
+
+    presetBlocked(n) {
+      const p = this.tilePipelineFor(n);
+      if (!p) return false;
+      return p.status === 'running' || (this.targets[p.id] || []).some(t => t.status === 'running');
+    },
+
+    coerceLike(def, v) {
+      if (typeof def === 'number') { const x = Number(v); return Number.isFinite(x) ? x : def; }
+      if (typeof def === 'boolean') return v === true || v === 1 || v === '1';
+      return v === null || v === undefined ? def : String(v);
+    },
+
+    pickLike(defaults, src, skip = []) {
+      const out = {};
+      for (const k of Object.keys(defaults)) {
+        if (skip.includes(k) || !(k in src)) continue;
+        out[k] = this.coerceLike(defaults[k], src[k]);
+      }
+      return out;
+    },
+
+    async saveTileAsPreset(n) {
+      const dir = this.tileDirection(this.portFor(n));
+      if (!dir) return;
+      const selected = this.presets.find(x => String(x.id) === String(this.presetSelected[n]));
+      const name = (prompt('Name des Presets (gleicher Name überschreibt nach Rückfrage):', selected ? selected.name : '') || '').trim();
+      if (!name) return;
+      const p = this.tilePipelineFor(n);
+      const tile = this.pickLike(defaultTileForm(n), this.tileForms[n], ['id']);
+      const targets = (await this.presetTargetsOf(p)).map(t => this.pickLike(this.newTargetDefaults(), t));
+      const post = async (overwrite) => {
+        const res = await fetch('api.php?action=preset_save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, direction: dir, data: { tile, targets }, overwrite })
+        });
+        return res.json();
+      };
+      try {
+        let r = await post(false);
+        if (r.exists) {
+          if (!confirm('Ein Preset mit dem Namen "' + name + '" gibt es schon. Überschreiben?')) return;
+          r = await post(true);
+        }
+        if (r.error) throw new Error(r.error);
+        await this.loadPresets();
+        this.presetSelected[n] = String(r.id);
+        this.presetMsg[n] = 'Preset "' + name + '" gespeichert (Ziel 1' + (targets.length ? ' und ' + targets.length + ' weitere' : '') + ').';
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Speichern des Presets: ' + e.message;
+      }
+    },
+
+    async loadPreset(n) {
+      const pr = this.presets.find(x => String(x.id) === String(this.presetSelected[n]));
+      if (!pr) return;
+      if (pr.direction !== this.tileDirection(this.portFor(n))) {
+        this.errorMsg = 'Das Preset passt nicht zur Richtung dieses Anschlusses.';
+        return;
+      }
+      if (this.presetBlocked(n)) {
+        this.errorMsg = 'Erst die laufenden Ziele dieses Anschlusses stoppen.';
+        return;
+      }
+      const tile = this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id']);
+      for (const k of Object.keys(tile)) this.tileForms[n][k] = tile[k];
+      const wanted = ((pr.data && pr.data.targets) || []).map(t => this.pickLike(this.newTargetDefaults(), t));
+      this.presetPending[n] = wanted;
+      const p = this.tilePipelineFor(n);
+      const have = (await this.presetTargetsOf(p)).length;
+      let msg = 'Preset "' + pr.name + '" geladen, noch nicht gespeichert. Mit „Speichern“ übernehmen.';
+      if (wanted.length) msg += ' Enthält ' + wanted.length + (wanted.length === 1 ? ' weiteres Ziel' : ' weitere Ziele') + ' (Ziel 2' + (wanted.length > 1 ? ' bis ' + (wanted.length + 1) : '') + '), die dabei überschrieben bzw. angelegt werden.';
+      if (have > wanted.length) msg += ' Vorhandene Ziele ab Ziel ' + (wanted.length + 2) + ' bleiben unverändert.';
+      this.presetMsg[n] = msg;
+      this.errorMsg = '';
+    },
+
+    async applyPresetTargets(n, pipelineId) {
+      const wanted = this.presetPending[n] || [];
+      const existing = await (await fetch('api.php?action=targets_list&pipeline_id=' + pipelineId)).json();
+      for (let i = 0; i < wanted.length; i++) {
+        const cur = existing[i];
+        const url = cur ? 'api.php?action=target_update&id=' + cur.id : 'api.php?action=target_create&pipeline_id=' + pipelineId;
+        const body = cur ? Object.assign({}, cur, wanted[i]) : Object.assign(this.newTargetDefaults(), wanted[i]);
+        const r = await (await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+        if (r.error) throw new Error('Ziel ' + (i + 2) + ': ' + r.error);
+      }
+      this.presetPending[n] = null;
+      this.presetMsg[n] = '';
+      await this.loadTargets(pipelineId);
+    },
+
+    async deletePreset(pr) {
+      if (!confirm('Preset "' + pr.name + '" wirklich löschen?')) return;
+      try {
+        const r = await (await fetch('api.php?action=preset_delete&id=' + pr.id, { method: 'POST' })).json();
+        if (r.error) throw new Error(r.error);
+        for (const n of [0, 1, 2, 3]) if (String(this.presetSelected[n]) === String(pr.id)) this.presetSelected[n] = '';
+        await this.loadPresets();
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Löschen des Presets: ' + e.message;
+      }
+    },
+
+    exportPresets(list) {
+      const doc = {
+        format: 'noicecaster-presets', version: 1, exported: new Date().toISOString(),
+        presets: list.map(pr => ({ name: pr.name, direction: pr.direction, data: pr.data }))
+      };
+      const label = list.length === 1 ? list[0].name : 'alle';
+      const file = 'noicecaster-presets-' + label.replace(/[^A-Za-z0-9._-]+/g, '_') + '.json';
+      const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      this.presetsMsg = list.length + (list.length === 1 ? ' Preset' : ' Presets') + ' exportiert (' + file + '). Die Datei enthält SRT-Passphrasen im Klartext.';
+    },
+
+    async importPresets(ev) {
+      const input = ev.target;
+      const f = input.files && input.files[0];
+      input.value = '';
+      if (!f) return;
+      let doc;
+      try {
+        doc = JSON.parse(await f.text());
+      } catch (e) {
+        this.presetsMsg = 'Import fehlgeschlagen: keine gültige JSON-Datei.';
+        return;
+      }
+      if (!doc || doc.format !== 'noicecaster-presets' || !Array.isArray(doc.presets)) {
+        this.presetsMsg = 'Import fehlgeschlagen: keine Preset-Datei von Noicecaster.';
+        return;
+      }
+      let added = 0, replaced = 0, skipped = 0, failed = 0;
+      for (const item of doc.presets) {
+        const post = async (overwrite) => (await fetch('api.php?action=preset_save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: item && item.name, direction: item && item.direction, data: item && item.data, overwrite })
+        })).json();
+        try {
+          let r = await post(false);
+          if (r.exists) {
+            if (!confirm('Ein Preset mit dem Namen "' + item.name + '" gibt es schon. Überschreiben?')) { skipped++; continue; }
+            r = await post(true);
+            if (r.error) throw new Error(r.error);
+            replaced++;
+          } else if (r.error) {
+            throw new Error(r.error);
+          } else {
+            added++;
+          }
+        } catch (e) {
+          failed++;
+        }
+      }
+      await this.loadPresets();
+      this.presetsMsg = 'Import: ' + added + ' neu, ' + replaced + ' überschrieben, ' + skipped + ' übersprungen' + (failed ? ', ' + failed + ' fehlerhaft' : '') + '.';
     },
 
     toggleTileCollapsed(n) {
@@ -2617,6 +2883,7 @@ function app() {
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        if (this.presetPending[n] !== null) await this.applyPresetTargets(n, tf.id || data.id);
         await this.load();
         this.initTiles(n);
       } catch (e) {
