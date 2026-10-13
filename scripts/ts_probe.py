@@ -613,7 +613,9 @@ def analyse(packets):
         sps = (mpeg2_seq or find_seq_mpeg2(bytes(video_buf))) if video_type == 2 else ((find_sps_hevc if video_type == 0x24 else find_sps)(bytes(video_buf)) if video_buf else None)
         if sps:
             v.update({k: sps[k] for k in ('profile', 'level', 'width', 'height', 'interlaced', 'chroma', 'bit_depth') if k in sps})
-        iv = intervals(pes.get(video_pid, []))
+        # Bildabstand aus den nach PTS sortierten Zeitstempeln (Anzeigereihenfolge): in Dekodierreihenfolge springt die
+        # PTS mit B-Bildern vor und zurueck, das ergab z. B. 12,5 statt 25 Bilder/s bei IBBP.
+        iv = intervals(sorted(pes.get(video_pid, []), key=lambda e: e[1]))
         if len(iv) >= 3:
             med = statistics.median(iv)
             v['fps'] = round(1000.0 / med, 2)
