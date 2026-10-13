@@ -223,6 +223,58 @@ def find_seq_mpeg2(buf):
             'interlaced': bool(interlaced), 'sps_fps': fps}
 
 
+def frame_type_h264(head):
+    """Bildtyp I/P/B aus dem slice_type des ersten Slices (NAL 1 oder 5); None, wenn kein Slice im Anfang liegt."""
+    i = 0
+    while True:
+        i = head.find(b'\x00\x00\x01', i)
+        if i < 0 or i + 4 >= len(head):
+            return None
+        if head[i + 3] & 0x1f in (1, 5):
+            b = Bits(unescape(bytes(head[i + 4:i + 28])))
+            b.ue()
+            return {2: 'I', 4: 'I', 0: 'P', 3: 'P', 1: 'B'}.get(b.ue() % 5)
+        i += 3
+
+
+def frame_type_mpeg2(head):
+    """Bildtyp I/P/B aus picture_coding_type des Bildkopfs (00)."""
+    i = 0
+    while True:
+        i = head.find(b'\x00\x00\x01\x00', i)
+        if i < 0 or i + 5 >= len(head):
+            return None
+        return {1: 'I', 2: 'P', 3: 'B'}.get((head[i + 5] >> 3) & 7)
+
+
+def gop_structure(types, pts):
+    """Aus Bildtypen und PTS (Dekodierreihenfolge): Framing (z. B. IBBP), offene/geschlossene GOP, I-Bild-Positionen."""
+    out = {'framing': None, 'open': None, 'keys': [i for i, t in enumerate(types) if t == 'I']}
+    if len(types) < 8:
+        return out
+    runs, n = [], 0
+    for t in types:
+        if t == 'B':
+            n += 1
+        else:
+            if n:
+                runs.append(n)
+            n = 0
+    if n:
+        runs.append(n)
+    bf = max(runs) if runs else 0
+    if 'P' not in types and 'B' not in types:
+        out['framing'] = 'I'
+    else:
+        out['framing'] = 'I' + 'B' * bf + 'P'
+    if bf:
+        # offene GOP: direkt nach einem I-Bild folgen B-Bilder (fuehrende Bilder, die vor dem I-Bild angezeigt werden)
+        after = [types[j + 1] for j, t in enumerate(types[:-1]) if t == 'I']
+        if after:
+            out['open'] = any(a == 'B' for a in after)
+    return out
+
+
 def is_keyframe_hevc(head):
     """IDR/CRA-Bild (NAL 19-21) oder Parametersatz (VPS/SPS/PPS 32-34) am Anfang des Bildes."""
     i = 0
@@ -427,6 +479,9 @@ def analyse(packets):
     cur_pes = {}           # pid -> bytearray des laufenden PES (Anfang)
     vhead = None           # Anfang des laufenden Videobildes
     vframes = []           # je Bild: Keyframe ja/nein
+    vtypes = []            # je Bild: I/P/B aus dem Bitstrom (H.264, MPEG-2) oder None
+    vpts = []              # je Bild: PTS in ms (Dekodierreihenfolge)
+    vcur_pts = None
     nulls = 0
     for idx, p in enumerate(packets):
         if p[0] != 0x47:
@@ -513,8 +568,11 @@ def analyse(packets):
                 if pusi:
                     if vhead is not None:
                         vframes.append((is_keyframe_mpeg2 if video_type == 2 else (is_keyframe_hevc if video_type == 0x24 else is_keyframe))(bytes(vhead)))
+                        vtypes.append(frame_type_mpeg2(bytes(vhead)) if video_type == 2 else (None if video_type == 0x24 else frame_type_h264(bytes(vhead))))
+                        vpts.append(vcur_pts)
                         if video_type == 2 and mpeg2_seq is None:
                             mpeg2_seq = find_seq_mpeg2(bytes(vhead))
+                    vcur_pts = t / 90.0 if t is not None else None
                     vhead = bytearray(payload[9 + payload[8]:]) if len(payload) > 9 else bytearray()
                 elif vhead is not None and len(vhead) < 2500:
                     vhead += payload
@@ -562,7 +620,18 @@ def analyse(packets):
             v['interval_ms'] = round(med, 2)
             v['interval_dev_ms'] = round(max(abs(x - med) for x in iv), 2)
         # GOP-Laenge = Bilder zwischen zwei Keyframes (IDR)
-        keys = [i for i, k in enumerate(vframes) if k]
+        # Bildtypen: aus dem Bitstrom, sonst (H.265) Keyframe = I, PTS kleiner als das bisherige Maximum = B, Rest P
+        types, maxp = [], None
+        for ty, k, pt in zip(vtypes, vframes, vpts):
+            if ty is None:
+                ty = 'I' if k else ('B' if pt is not None and maxp is not None and pt < maxp else 'P')
+            if pt is not None and (maxp is None or pt > maxp):
+                maxp = pt
+            types.append(ty)
+        gs = gop_structure(types, vpts)
+        v['gop_framing'] = gs['framing']
+        v['gop_open'] = gs['open']
+        keys = gs['keys']
         if len(keys) >= 2:
             gops = [b - a for a, b in zip(keys, keys[1:])]
             v['gop_frames'] = int(statistics.median(gops))

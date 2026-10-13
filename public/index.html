@@ -784,7 +784,7 @@
               <div>
                 <div class="k">Keyframes (GOP)</div>
                 <div class="v" x-text="it.probe.video && it.probe.video.gop_frames ? it.probe.video.gop_frames + ' Bilder (' + String(it.probe.video.gop_s).replace('.', ',') + ' s)' : '–'"></div>
-                <div class="s" x-text="it.probe.video ? it.probe.video.keyframes_in_window + ' Keyframes im Messfenster' : ''"></div>
+                <div class="s" x-text="it.probe.video ? (it.probe.video.gop_framing ? it.probe.video.gop_framing + (it.probe.video.gop_open === true ? ', offene GOP' : it.probe.video.gop_open === false ? ', geschlossene GOP' : '') + ' · ' : '') + it.probe.video.keyframes_in_window + ' Keyframes im Messfenster' : ''"></div>
               </div>
               <div>
                 <div class="k">Audio</div>
