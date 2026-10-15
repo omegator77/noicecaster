@@ -95,6 +95,43 @@ try {
             }
             break;
 
+        case 'lowerthird_template_upload':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $file = $_FILES['file'] ?? null;
+            if (!$file || ($file['error'] ?? 1) !== UPLOAD_ERR_OK) {
+                throw new RuntimeException('Datei nicht empfangen');
+            }
+            echo json_encode(['success' => true] + LowerThird::installTemplate((string)$file['tmp_name'], (int)$file['size'], (string)($_POST['name'] ?? ''), !empty($_POST['overwrite']), (string)($file['name'] ?? '')));
+            break;
+
+        case 'lowerthird_template_delete':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            LowerThird::deleteTemplate((string)($data['id'] ?? ''), $db->pdo());
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'lowerthird_template_download':
+            $tid = (string)($_GET['id'] ?? '');
+            $svgText = preg_match('/^[a-z0-9_-]{1,40}$/', $tid) === 1 ? LowerThird::templateSvg($tid) : null;
+            if ($svgText === null) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Vorlage nicht gefunden']);
+                break;
+            }
+            header('Content-Type: image/svg+xml; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $tid . '.svg"');
+            echo $svgText;
+            break;
+
         case 'lowerthird_logo':
             $name = (string)($_GET['name'] ?? '');
             if (preg_match('/^[a-f0-9]{16,64}\.(png|jpg)$/', $name) !== 1 || !is_file(LowerThird::logoPath($name))) {

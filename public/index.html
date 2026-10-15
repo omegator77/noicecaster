@@ -1502,6 +1502,52 @@
                     </div>
                   </div>
                 </div>
+                <details style="margin-top: 0.5rem;">
+                  <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Vorlagen verwalten</summary>
+                  <div class="tl-box" style="margin-top: 0.4rem;">
+                    <div class="hint" x-show="ltTemplates === null" style="margin-top: 0;">Vorlagen werden geladen …</div>
+                    <template x-for="t in (ltTemplates || [])" :key="t.id">
+                      <div class="tl-row" style="padding: 0.3rem 0; border-bottom: 1px solid #2a2e37;">
+                        <span style="flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; font-size: 0.85rem; color: #e4e6eb;">
+                          <strong x-text="t.name || t.id"></strong>
+                          <span class="hint" x-text="' · ' + (t.builtin ? 'eingebaut' : 'eigen') + ' · ' + t.width + '×' + t.height + ' · ' + (t.has_logo ? 'mit Logo-Platz' : 'ohne Logo-Platz')"></span>
+                        </span>
+                        <a class="btn-secondary" style="padding: 0.3rem 0.7rem; border-radius: 6px; font-size: 0.8rem; text-decoration: none;" :href="'api.php?action=lowerthird_template_download&id=' + encodeURIComponent(t.id)" download>Herunterladen</a>
+                        <button type="button" class="btn-stop" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;" x-show="!t.builtin" :disabled="!!tplBusy" @click="tplDelete(t)">Löschen</button>
+                      </div>
+                    </template>
+                    <div style="margin-top: 0.6rem;">
+                      <label>Eigene Vorlage hochladen (SVG, bis 1 MB)</label>
+                      <div class="tl-row">
+                        <input type="file" accept=".svg,image/svg+xml" @change="tplPick(n, $event)" style="width: auto;">
+                        <input type="text" maxlength="60" x-model="tplName[n]" placeholder="Name (optional)" spellcheck="false" style="width: 14rem; max-width: 100%;">
+                        <button type="button" class="btn-primary" :disabled="!!(!tplHasFile[n] || tplBusy)" @click="tplUpload(n, false)">Hochladen</button>
+                      </div>
+                    </div>
+                    <div class="hint" x-show="tplMsg" :style="'color:' + (tplMsg && tplMsg.kind === 'err' ? '#f87171' : '#4ade80')" x-text="tplMsg && tplMsg.text"></div>
+                    <details style="margin-top: 0.5rem;">
+                      <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Wie baue ich eine eigene Vorlage?</summary>
+                      <div style="font-size: 0.8rem; color: #c3c8d2; margin-top: 0.4rem; line-height: 1.45;">
+                        <p style="margin: 0 0 0.4rem;"><strong>Tipp:</strong> Eine eingebaute Vorlage herunterladen, in Illustrator, Inkscape oder einem Texteditor anpassen und wieder hochladen.</p>
+                        <p style="margin: 0 0 0.2rem;">Platzhalter im SVG:</p>
+                        <ul style="margin: 0 0 0.4rem 1.1rem; padding: 0;">
+                          <li><code>{{TITLE}}</code>, <code>{{MAIN}}</code>, <code>{{SUB}}</code>: Reiter-Titel, Haupttext und Untertext (mindestens einer ist nötig)</li>
+                          <li><code>{{ACCENT}}</code> und <code>{{ACCENT2}}</code>: Akzentfarbe und eine dunklere Variante, z. B. in <code>fill</code> oder <code>stop-color</code></li>
+                          <li><code>{{TITLE_SIZE}}</code>, <code>{{MAIN_SIZE}}</code>, <code>{{SUB_SIZE}}</code>: vom Gateway eingepasste Schriftgrößen für <code>font-size</code> (in SVG-Einheiten)</li>
+                          <li><code>{{LOGO}}</code>: hier wird das gewählte Logo als Bild eingesetzt; die Position kommt aus einem unsichtbaren Rechteck mit <code>id="logo"</code> oder aus dem Kommentar</li>
+                        </ul>
+                        <p style="margin: 0 0 0.2rem;">Regeln:</p>
+                        <ul style="margin: 0 0 0.4rem 1.1rem; padding: 0;">
+                          <li>Die Größe kommt aus dem <code>viewBox</code> (100 bis 4000 Einheiten).</li>
+                          <li>Nicht erlaubt: Skripte, Animationen, Dateiverweise und externe Bilder. Eingebettete Bilder nur als <code>data:image/png|jpeg|gif|webp;base64</code>.</li>
+                          <li>Der Name kommt aus dem Feld oben, sonst aus einem noicecaster-Kommentar, sonst aus dem Dateinamen. Gleicher Name wie eine eigene Vorlage: Ersetzen wird nachgefragt.</li>
+                          <li>Eine Vorlage lässt sich erst löschen, wenn kein Ausgang sie mehr benutzt.</li>
+                          <li>Optionaler Kommentar mit Feinheiten: <code>&lt;!-- noicecaster: {"name": "...", "boxes": {"main": {"w": 900, "size": 60}}, "logo": {"x": 0, "y": 0, "w": 100, "h": 100}} --&gt;</code></li>
+                        </ul>
+                      </div>
+                    </details>
+                  </div>
+                </details>
                 <div style="margin-top: 0.5rem;">
                   <label>Reiter-Titel</label>
                   <input type="text" maxlength="80" x-model="lt.lt_title" placeholder="z. B. LIVE" spellcheck="false">
@@ -1529,6 +1575,7 @@
                     <input type="file" accept="image/png,image/jpeg" @change="ltLogoUpload(n, $event)" style="width: auto;">
                   </div>
                   <div class="hint" x-show="ltLogoMsg[n]" style="color: #f87171;" x-text="ltLogoMsg[n]"></div>
+                  <div class="hint" x-show="tplNoLogo(lt)">Diese Vorlage hat keinen Logo-Platz, das Logo wird nicht angezeigt.</div>
                 </div>
                 <div class="form-row" style="margin-top: 0.5rem;">
                   <div>
@@ -2540,7 +2587,10 @@ function overlayFromServer(p) {
 }
 
 // Bauchbinde (Lower Third) am Ausgang: Standardwerte und Normalisierung der Serverwerte
-const LT_KEYS = ['lt_template', 'lt_title', 'lt_main', 'lt_sub', 'lt_color', 'lt_logo', 'lt_anim', 'lt_dur', 'lt_hold', 'lt_scale', 'lt_pos'];
+// Gewaehlte SVG-Dateien der Vorlagen-Verwaltung je Kachel (File-Objekte bleiben ausserhalb von Alpine)
+const TPL_FILES = {};
+const TPL_INPUTS = {};
+const LT_KEYS =['lt_template', 'lt_title', 'lt_main', 'lt_sub', 'lt_color', 'lt_logo', 'lt_anim', 'lt_dur', 'lt_hold', 'lt_scale', 'lt_pos'];
 function ltDefaults() {
   return { lt_template: 'classic', lt_title: '', lt_main: '', lt_sub: '', lt_color: '#E1306C', lt_logo: '', lt_anim: 'slide-left', lt_dur: 700, lt_hold: 0, lt_scale: 60, lt_pos: 'bottom-left' };
 }
@@ -2684,6 +2734,11 @@ function app() {
     ltPrev: { 0: null, 1: null, 2: null, 3: null },
     ltTemplates: null,
     ltTemplatesLoading: false,
+    // Vorlagen-Verwaltung (systemweit; Datei und Name je Kachel, Meldung gemeinsam)
+    tplMsg: null,
+    tplBusy: false,
+    tplHasFile: { 0: false, 1: false, 2: false, 3: false },
+    tplName: { 0: '', 1: '', 2: '', 3: '' },
     ltDurs: [300, 500, 700, 1000, 1500, 2000],
     ltScales: [30, 40, 50, 60, 70, 80, 100],
     ltAnims: [
@@ -3484,7 +3539,7 @@ function app() {
     },
 
     ltTemplateList(cur) {
-      const list = (this.ltTemplates || []).map(t => ({ id: String(t.id), name: String(t.name || t.id) }));
+      const list = (this.ltTemplates || []).map(t => ({ id: String(t.id), name: String(t.name || t.id) + (t.builtin ? '' : ' (eigen)') }));
       if (cur && !list.some(t => t.id === cur)) list.unshift({ id: cur, name: cur });
       if (!list.length) list.push({ id: 'classic', name: 'classic' });
       return list;
@@ -3501,6 +3556,112 @@ function app() {
         // nicht kritisch: beim naechsten Aufklappen erneut versuchen
       } finally {
         this.ltTemplatesLoading = false;
+      }
+    },
+
+    // Logo gewaehlt, aber die gewaehlte Vorlage hat keinen Logo-Platz
+    tplNoLogo(lt) {
+      if (!lt || !lt.lt_logo || !Array.isArray(this.ltTemplates)) return false;
+      const t = this.ltTemplates.find(x => String(x.id) === String(lt.lt_template));
+      return !!(t && !t.has_logo);
+    },
+
+    // Vorlagenliste neu holen (bei Fehler bleibt die alte stehen)
+    async tplReload() {
+      try {
+        const res = await fetch('api.php?action=lowerthird_templates');
+        const data = await res.json();
+        if (data && Array.isArray(data.templates)) this.ltTemplates = data.templates;
+      } catch (e) { /* alte Liste behalten */ }
+    },
+
+    tplPick(n, ev) {
+      const input = ev.target;
+      const file = input.files && input.files[0];
+      TPL_FILES[n] = file || null;
+      TPL_INPUTS[n] = input;
+      this.tplHasFile[n] = !!file;
+      this.tplMsg = null;
+    },
+
+    // useFile: Dateiname (ohne .svg) als Name verwenden (Rueckfall, wenn weder Feld noch Kommentar einen Namen liefern)
+    async tplUpload(n, overwrite, useFile) {
+      let next = await this.tplUploadOnce(n, !!overwrite, !!useFile);
+      while (next) next = await this.tplUploadOnce(n, next.overwrite, next.useFile);
+    },
+
+    // Ein Upload-Versuch; liefert {overwrite, useFile} zurueck, wenn ein weiterer Versuch noetig ist
+    async tplUploadOnce(n, overwrite, useFile) {
+      const file = TPL_FILES[n];
+      if (!file || this.tplBusy) return null;
+      if (file.size > 1024 * 1024) { this.tplMsg = { kind: 'err', text: 'Die Datei ist größer als 1 MB' }; return null; }
+      this.tplBusy = true;
+      this.tplMsg = null;
+      let again = false;
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        let nm = String(this.tplName[n] || '').trim();
+        const stem = String(file.name || '').replace(/\.svg$/i, '').trim();
+        if (!nm && useFile) nm = stem;
+        if (nm) fd.append('name', nm);
+        if (overwrite) fd.append('overwrite', '1');
+        const res = await fetch('api.php?action=lowerthird_template_upload', { method: 'POST', body: fd });
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* keine JSON-Antwort */ }
+        if (!data) throw new Error('Unerwartete Antwort vom Server (HTTP ' + res.status + ')');
+        if (data.error) {
+          if (!nm && !useFile && stem && String(data.error).indexOf('Bitte einen Namen') !== -1) {
+            again = { overwrite: !!overwrite, useFile: true };
+            return again;
+          }
+          if (!overwrite && String(data.error).indexOf('gibt es schon') !== -1) {
+            if (confirm('Eine eigene Vorlage mit diesem Namen gibt es schon. Ersetzen?')) { again = { overwrite: true, useFile: !!useFile }; }
+            else { this.tplMsg = { kind: 'err', text: 'Abgebrochen, nichts hochgeladen.' }; }
+            return again;
+          }
+          throw new Error(data.error);
+        }
+        await this.tplReload();
+        this.tplMsg = { kind: 'ok', text: 'Vorlage „' + String(data.name || data.id) + '“ ' + (data.replaced ? 'ersetzt' : 'installiert') };
+        TPL_FILES[n] = null;
+        this.tplHasFile[n] = false;
+        this.tplName[n] = '';
+        if (TPL_INPUTS[n]) TPL_INPUTS[n].value = '';
+      } catch (e) {
+        this.tplMsg = { kind: 'err', text: e.message };
+      } finally {
+        this.tplBusy = false;
+      }
+      return null;
+    },
+
+    async tplDelete(t) {
+      if (!t || t.builtin || this.tplBusy) return;
+      if (!confirm('Vorlage „' + (t.name || t.id) + '“ löschen?')) return;
+      this.tplBusy = true;
+      this.tplMsg = null;
+      try {
+        const res = await fetch('api.php?action=lowerthird_template_delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: t.id })
+        });
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* keine JSON-Antwort */ }
+        if (!data) throw new Error('Unerwartete Antwort vom Server (HTTP ' + res.status + ')');
+        if (data.error) throw new Error(data.error);
+        // Wird die Vorlage in einem Formular noch ausgewaehlt, zurueck auf classic
+        Object.keys(this.tileForms || {}).forEach(k => {
+          const f = this.tileForms[k];
+          if (f && f.lt_template === t.id) f.lt_template = 'classic';
+        });
+        await this.tplReload();
+        this.tplMsg = { kind: 'ok', text: 'Vorlage „' + (t.name || t.id) + '“ gelöscht' };
+      } catch (e) {
+        this.tplMsg = { kind: 'err', text: e.message };
+      } finally {
+        this.tplBusy = false;
       }
     },
 
