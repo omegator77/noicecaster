@@ -54,8 +54,16 @@ class FirewallManager
             $ports[$port]['port'] = $port;
             $ports[$port]['users'][] = ['name' => $label, 'running' => $status === 'running'];
         };
+        $tcp = [];
+        $addTcp = function (int $port, string $label, string $status) use (&$tcp) {
+            $tcp[$port]['port'] = $port;
+            $tcp[$port]['proto'] = 'tcp';
+            $tcp[$port]['users'][] = ['name' => $label, 'running' => $status === 'running'];
+        };
         foreach ($manager->list() as $p) {
-            if (($p['srt_mode'] ?? 'listener') === 'listener' && ($p['output_protocol'] ?? 'srt') !== 'rtmp') {
+            if (($p['output_protocol'] ?? 'srt') === 'rtmp_in') {
+                $addTcp(IngestManager::PORT, (string)$p['name'] . ' (RTMP-Annahme)', (string)($p['status'] ?? ''));
+            } elseif (($p['srt_mode'] ?? 'listener') === 'listener' && ($p['output_protocol'] ?? 'srt') !== 'rtmp') {
                 $add((int)$p['srt_port'], (string)$p['name'], (string)($p['status'] ?? ''));
             }
             foreach ($manager->listTargets((int)$p['id']) as $t) {
@@ -67,12 +75,19 @@ class FirewallManager
         ksort($ports);
 
         foreach ($ports as &$entry) {
-            $entry['state'] = self::portState($entry['port'], $rules, $active);
+            $entry['proto'] = 'udp';
+            $entry['state'] = self::portState($entry['port'], $rules, $active, 'udp');
         }
-        return array_values($ports);
+        unset($entry);
+        ksort($tcp);
+        foreach ($tcp as &$entry) {
+            $entry['state'] = self::portState($entry['port'], $rules, $active, 'tcp');
+        }
+        unset($entry);
+        return array_merge(array_values($ports), array_values($tcp));
     }
 
-    private static function portState(int $port, array $rules, ?bool $active): array
+    private static function portState(int $port, array $rules, ?bool $active, string $proto = 'udp'): array
     {
         if ($active === null) {
             return ['code' => 'unknown', 'sources' => []];
@@ -86,7 +101,7 @@ class FirewallManager
             if (($r['action'] ?? '') !== 'allow' || ($dir !== 'in' && strpos($dir, 'in_') !== 0)) {
                 continue;
             }
-            if (!in_array($r['proto'], ['udp', 'any'], true)) {
+            if (!in_array($r['proto'], [$proto, 'any'], true)) {
                 continue;
             }
             $range = explode(':', (string)$r['port']);

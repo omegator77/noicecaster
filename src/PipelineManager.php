@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/TestSignal.php';
+require_once __DIR__ . '/IngestManager.php';
 
 class PipelineManager
 {
@@ -41,7 +42,9 @@ class PipelineManager
     ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
     // Ausgabeprotokoll je Ziel. RTMP (nur Senden): H.264 4:2:0 8 Bit + AAC Stereo in FLV, keine PIDs, kein Abgriff.
-    private const OUTPUT_PROTOCOLS = ['srt', 'rtmp'];
+    // Bei Empfaengern (SRT/RTMP -> SDI): 'rtmp' = Strom von einem RTMP-Server abrufen, 'rtmp_in' = ein Encoder sendet per RTMP
+    // an das Gateway (Hilfsserver, siehe IngestManager).
+    private const OUTPUT_PROTOCOLS = ['srt', 'rtmp', 'rtmp_in'];
     private const VIDEO_RATE_CONTROLS = ['cbr', 'vbr'];
     // Chroma-Subsampling und Bittiefe des Videostroms (H.264/H.265; MPEG-2 nur 8 Bit)
     private const VIDEO_CHROMA = ['420', '422'];
@@ -548,13 +551,37 @@ class PipelineManager
         return ($row['output_protocol'] ?? 'srt') === 'rtmp';
     }
 
+    private function isRtmpIn(array $row): bool
+    {
+        return ($row['output_protocol'] ?? 'srt') === 'rtmp_in' && $this->isReceiverRow($row);
+    }
+
+    /** Empfaenger-Pipeline (SRT/RTMP -> SDI-Ausgang), also ohne Encoder. */
+    private function isReceiverRow(array $row): bool
+    {
+        return ($row['pipeline_direction'] ?? 'sdi_to_srt') === 'srt_to_sdi';
+    }
+
+    /**
+     * Vollstaendige RTMP-Adresse: URL plus Stream-Key bzw. Stream-Name. Beim Senden Pflicht, beim Empfang optional
+     * (dann steht der Stream-Name schon in der URL).
+     */
+    private function rtmpLocation(array $row): string
+    {
+        $out = $this->sanitizeOutput($row);
+        if ($out['url'] === null) {
+            throw new RuntimeException('RTMP benoetigt eine URL');
+        }
+        return $out['key'] !== null ? $out['url'] . '/' . $out['key'] : $out['url'];
+    }
+
     /**
      * RTMP kann nur H.264 (4:2:0, 8 Bit) und AAC in einer Stereo-Spur: diese Werte werden bei RTMP-Zielen fest gesetzt
      * (beim Speichern und beim Bauen des Befehls), PIDs/Programm gibt es im FLV-Strom nicht. Bei SRT aendert sich nichts.
      */
     private function applyRtmpLimits(array $data): array
     {
-        if (!$this->isRtmp($data)) {
+        if (!$this->isRtmp($data) || $this->isReceiverRow($data)) {
             return $data;
         }
         return array_merge($data, [
@@ -578,18 +605,31 @@ class PipelineManager
         $protocol = in_array($requested, self::OUTPUT_PROTOCOLS, true) ? $requested : 'srt';
         $url = rtrim(trim((string)($data['rtmp_url'] ?? '')), '/');
         $key = trim((string)($data['rtmp_key'] ?? ''));
-        if ($key === '' && $existingKey !== null && (int)($data['rtmp_key_clear'] ?? 0) !== 1) {
+        // Bei der RTMP-Annahme wird der Key immer mitgeschickt (er ist in der Oberflaeche sichtbar): leer heisst leer, nicht behalten
+        if ($key === '' && $existingKey !== null && $protocol !== 'rtmp_in' && (int)($data['rtmp_key_clear'] ?? 0) !== 1) {
             $key = $existingKey;
         }
         $urlValid = $url !== '' && strlen($url) <= 300 && preg_match(self::RTMP_URL_PATTERN, $url) === 1;
-        if ($protocol === 'rtmp') {
+        if ($protocol === 'rtmp_in') {
+            if (!$this->isReceiverRow($data)) {
+                throw new RuntimeException('RTMP-Annahme gibt es nur bei Ausgangs-Anschluessen (Empfang -> SDI)');
+            }
+            // Der Key ist der Pfad im Hilfsserver und damit die Zugangsberechtigung zum Senden: eigene, engere Zeichenmenge
+            if ($key === '') {
+                throw new RuntimeException('RTMP-Annahme benoetigt einen Stream-Key (so wie ihn der Encoder eintraegt)');
+            }
+            if (preg_match('/^[A-Za-z0-9._~-]{4,128}$/', $key) !== 1) {
+                throw new RuntimeException('Stream-Key fuer die RTMP-Annahme: 4 bis 128 Zeichen aus Buchstaben, Ziffern und . _ ~ -');
+            }
+            $url = '';
+        } elseif ($protocol === 'rtmp') {
             if ($url === '') {
                 throw new RuntimeException('RTMP-Ziel benoetigt eine Server-URL (z. B. rtmp://a.rtmp.youtube.com/live2)');
             }
             if (!$urlValid) {
                 throw new RuntimeException('RTMP-URL muss mit rtmp:// oder rtmps:// beginnen und darf nur Buchstaben, Ziffern und . - _ ~ / enthalten (ohne Stream-Key)');
             }
-            if ($key === '') {
+            if ($key === '' && !$this->isReceiverRow($data)) {
                 throw new RuntimeException('RTMP-Ziel benoetigt einen Stream-Key');
             }
         } elseif (!$urlValid) {
@@ -610,7 +650,11 @@ class PipelineManager
     private function maskOutputSecrets(array $row): array
     {
         $row['rtmp_key_set'] = !empty($row['rtmp_key']) ? 1 : 0;
-        unset($row['rtmp_key']);
+        // Bei der RTMP-Annahme ist der Key die Adresse, an die der Encoder sendet (rtmp://Gateway:1935/live/KEY): er muss
+        // in der Oberflaeche lesbar bleiben (Zugriff nur mit Anmeldung, wie die SRT-Passphrase). Sonst bleibt er serverseitig.
+        if (($row['output_protocol'] ?? 'srt') !== 'rtmp_in') {
+            unset($row['rtmp_key']);
+        }
         return $row;
     }
 
@@ -640,7 +684,7 @@ class PipelineManager
         if ($out['url'] === null || $out['key'] === null) {
             throw new RuntimeException('RTMP-Ziel benoetigt Server-URL und Stream-Key');
         }
-        $location = escapeshellarg($out['url'] . '/' . $out['key']);
+        $location = escapeshellarg($this->rtmpLocation($row));
         // avc/au: flvmux verlangt H.264 ohne Startcodes; latency wie beim Transportstrom, damit der Ton beim Start nicht fehlt.
         // Queues: vor flvmux (Latenzabfrage, siehe muxSetupFor) und vor rtmp2sink (3 s Puffer, damit ein kurzes Stocken des
         // Netzes die Encoder-Kette und den Verteiler nicht blockiert).
@@ -1446,6 +1490,11 @@ class PipelineManager
             TestSignal::stop((int)$p['decklink_device_number']);
         }
 
+        // RTMP-Annahme: der Hilfsserver muss laufen (und den Pfad dieses Empfaengers kennen), bevor der Empfaenger abholt
+        if ($this->isRtmpIn($p) && (int)($p['test_pattern_enabled'] ?? 0) !== 1) {
+            IngestManager::sync($this->db, [(string)$p['rtmp_key']]);
+        }
+
         if ($this->isMultiTargetEligible($p)) {
             // "Ziel 1" ist die Pipeline selbst - laeuft wie jedes andere Ziel per shmsrc gegen den
             // gemeinsamen Verteiler, damit weitere Ziele jederzeit unabhaengig dazukommen koennen.
@@ -1478,6 +1527,9 @@ class PipelineManager
 
         if ($this->isMultiTargetEligible($p)) {
             $this->maybeStopDistributor($id);
+        }
+        if ($this->isRtmpIn($p)) {
+            IngestManager::sync($this->db); // Pfad entfernen, beim letzten Empfaenger den Hilfsserver beenden
         }
     }
 
@@ -1662,6 +1714,9 @@ class PipelineManager
 
     private function buildReceiveCommand(array $p): string
     {
+        if ($this->isRtmp($p) || $this->isRtmpIn($p)) {
+            return $this->buildRtmpReceiveCommand($p);
+        }
         $port = (int)$p['srt_port'];
         $latency = (int)$p['srt_latency'];
         $mode = $p['srt_mode'] ?? 'listener';
@@ -1717,6 +1772,38 @@ class PipelineManager
         }
 
         return "env GST_DEBUG=srtsrc:5 GST_DEBUG_NO_COLOR=1 python3 {$helper}{$args}";
+    }
+
+    /**
+     * RTMP-Empfang: derselbe Python-Empfaenger wie bei SRT, aber mit --rtmp-uri (rtmp2src holt den Strom von einem Server ab,
+     * flvdemux, danach der gleiche Ausgabeweg). Kein Stromabgriff, kein SRT-Latenz-/Verschluesselungsteil.
+     */
+    private function buildRtmpReceiveCommand(array $p): string
+    {
+        $location = $this->isRtmpIn($p)
+            ? IngestManager::localUrl((string)$this->sanitizeOutput($p)['key'])
+            : $this->rtmpLocation($p);
+        $decklink = $this->sanitizeDecklink([
+            'decklink_device_number' => $p['decklink_device_number'] ?? 0,
+            'decklink_connection' => $p['decklink_connection'] ?? 'auto',
+            'decklink_profile' => $p['decklink_profile'] ?? 'default',
+            'decklink_audio_channels' => $p['decklink_audio_channels'] ?? 2,
+            'pipeline_direction' => 'srt_to_sdi',
+        ]);
+        $this->ports->assertRole($decklink['device_number'], 'output');
+        $outputMode = $this->ports->getMode($decklink['device_number']);
+        if ($outputMode === 'auto') {
+            $outputMode = DecklinkPortManager::DEFAULT_OUTPUT_MODE;
+        }
+        $helper = escapeshellarg(__DIR__ . '/../scripts/srt_to_sdi_receiver.py');
+        $args = ' --rtmp-uri ' . escapeshellarg($location) .
+            ' --device ' . (int)$decklink['device_number'] .
+            ' --mode ' . escapeshellarg($outputMode) .
+            ' --profile ' . escapeshellarg($decklink['profile']) .
+            ' --audio-channels ' . $this->deviceAudioChannels((int)$decklink['audio_channels']) .
+            ' --audio-used ' . max(2, (int)$decklink['audio_channels']) .
+            ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id']));
+        return "env GST_DEBUG=rtmp2src:3 GST_DEBUG_NO_COLOR=1 python3 {$helper}{$args}";
     }
 
     private function updateStatus(int $id, string $status, ?int $pid): void

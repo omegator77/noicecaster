@@ -28,3 +28,9 @@ data/probe_*.lock
 data/peer.json
 data/peer_status.json
 data/testsignal_*.json
+
+# RTMP-Hilfsserver (MediaMTX, installiert mit deploy/install-mediamtx.sh) und seine Laufzeitdateien
+bin/
+data/mediamtx.yml
+data/mediamtx.yml.tmp
+data/mediamtx.pid

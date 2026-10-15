@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SRT-Empfang -> DeckLink-Ausgabe (Video + Audio) mit dynamischer Pad-Behandlung.
+"""SRT- oder RTMP-Empfang -> DeckLink-Ausgabe (Video + Audio) mit dynamischer Pad-Behandlung.
 
 Wird von PipelineManager::buildReceiveCommand() gestartet. tsdemux legt seine Streams beim
 Verbindungsaufbau neu an (audio_0_0042 -> audio_1_0042, video_1_0041); jedes neue Pad wird hier
@@ -10,6 +10,11 @@ Selbstueberwachung: Bricht die Pipeline mit einem Fehler ab (z. B. der Videoausg
 Stream-Fehler, wenn der Sender neu startet und die Zeitstempel zurueckspringen), wird sie nach
 kurzer Pause neu aufgebaut. SIGTERM/SIGINT beenden das Programm sofort und schliessen die
 SRT-Verbindung sauber.
+
+RTMP (--rtmp-uri): rtmp2src holt den Strom von einem RTMP-Server ab (Client), flvdemux liefert H.264 und AAC. Der
+Rest (Ausgabewege, Ton, Selbstueberwachung) ist derselbe wie bei SRT. Ein Abbruch oder Ende des Stroms fuehrt zum
+Neuaufbau nach 2 s, so holt sich der Empfaenger den Strom nach einer Unterbrechung selbst zurueck. Kein Stromabgriff:
+die Statistik kommt aus rtmp2src.stats.
 """
 import argparse
 import json
@@ -110,23 +115,37 @@ def build(a):
     # Abgriff fuer die Statistik: Kopie des empfangenen Transportstroms auf 127.0.0.1 (leckere Queue, damit ein
     # fehlender oder langsamer Leser den Empfang nie bremst; tsparse buendelt 7 TS-Pakete je Datagramm).
     # Der Empfangsweg haengt direkt am ersten tee-Zweig und bleibt damit so wie vorher.
-    head = "srtsrc name=src ! "
-    tap = ""
-    if a.tap_port:
-        head += "tee name=rxtap ! "
-        tap = ("rxtap. ! queue leaky=downstream max-size-buffers=300 ! tsparse alignment=7 ! "
-               f"udpsink host=127.0.0.1 port={a.tap_port} sync=false async=false")
-    pipe = Gst.parse_launch(f"{head}tsdemux name=demux  {video}  {audio}  {tap}")
+    if a.rtmp_uri:
+        # Grosse Queues (10 s) hinter flvdemux: Der Ton kommt vor dem ersten Keyframe. Ist aq (1 s) voll, blockiert der Demuxer,
+        # und das Video, das den Ausgang erst in Gang bringt, kommt nie an (Vorlauf-Stillstand, 22 kB und dann nichts).
+        video = video.replace("queue name=vq !", "queue name=vq max-size-buffers=0 max-size-bytes=0 max-size-time=10000000000 !")
+        audio = audio.replace("queue name=aq max-size-time=1000000000 !", "queue name=aq max-size-buffers=0 max-size-bytes=0 max-size-time=10000000000 !")
+        # flvdemux legt seine Pads "video" und "audio" beim Verbindungsaufbau an (on_pad_added verbindet sie mit
+        # vq/aq); die Queues dahinter verhindern, dass die beiden Ausgaenge beim Anlaufen aufeinander warten.
+        pipe = Gst.parse_launch(f"rtmp2src name=src ! flvdemux name=demux  {video}  {audio}")
+        src = pipe.get_by_name("src")
+        src.set_property("location", a.rtmp_uri)
+        src.set_property("timeout", 5)
+        # Bleibt der Strom aus (Server tot, Sender weg), nach 10 s abbrechen: die Selbstueberwachung baut dann neu auf
+        src.set_property("idle-timeout", 10)
+    else:
+        head = "srtsrc name=src ! "
+        tap = ""
+        if a.tap_port:
+            head += "tee name=rxtap ! "
+            tap = ("rxtap. ! queue leaky=downstream max-size-buffers=300 ! tsparse alignment=7 ! "
+                   f"udpsink host=127.0.0.1 port={a.tap_port} sync=false async=false")
+        pipe = Gst.parse_launch(f"{head}tsdemux name=demux  {video}  {audio}  {tap}")
 
-    src = pipe.get_by_name("src")
-    src.set_property("uri", a.uri)
-    src.set_property("latency", a.latency)
-    src.set_property("keep-listening", True)
-    if a.passphrase:
-        src.set_property("passphrase", a.passphrase)
-        src.set_property("pbkeylen", a.pbkeylen or 16)
-    if a.streamid:
-        src.set_property("streamid", a.streamid)
+        src = pipe.get_by_name("src")
+        src.set_property("uri", a.uri)
+        src.set_property("latency", a.latency)
+        src.set_property("keep-listening", True)
+        if a.passphrase:
+            src.set_property("passphrase", a.passphrase)
+            src.set_property("pbkeylen", a.pbkeylen or 16)
+        if a.streamid:
+            src.set_property("streamid", a.streamid)
 
     demux = pipe.get_by_name("demux")
     targets = {"video": pipe.get_by_name("vq"), "audio": pipe.get_by_name("aq")}
@@ -335,10 +354,13 @@ def write_stats(a) -> bool:
     if pipe is None or not a.stats_file:
         return True
     data = {"time": time.time(), "srt": {}, "queues": {}, "sinks": {}}
+    if a.rtmp_uri:
+        data["protocol"] = "rtmp"
     try:
-        data["srt"] = struct_numbers(pipe.get_by_name("src").get_property("stats"))
+        key = "rtmp" if a.rtmp_uri else "srt"
+        data[key] = struct_numbers(pipe.get_by_name("src").get_property("stats"))
     except Exception as e:
-        data["srt_error"] = str(e)
+        data[("rtmp" if a.rtmp_uri else "srt") + "_error"] = str(e)
     for name in ("vq", "aq"):
         q = pipe.get_by_name(name)
         if q is not None:
@@ -415,7 +437,8 @@ def pause(seconds: float) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--uri", required=True)
+    ap.add_argument("--uri", help="SRT-URI (srt://...)")
+    ap.add_argument("--rtmp-uri", help="RTMP-/RTMPS-URL des abzurufenden Stroms (rtmp://Host/Anwendung/Name); ersetzt --uri")
     ap.add_argument("--latency", type=int, default=120)
     ap.add_argument("--device", type=int, required=True)
     ap.add_argument("--mode", required=True)
@@ -430,6 +453,8 @@ def main() -> int:
     ap.add_argument("--null-sinks", action="store_true", help="fakesink statt DeckLink (nur Tests ohne Karte)")
     ap.add_argument("--audio-levels", action="store_true", help="Pegel je Ausgangskanal jede Sekunde ins Log (Tests)")
     a = ap.parse_args()
+    if not a.uri and not a.rtmp_uri:
+        ap.error("--uri oder --rtmp-uri ist erforderlich")
     Gst.init(None)
 
     def on_signal(*_):
@@ -442,12 +467,16 @@ def main() -> int:
     GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, on_signal)
 
     try:
+        fails = 0
         while not state["stopping"]:
             rc = run_once(a)
             if state["stopping"]:
                 break
-            log(f"Pipeline beendet (Code {rc}), Neuaufbau in 2 s")
-            pause(2)
+            # RTMP: bei wiederholten Fehlern (Server/Strom nicht da) bis 5 s warten, sonst waechst das Log
+            fails = fails + 1 if (a.rtmp_uri and rc != 0) else 0
+            wait = min(5, 2 * fails) if fails > 1 else 2
+            log(f"Pipeline beendet (Code {rc}), Neuaufbau in {wait} s")
+            pause(wait)
     finally:
         if a.stats_file:
             try:

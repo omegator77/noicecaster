@@ -68,11 +68,14 @@ class StreamStats
                 'key' => 'p' . $p['id'],
                 'name' => (string)$p['name'] . ($sender ? ' / ' . ($p['target_name'] ?? 'Ziel 1') : ''),
                 'direction' => $sender ? 'sender' : 'receiver',
-                'port' => ($testPattern || self::isRtmp($p)) ? null : PipelineManager::tapPort($sender ? 'pipeline' : 'receiver', (int)$p['id']),
+                'port' => ($testPattern || self::isRtmp($p) || self::isRtmpIn($p)) ? null : PipelineManager::tapPort($sender ? 'pipeline' : 'receiver', (int)$p['id']),
                 'config' => self::config($p),
             ];
             if (self::isRtmp($p)) {
-                $item['note'] = self::RTMP_NOTE;
+                $item['note'] = $sender ? self::RTMP_NOTE : self::RTMP_RX_NOTE;
+            }
+            if (self::isRtmpIn($p)) {
+                $item['note'] = self::RTMP_IN_NOTE;
             }
             if ($testPattern) {
                 $item['note'] = 'Der Ausgang gibt ein Testbild aus (kein SRT-Empfang), daher gibt es keine Stromdaten.';
@@ -101,11 +104,20 @@ class StreamStats
         return $items;
     }
 
+    private const RTMP_IN_NOTE = 'RTMP-Annahme: Ein Encoder sendet per RTMP an dieses Gateway, der Empfaenger holt den Strom lokal ab. Eine Stromanalyse gibt es hier nicht, angezeigt werden die Verbindungs- und Ausgabe-Zaehler.';
+
+    private const RTMP_RX_NOTE = 'RTMP-Empfang: Der Strom wird von einem RTMP-Server abgerufen (FLV). Eine Stromanalyse gibt es hier nicht, angezeigt werden die Verbindungs- und Ausgabe-Zaehler.';
+
     private const RTMP_NOTE = 'RTMP-Ziel: Der Strom wird als FLV gesendet, eine Stromanalyse (Bitrate, GOP, Zeitstempel) gibt es hier nicht. Ob die Gegenstelle ihn annimmt, zeigt deren Oberflaeche.';
 
     private static function isRtmp(array $row): bool
     {
         return ($row['output_protocol'] ?? 'srt') === 'rtmp';
+    }
+
+    private static function isRtmpIn(array $row): bool
+    {
+        return ($row['output_protocol'] ?? 'srt') === 'rtmp_in';
     }
 
     private static function config(array $row): array
@@ -125,7 +137,8 @@ class StreamStats
             'audio_kbit' => isset($row['audio_bitrate']) ? (int)$row['audio_bitrate'] : null,
             'audio_channels' => isset($row['audio_output_channels']) ? (int)$row['audio_output_channels'] : null,
             'audio_track_mode' => $row['audio_track_mode'] ?? 'multi',
-            'protocol' => self::isRtmp($row) ? 'rtmp' : 'srt',
+            'protocol' => self::isRtmp($row) ? 'rtmp' : (self::isRtmpIn($row) ? 'rtmp_in' : 'srt'),
+            'rtmp_in_port' => self::isRtmpIn($row) ? IngestManager::PORT : null,
             // nur Server und Anwendung, der Stream-Key verlaesst den Server nie
             'rtmp_url' => self::isRtmp($row) ? ($row['rtmp_url'] ?? null) : null,
             'rtmp_deinterlace' => self::isRtmp($row) ? !empty($row['rtmp_deinterlace']) : null,

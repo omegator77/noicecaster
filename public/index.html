@@ -637,13 +637,13 @@
 
     <template x-if="firewall.available && firewall.needed.length">
       <div style="margin-bottom: 1rem;">
-        <div style="font-weight: 600; margin-bottom: 0.4rem;">Von den Pipelines benötigte Ports (SRT-Listener, UDP)</div>
-        <template x-for="n in firewall.needed" :key="'need-' + n.port">
+        <div style="font-weight: 600; margin-bottom: 0.4rem;">Von den Pipelines benötigte Ports (SRT-Listener: UDP, RTMP-Annahme: TCP)</div>
+        <template x-for="n in firewall.needed" :key="'need-' + (n.proto || 'udp') + '-' + n.port">
           <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; padding: 0.3rem 0; border-bottom: 1px solid #2a2e37;">
-            <span style="min-width: 70px; font-weight: 600;" x-text="'UDP ' + n.port"></span>
+            <span style="min-width: 70px; font-weight: 600;" x-text="(n.proto || 'udp').toUpperCase() + ' ' + n.port"></span>
             <span class="badge" :class="n.state.code === 'open_all' ? 'running' : ''" x-text="fwStateLabel(n.state)"></span>
             <span class="hint" style="margin: 0; flex: 1;" x-text="n.users.map(u => u.name + (u.running ? ' (läuft)' : '')).join(', ')"></span>
-            <button type="button" class="btn-secondary" x-show="n.state.code === 'closed' || n.state.code === 'open_limited'" @click="fwPrefill(n.port)">Freigeben…</button>
+            <button type="button" class="btn-secondary" x-show="n.state.code === 'closed' || n.state.code === 'open_limited'" @click="fwPrefill(n.port, n.proto)">Freigeben…</button>
           </div>
         </template>
       </div>
@@ -713,14 +713,14 @@
         <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
           <span style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
             <strong x-text="it.name"></strong>
-            <span class="badge" x-text="it.direction === 'sender' ? (it.config && it.config.protocol === 'rtmp' ? 'SDI → RTMP' : 'SDI → SRT') : 'SRT → SDI'"></span>
-            <span class="hint" style="margin: 0;" x-text="statsSrtLine(it.config)"></span>
+            <span class="badge" x-text="it.direction === 'sender' ? (it.config && it.config.protocol === 'rtmp' ? 'SDI → RTMP' : 'SDI → SRT') : (statsIsRtmpIn(it) ? 'RTMP-Annahme → SDI' : statsIsRtmpRx(it) ? 'RTMP → SDI' : 'SRT → SDI')"></span>
+            <span class="hint" style="margin: 0;" x-text="statsIsRtmpRx(it) ? statsRtmpRxLine(it) : statsSrtLine(it.config)"></span>
           </span>
         </div>
         <template x-if="it.note">
           <div class="hint" x-text="it.note"></div>
         </template>
-        <template x-if="it.config && it.config.protocol === 'rtmp'">
+        <template x-if="it.config && it.config.protocol === 'rtmp' && it.direction !== 'receiver'">
           <div class="sg">
             <div>
               <div class="k">Protokoll</div>
@@ -739,7 +739,26 @@
             </div>
           </div>
         </template>
-        <template x-if="it.direction === 'receiver' && it.srt">
+        <template x-if="statsIsRtmpRx(it) && it.srt">
+          <div class="sg">
+            <div>
+              <div class="k">Empfangen gesamt (RTMP)</div>
+              <div class="v" x-text="formatBytes((it.srt.rtmp && it.srt.rtmp.in_bytes_total) || 0)"></div>
+              <div class="s" x-text="statsIsRtmpIn(it) ? 'vom Encoder' : 'vom Server ' + (it.config.rtmp_url || '–')"></div>
+            </div>
+            <div>
+              <div class="k">Ausgabe (SDI)</div>
+              <div class="v" :class="statsRxDropped(it.srt.sinks) > 0 ? 'st-bad' : 'st-ok'" x-text="((it.srt.sinks && it.srt.sinks.vsink && it.srt.sinks.vsink.rendered) ?? '–') + ' Bilder'"></div>
+              <div class="s" x-text="'gerendert · verworfen: ' + ((it.srt.sinks && it.srt.sinks.vsink && it.srt.sinks.vsink.dropped) || 0) + ' Bild, ' + ((it.srt.sinks && it.srt.sinks.asink && it.srt.sinks.asink.dropped) || 0) + ' Ton'"></div>
+            </div>
+            <div>
+              <div class="k">Puffer vor dem Ausgang</div>
+              <div class="v" x-text="((it.srt.queues && it.srt.queues.vq) ? it.srt.queues.vq.ms : '–') + ' ms Bild · ' + ((it.srt.queues && it.srt.queues.aq) ? it.srt.queues.aq.ms : '–') + ' ms Ton'"></div>
+              <div class="s">vor der SDI-Ausgabe</div>
+            </div>
+          </div>
+        </template>
+        <template x-if="it.direction === 'receiver' && it.srt && !statsIsRtmpRx(it)">
           <div>
             <div class="sg">
               <div>
@@ -782,7 +801,7 @@
           </div>
         </template>
         <template x-if="it.direction === 'receiver' && !it.srt && !it.note">
-          <div class="hint">Keine SRT-Zahlen vom Empfänger. Er muss nach dem Update einmal neu gestartet werden, oder er ist gerade gestoppt.</div>
+          <div class="hint" x-text="statsIsRtmpRx(it) ? 'Noch keine Zahlen vom RTMP-Empfänger (er startet gerade oder ist gestoppt).' : 'Keine SRT-Zahlen vom Empfänger. Er muss nach dem Update einmal neu gestartet werden, oder er ist gerade gestoppt.'"></div>
         </template>
         <template x-if="!it.note && !(it.config && it.config.protocol === 'rtmp') && !(it.probe && it.probe.active)">
           <div class="hint" x-text="'Kein Messwert: ' + ((it.probe && it.probe.error) || 'noch nicht gemessen') + ((it.probe && it.probe.error === 'keine Daten am Abgriff') ? ' (Die Pipeline muss nach dem Update einmal neu gestartet werden, damit der Messabgriff aktiv ist.)' : '')"></div>
@@ -976,8 +995,9 @@
           <div class="hint" x-show="presetMsg[n]" x-text="presetMsg[n]" style="margin: -0.4rem 0 0.75rem;"></div>
           <div class="meta" style="margin-bottom: 0.75rem;">
             Modus: <span x-text="portMode(n)"></span> &middot;
-            <span x-show="!(tileDirection(portFor(n)) === 'sdi_to_srt' && isRtmp(tileForms[n]))">SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span></span>
-            <span x-show="tileDirection(portFor(n)) === 'sdi_to_srt' && isRtmp(tileForms[n])">RTMP: <span class="srt-url" x-text="tileForms[n].rtmp_url || '(keine URL)'"></span></span>
+            <span x-show="!isRtmp(tileForms[n]) && !isRtmpIn(tileForms[n])">SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span></span>
+            <span x-show="isRtmp(tileForms[n])">RTMP: <span class="srt-url" x-text="tileForms[n].rtmp_url || '(keine URL)'"></span></span>
+            <span x-show="isRtmpIn(tileForms[n])">RTMP-Annahme: <span class="srt-url" x-text="rtmpInUrl(tileForms[n])"></span></span>
             <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running'"> &middot; PID <span x-text="tilePipelineFor(n).pid"></span></template>
           </div>
 
@@ -1194,6 +1214,55 @@
 
           <template x-if="!(tileDirection(portFor(n)) === 'srt_to_sdi' && tileForms[n].test_pattern_enabled)">
             <div x-show="tileDirection(portFor(n)) !== 'sdi_to_srt' || (targetsExpanded[n] && !isRtmp(tileForms[n]))">
+              <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi'">
+                <div x-data="{ showKey: false }" style="margin-top: 0.75rem;">
+                  <label>Quelle</label>
+                  <select x-model="tileForms[n].output_protocol" @change="onProtocolChange(tileForms[n], true); onRxSourceChange(n)">
+                    <option value="srt">SRT</option>
+                    <option value="rtmp">RTMP (abrufen)</option>
+                    <option value="rtmp_in">RTMP (Gateway nimmt Strom an)</option>
+                  </select>
+                  <div x-show="isRtmpIn(tileForms[n])">
+                    <div class="hint" style="color: #d9a400;">Ein Encoder sendet per RTMP an dieses Gateway (nur H.264 und AAC, eine Tonspur). Der Empfang läuft nur, solange dieser Anschluss gestartet ist. Der Port 1935 (TCP) muss im Abschnitt Firewall freigegeben sein.</div>
+                    <div style="margin-top: 0.5rem;">
+                      <label>Stream-Key</label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" x-model="tileForms[n].rtmp_key" autocomplete="off" spellcheck="false" maxlength="128" placeholder="4 bis 128 Zeichen: A-Z a-z 0-9 . _ ~ -" style="flex: 1;">
+                        <button type="button" class="btn-secondary" @click="tileForms[n].rtmp_key = randomRtmpKey()">Zufälligen Key erzeugen</button>
+                      </div>
+                      <div class="hint">Erlaubt sind Buchstaben, Ziffern und . _ ~ - (4 bis 128 Zeichen). Der Key wird im Klartext in der Datenbank des Gateways gespeichert und taucht nie in Presets oder Exportdateien auf.</div>
+                    </div>
+                    <div style="margin-top: 0.5rem;">
+                      <div class="meta" style="margin: 0;">Adresse für den Encoder:<br>
+                        Server: <span class="srt-url" x-text="'rtmp://' + srtHost() + ':1935/live'"></span><br>
+                        Stream-Key: <span class="srt-url" x-text="(tileForms[n].rtmp_key || '').trim() || '(noch kein Key)'"></span><br>
+                        Komplett: <span class="srt-url" x-text="rtmpInUrl(tileForms[n])"></span>
+                      </div>
+                    </div>
+                    <div class="hint" style="margin-top: 0.4rem;">Hilfsserver: <span x-text="ingestLine()"></span></div>
+                  </div>
+                  <div x-show="isRtmp(tileForms[n])">
+                    <div class="hint" style="color: #d9a400;">RTMP-Empfang: Strom wird von einem RTMP-Server abgerufen (nur H.264 und AAC, eine Tonspur). Nach einem Abbruch holt sich der Empfänger den Strom nach wenigen Sekunden selbst wieder.</div>
+                    <div style="margin-top: 0.5rem;">
+                      <label>RTMP-URL</label>
+                      <input type="text" x-model="tileForms[n].rtmp_url" placeholder="rtmp://server/live" autocomplete="off" spellcheck="false">
+                    </div>
+                    <div style="margin-top: 0.5rem;">
+                      <label>Stream-Name / Key (optional) <span style="color: #8b93a1;" x-text="'(' + (tileKeySet(n) ? 'Key gesetzt' : 'kein Key') + ')'"></span></label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <input :type="showKey ? 'text' : 'password'" x-model="tileForms[n].rtmp_key" autocomplete="off" spellcheck="false" :placeholder="rtmpKeyPlaceholder(tileKeySet(n))" style="flex: 1;">
+                        <button type="button" class="btn-secondary" @click="showKey = !showKey" x-text="showKey ? 'verbergen' : 'anzeigen'"></button>
+                      </div>
+                      <label x-show="tileKeySet(n)" style="margin-top: 0.4rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" :checked="tileForms[n].rtmp_key_clear === 1" @change="tileForms[n].rtmp_key_clear = $event.target.checked ? 1 : 0" style="width: auto;">
+                        <span>Gespeicherten Key beim Speichern löschen (z. B. beim Wechsel zu SRT)</span>
+                      </label>
+                      <div class="hint">Der Stream-Name wird mit „/“ an die URL angehängt. Er wird im Klartext in der Datenbank des Gateways gespeichert (wie die SRT-Passphrase).</div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div x-show="!isRtmp(tileForms[n]) && !isRtmpIn(tileForms[n])">
               <div style="margin-top: 0.75rem;">
                 <label>SRT-Link einfügen</label>
                 <div style="display: flex; gap: 0.5rem;">
@@ -1223,6 +1292,7 @@
                 <label>SRT Latenz (ms)</label>
                 <input type="number" x-model.number="tileForms[n].srt_latency">
               </div>
+              </div>
               <div style="margin-top: 0.5rem;" x-show="tileDirection(portFor(n)) === 'srt_to_sdi'">
                 <label>SDI-Ausgabekanäle (eingebettetes Audio)</label>
                 <select x-model.number="tileForms[n].decklink_audio_channels">
@@ -1234,6 +1304,7 @@
                 <div class="hint">Wie viele Kanäle ausgegeben werden (gerade Zahlen bis 16). Die DeckLink-Karte öffnet dafür 2, 8 oder 16 Kanäle (die nächstgrößere Zahl), die nicht genutzten Ausgänge bleiben still. Bei mehr als 2 liegen die Kanäle des Stroms 1:1 auf den Ausgängen 1 bis N. Enthält der Strom mehrere Stereo-Spuren (je eigene PID), werden sie nach PID sortiert auf die Paare gelegt: niedrigste PID auf 1+2, die nächste auf 3+4 usw. Bei 2 Kanälen wird nur die erste Spur ausgegeben.</div>
               </div>
 
+              <div x-show="!isRtmp(tileForms[n]) && !isRtmpIn(tileForms[n])">
               <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">SRT-Sicherheit (optional)</h2>
               <div class="form-row">
                 <div>
@@ -1253,6 +1324,7 @@
               <div style="margin-top: 0.5rem;">
                 <label>Stream ID</label>
                 <input type="text" x-model="tileForms[n].srt_streamid" placeholder="leer = keine">
+              </div>
               </div>
             </div>
           </template>
@@ -2110,6 +2182,7 @@ function app() {
     firewall: { available: false, active: null, rules: [], needed: [], presets: [], unparsed: [], pending: null },
     fwForm: { proto: 'udp', port: '', iface: '', source: 'any', custom: '', comment: '' },
     fwBusy: false,
+    ingest: null,
     statsView: { items: [], nics: [], time: 0 },
     statsHist: {},
     nicPrev: {},
@@ -2213,6 +2286,7 @@ function app() {
         const res = await fetch('api.php?action=list');
         this.pipelines = await res.json();
         await this.loadStats();
+        if (this.ingestWanted()) await this.loadIngestStatus();
         // Ziel-Status auch im zugeklappten/geschlossenen Zustand aktuell halten (fuer die Badges im
         // Kachel-Header), und bei offenem Advanced-Panel Status/Stats live nachziehen. Bei offenem
         // Panel nur neu laden, wenn dort auch wirklich etwas laeuft - sonst wuerden gerade laufende,
@@ -2442,6 +2516,26 @@ function app() {
       return (v.rendered ?? '–') + ' Bilder ausgegeben, ' + (v.dropped ?? 0) + ' verworfen';
     },
 
+    // RTMP-Empfänger (Ausgangs-Anschluss mit Quelle RTMP): Statistik-Eintrag mit config.protocol bzw. srt.protocol = 'rtmp'
+    statsIsRtmpRx(it) {
+      return !!it && it.direction === 'receiver' && ((it.config && (it.config.protocol === 'rtmp' || it.config.protocol === 'rtmp_in')) || (it.srt && it.srt.protocol === 'rtmp'));
+    },
+
+    // RTMP-Annahme: ein Encoder sendet an das Gateway (Hilfsserver), config.protocol = 'rtmp_in'
+    statsIsRtmpIn(it) {
+      return !!it && it.direction === 'receiver' && !!it.config && it.config.protocol === 'rtmp_in';
+    },
+
+    statsRtmpRxLine(it) {
+      if (this.statsIsRtmpIn(it)) return 'RTMP-Annahme (Port ' + ((it.config && it.config.rtmp_in_port) || 1935) + ')';
+      const url = (it.config && it.config.rtmp_url) || '';
+      return 'RTMP ← ' + (url || '–');
+    },
+
+    statsRxDropped(sinks) {
+      return ((sinks && sinks.vsink && sinks.vsink.dropped) || 0) + ((sinks && sinks.asink && sinks.asink.dropped) || 0);
+    },
+
     nicRate(name, dir) {
       const r = this.nicRates[name];
       if (!r) return '…';
@@ -2476,8 +2570,8 @@ function app() {
       }
     },
 
-    fwPrefill(port) {
-      this.fwForm = { proto: 'udp', port: String(port), iface: '', source: 'any', custom: '', comment: '' };
+    fwPrefill(port, proto) {
+      this.fwForm = { proto: proto || 'udp', port: String(port), iface: '', source: 'any', custom: '', comment: '' };
     },
 
     async loadFirewall() {
@@ -2731,9 +2825,9 @@ function app() {
           srt_pbkeylen: p.srt_pbkeylen || 16,
           srt_streamid: p.srt_streamid || '',
           test_pattern_enabled: !!(p.test_pattern_enabled && p.test_pattern_enabled != 0),
-          output_protocol: p.output_protocol === 'rtmp' ? 'rtmp' : 'srt',
-          rtmp_url: p.rtmp_url || '',
-          rtmp_key: '',
+          output_protocol: p.output_protocol === 'rtmp' ? 'rtmp' : (p.output_protocol === 'rtmp_in' && p.pipeline_direction === 'srt_to_sdi' ? 'rtmp_in' : 'srt'),
+          rtmp_url: p.output_protocol === 'rtmp_in' ? '' : (p.rtmp_url || ''),
+          rtmp_key: (p.output_protocol === 'rtmp_in' && p.pipeline_direction === 'srt_to_sdi') ? (p.rtmp_key || '') : '',
           rtmp_key_clear: 0,
           rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0
         };
@@ -2747,15 +2841,75 @@ function app() {
     },
 
     // RTMP kann nur H.264 4:2:0 8 Bit und AAC Stereo in einer Spur, keine TS-PIDs (der Server setzt das ebenfalls fest)
-    rtmpForceLimits(o) {
-      if (!this.isRtmp(o)) return;
+    // Nur fürs Senden: ein Empfänger (receiver = true) hat keinen Encoder, hier wird nichts geklemmt
+    rtmpForceLimits(o, receiver = false) {
+      if (receiver || !this.isRtmp(o)) return;
       o.video_codec = 'h264'; o.video_chroma = '420'; o.video_bitdepth = 8;
       o.audio_codec = 'aac'; o.audio_output_channels = 2; o.audio_track_mode = 'multi';
       o.ts_video_pid = 0; o.ts_audio_pid = 0; o.ts_pmt_pid = 0; o.ts_program = 0;
     },
 
-    onProtocolChange(o) {
-      this.rtmpForceLimits(o);
+    onProtocolChange(o, receiver = false) {
+      this.rtmpForceLimits(o, receiver);
+    },
+
+    // RTMP-Annahme (nur Ausgangs-Anschlüsse): der Encoder sendet an das Gateway, der Key steht im Klartext im Feld
+    isRtmpIn(o) {
+      return !!o && o.output_protocol === 'rtmp_in';
+    },
+
+    rtmpInUrl(o) {
+      const k = String((o && o.rtmp_key) || '').trim();
+      return 'rtmp://' + this.srtHost() + ':1935/live/' + (k || '(noch kein Key)');
+    },
+
+    randomRtmpKey() {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const buf = new Uint32Array(16);
+      crypto.getRandomValues(buf);
+      let out = '';
+      for (let i = 0; i < buf.length; i++) out += chars[buf[i] % chars.length];
+      return out;
+    },
+
+    // Quelle eines Ausgangs-Anschlusses gewechselt: bei RTMP-Annahme den gespeicherten Key anzeigen, sonst das Feld leeren
+    onRxSourceChange(n) {
+      const tf = this.tileForms[n];
+      if (!tf) return;
+      const p = this.tilePipelineFor(n);
+      if (tf.output_protocol === 'rtmp_in') {
+        tf.rtmp_url = '';
+        tf.rtmp_key = (p && p.output_protocol === 'rtmp_in') ? (p.rtmp_key || '') : '';
+        tf.rtmp_key_clear = 0;
+        this.loadIngestStatus();
+      } else {
+        tf.rtmp_key = '';
+        tf.rtmp_key_clear = 0;
+      }
+    },
+
+    // Status des RTMP-Hilfsservers (MediaMTX); wird nur abgefragt, wenn ein Ausgangs-Anschluss auf RTMP-Annahme steht
+    ingestWanted() {
+      return [0, 1, 2, 3].some(n => this.isRtmpIn(this.tileForms[n]) && this.tileDirection(this.portFor(n)) === 'srt_to_sdi')
+        || this.pipelines.some(p => p.pipeline_direction === 'srt_to_sdi' && p.output_protocol === 'rtmp_in');
+    },
+
+    async loadIngestStatus() {
+      try {
+        const res = await fetch('api.php?action=ingest_status');
+        const data = await res.json();
+        if (data && !data.error) this.ingest = data;
+      } catch (e) {
+        // Statuszeile ist nicht kritisch
+      }
+    },
+
+    ingestLine() {
+      const s = this.ingest;
+      if (!s) return 'Status wird abgefragt …';
+      if (!s.installed) return 'nicht installiert (deploy/install-mediamtx.sh)';
+      if (s.running) return 'läuft' + (s.port ? ' (Port ' + s.port + ')' : '');
+      return 'bereit, startet mit dem Anschluss';
     },
 
     rtmpKeyPlaceholder(isSet) {
@@ -2780,10 +2934,13 @@ function app() {
     },
 
     // Presets ohne Protokollfelder (alte Presets) gelten als SRT; bei RTMP die festen Codec-Werte setzen
-    presetOutputFix(o) {
+    // Empfänger-Presets (receiver = true): kein Encoder, daher keine Codec-Klemmung und kein Zeilensprung-Filter
+    presetOutputFix(o, receiver = false) {
       if (!('output_protocol' in o)) { o.output_protocol = 'srt'; o.rtmp_url = ''; o.rtmp_deinterlace = 0; }
-      if (o.output_protocol !== 'rtmp') o.output_protocol = 'srt';
-      this.rtmpForceLimits(o);
+      if (o.output_protocol !== 'rtmp' && !(receiver && o.output_protocol === 'rtmp_in')) o.output_protocol = 'srt';
+      if (receiver) o.rtmp_deinterlace = 0;
+      if (receiver && o.output_protocol === 'rtmp_in') o.rtmp_url = '';
+      this.rtmpForceLimits(o, receiver);
       return o;
     },
 
@@ -2826,7 +2983,7 @@ function app() {
       const t = (pr.data && pr.data.tile) || {};
       const extra = ((pr.data && pr.data.targets) || []).length;
       const video = (t.video_codec || 'h264').toUpperCase() + ' ' + (t.bitrate || 0) + ' kbit/s';
-      return video + (t.output_protocol === 'rtmp' ? ' (RTMP)' : '') + ', ' + (t.audio_codec || 'aac').toUpperCase() + (extra ? ', +' + extra + (extra === 1 ? ' Ziel' : ' Ziele') : '');
+      return video + (t.output_protocol === 'rtmp' ? ' (RTMP)' : t.output_protocol === 'rtmp_in' ? ' (RTMP-Annahme)' : '') + ', ' + (t.audio_codec || 'aac').toUpperCase() + (extra ? ', +' + extra + (extra === 1 ? ' Ziel' : ' Ziele') : '');
     },
 
     async presetTargetsOf(p) {
@@ -2904,12 +3061,13 @@ function app() {
         this.errorMsg = 'Erst die laufenden Ziele dieses Anschlusses stoppen.';
         return;
       }
-      const tile = this.presetOutputFix(this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id', 'rtmp_key', 'rtmp_key_clear']));
+      const receiver = pr.direction === 'srt_to_sdi';
+      const tile = this.presetOutputFix(this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id', 'rtmp_key', 'rtmp_key_clear']), receiver);
       for (const k of Object.keys(tile)) this.tileForms[n][k] = tile[k];
       // Stream-Key steht nie im Preset: Eingabefeld leeren, ein gespeicherter Key bleibt auf dem Server
       this.tileForms[n].rtmp_key = '';
       this.tileForms[n].rtmp_key_clear = 0;
-      const wanted = ((pr.data && pr.data.targets) || []).map(t => this.presetOutputFix(this.pickLike(this.newTargetDefaults(), t, ['rtmp_key', 'rtmp_key_clear'])));
+      const wanted = ((pr.data && pr.data.targets) || []).map(t => this.presetOutputFix(this.pickLike(this.newTargetDefaults(), t, ['rtmp_key', 'rtmp_key_clear']), receiver));
       this.presetPending[n] = wanted;
       const p = this.tilePipelineFor(n);
       const have = (await this.presetTargetsOf(p)).length;
@@ -3041,6 +3199,15 @@ function app() {
           }
         }
       }
+      // RTMP-Empfang: Key optional, die URL ist Pflicht
+      if (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp' && !String(tf.rtmp_url || '').trim()) {
+        this.errorMsg = 'Anschluss ' + (n + 1) + ': Bitte die RTMP-URL eintragen.';
+        return;
+      }
+      if (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' && !String(tf.rtmp_key || '').trim()) {
+        this.errorMsg = 'Anschluss ' + (n + 1) + ': Bitte einen Stream-Key eintragen (oder zufällig erzeugen).';
+        return;
+      }
       this.savingTile[n] = true;
       this.errorMsg = '';
       const payload = {
@@ -3075,13 +3242,19 @@ function app() {
         srt_pbkeylen: tf.srt_pbkeylen,
         srt_streamid: tf.srt_streamid,
         test_pattern_enabled: direction === 'srt_to_sdi' ? tf.test_pattern_enabled : false,
-        output_protocol: direction === 'sdi_to_srt' ? tf.output_protocol : 'srt',
-        rtmp_url: tf.rtmp_url,
-        rtmp_deinterlace: tf.rtmp_deinterlace
+        output_protocol: tf.output_protocol === 'rtmp' ? 'rtmp' : (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' ? 'rtmp_in' : 'srt'),
+        rtmp_url: (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in') ? '' : tf.rtmp_url,
+        rtmp_deinterlace: direction === 'sdi_to_srt' ? tf.rtmp_deinterlace : 0
       };
       // Stream-Key nur mitsenden, wenn RTMP gewählt ist; leer = der Server behält den gespeicherten Key
+      // (Empfänger: Key optional, nur bei RTMP und nur wenn etwas eingetippt ist; SRT-Empfänger senden keine Key-Felder)
       if (direction === 'sdi_to_srt') {
         if (tf.output_protocol === 'rtmp') payload.rtmp_key = tf.rtmp_key;
+        payload.rtmp_key_clear = tf.rtmp_key_clear;
+      } else if (tf.output_protocol === 'rtmp_in') {
+        payload.rtmp_key = String(tf.rtmp_key || '').trim();
+      } else if (tf.output_protocol === 'rtmp') {
+        if (String(tf.rtmp_key || '').trim() !== '') payload.rtmp_key = tf.rtmp_key;
         payload.rtmp_key_clear = tf.rtmp_key_clear;
       }
       try {
@@ -3096,6 +3269,7 @@ function app() {
         if (this.presetPending[n] !== null) await this.applyPresetTargets(n, tf.id || data.id);
         await this.load();
         this.initTiles(n);
+        if (this.isRtmpIn(this.tileForms[n])) await this.loadIngestStatus();
       } catch (e) {
         this.errorMsg = 'Fehler beim Speichern (Anschluss ' + (n + 1) + '): ' + e.message;
       } finally {

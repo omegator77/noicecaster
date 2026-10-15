@@ -28,6 +28,10 @@ try {
             echo json_encode($manager->list());
             break;
 
+        case 'ingest_status':
+            echo json_encode(IngestManager::status($db->pdo()));
+            break;
+
         case 'system_info':
             echo json_encode(PeerInfo::get() + ['power' => PowerManager::status()]);
             break;
