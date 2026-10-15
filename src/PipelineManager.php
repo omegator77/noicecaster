@@ -40,6 +40,8 @@ class PipelineManager
         'mp2' => [2],
     ];
     private const VIDEO_CODECS = ['h264', 'h265', 'mpeg2'];
+    // Ausgabeprotokoll je Ziel. RTMP (nur Senden): H.264 4:2:0 8 Bit + AAC Stereo in FLV, keine PIDs, kein Abgriff.
+    private const OUTPUT_PROTOCOLS = ['srt', 'rtmp'];
     private const VIDEO_RATE_CONTROLS = ['cbr', 'vbr'];
     // Chroma-Subsampling und Bittiefe des Videostroms (H.264/H.265; MPEG-2 nur 8 Bit)
     private const VIDEO_CHROMA = ['420', '422'];
@@ -99,7 +101,7 @@ class PipelineManager
             }
         }
 
-        return $pipelines;
+        return array_map(fn($row) => $this->maskOutputSecrets($row), $pipelines);
     }
 
     private function validatePortUsage(array $data, array $decklink, string $direction, ?int $excludeId = null): void
@@ -161,6 +163,9 @@ class PipelineManager
         if (isset($data['srt_mode']) && !in_array($data['srt_mode'], ['listener', 'caller'], true)) {
             throw new RuntimeException("SRT-Modus muss 'listener' oder 'caller' sein");
         }
+        if (isset($data['output_protocol']) && !in_array($data['output_protocol'], self::OUTPUT_PROTOCOLS, true)) {
+            throw new RuntimeException("Ausgabeprotokoll muss 'srt' oder 'rtmp' sein");
+        }
         $host = $data['srt_target_host'] ?? null;
         if ($host !== null && $host !== '' &&
             !preg_match('/^[A-Za-z0-9]([A-Za-z0-9.:-]{0,251}[A-Za-z0-9])?$/', (string)$host)) {
@@ -176,6 +181,8 @@ class PipelineManager
     public function create(array $data): int
     {
         $this->validateSettings($data);
+        $data = $this->applyRtmpLimits($data);
+        $out = $this->sanitizeOutput($data);
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
         $audio = $this->sanitizeAudio($data);
@@ -189,8 +196,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -237,6 +244,10 @@ class PipelineManager
             ':test_pattern_enabled' => (int)($data['test_pattern_enabled'] ?? 0) === 1 ? 1 : 0,
             ':target_name' => $this->sanitizeTargetName($data),
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
+            ':output_protocol' => $out['protocol'],
+            ':rtmp_url' => $out['url'],
+            ':rtmp_key' => $out['key'],
+            ':rtmp_deinterlace' => $out['deinterlace'],
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -532,6 +543,111 @@ class PipelineManager
         }
     }
 
+    private function isRtmp(array $row): bool
+    {
+        return ($row['output_protocol'] ?? 'srt') === 'rtmp';
+    }
+
+    /**
+     * RTMP kann nur H.264 (4:2:0, 8 Bit) und AAC in einer Stereo-Spur: diese Werte werden bei RTMP-Zielen fest gesetzt
+     * (beim Speichern und beim Bauen des Befehls), PIDs/Programm gibt es im FLV-Strom nicht. Bei SRT aendert sich nichts.
+     */
+    private function applyRtmpLimits(array $data): array
+    {
+        if (!$this->isRtmp($data)) {
+            return $data;
+        }
+        return array_merge($data, [
+            'video_codec' => 'h264', 'video_chroma' => '420', 'video_bitdepth' => 8,
+            'audio_codec' => 'aac', 'audio_output_channels' => 2, 'audio_track_mode' => 'multi',
+            'ts_video_pid' => 0, 'ts_audio_pid' => 0, 'ts_pmt_pid' => 0, 'ts_program' => 0,
+        ]);
+    }
+
+    private const RTMP_URL_PATTERN = '#^rtmps?://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$#';
+
+    /**
+     * RTMP-Ziel pruefen: URL ohne Stream-Key (rtmp:// oder rtmps://, Host[:Port][/Anwendung]) und der Key getrennt.
+     * Beides landet im Shell-Befehl, deshalb nur eine enge Zeichenmenge (keine Leerzeichen, Anfuehrungszeichen, ! $ ` ; |).
+     * Ein leer gelassener Key behaelt den gespeicherten ($existingKey), ausser 'rtmp_key_clear' ist 1.
+     * @return array{protocol: string, url: ?string, key: ?string, deinterlace: int}
+     */
+    private function sanitizeOutput(array $data, ?string $existingKey = null): array
+    {
+        $requested = $data['output_protocol'] ?? 'srt';
+        $protocol = in_array($requested, self::OUTPUT_PROTOCOLS, true) ? $requested : 'srt';
+        $url = rtrim(trim((string)($data['rtmp_url'] ?? '')), '/');
+        $key = trim((string)($data['rtmp_key'] ?? ''));
+        if ($key === '' && $existingKey !== null && (int)($data['rtmp_key_clear'] ?? 0) !== 1) {
+            $key = $existingKey;
+        }
+        $urlValid = $url !== '' && strlen($url) <= 300 && preg_match(self::RTMP_URL_PATTERN, $url) === 1;
+        if ($protocol === 'rtmp') {
+            if ($url === '') {
+                throw new RuntimeException('RTMP-Ziel benoetigt eine Server-URL (z. B. rtmp://a.rtmp.youtube.com/live2)');
+            }
+            if (!$urlValid) {
+                throw new RuntimeException('RTMP-URL muss mit rtmp:// oder rtmps:// beginnen und darf nur Buchstaben, Ziffern und . - _ ~ / enthalten (ohne Stream-Key)');
+            }
+            if ($key === '') {
+                throw new RuntimeException('RTMP-Ziel benoetigt einen Stream-Key');
+            }
+        } elseif (!$urlValid) {
+            $url = ''; // bei SRT-Zielen nur Gueltiges ablegen
+        }
+        if ($key !== '' && (strlen($key) > 256 || preg_match('/^[A-Za-z0-9._~?=&%:+-]+$/', $key) !== 1)) {
+            throw new RuntimeException('Stream-Key darf nur Buchstaben, Ziffern und . _ ~ ? = & % : + - enthalten (maximal 256 Zeichen)');
+        }
+        return [
+            'protocol' => $protocol,
+            'url' => $url !== '' ? $url : null,
+            'key' => $key !== '' ? $key : null,
+            'deinterlace' => (int)($data['rtmp_deinterlace'] ?? 0) === 1 ? 1 : 0,
+        ];
+    }
+
+    /** Was nicht an den Browser darf, entfernen: der Stream-Key bleibt serverseitig (gemeldet wird nur, ob einer gesetzt ist). */
+    private function maskOutputSecrets(array $row): array
+    {
+        $row['rtmp_key_set'] = !empty($row['rtmp_key']) ? 1 : 0;
+        unset($row['rtmp_key']);
+        return $row;
+    }
+
+    /** Zeilensprung entfernen (nur RTMP und nur wenn gewaehlt): SDI-1080i50 ergibt 1080p50 (fuer 25p zusaetzlich Bildrate 25 setzen); YouTube/Twitch erwarten Vollbilder. */
+    private function deinterlaceElement(array $row): string
+    {
+        return ($this->isRtmp($row) && (int)($row['rtmp_deinterlace'] ?? 0) === 1) ? 'deinterlace ! ' : '';
+    }
+
+    /**
+     * Letzter Abschnitt einer Sender-Kette (hinter dem Encoder): bei SRT Muxer, Statistik-Abgriff und srtsink - Zeichen fuer
+     * Zeichen wie bisher; bei RTMP flvmux und rtmp2sink. Der Audio-Zweig muendet in beiden Faellen in "mux.".
+     * @param bool $waitFalse SRT: wait-for-connection=false (bei Live-Quellen)
+     */
+    private function buildSenderTail(array $row, array $mux, string $srtUri, int $latency, string $srtSecurityProps, string $tap, bool $waitFalse): string
+    {
+        if ($this->isRtmp($row)) {
+            return $this->buildRtmpTail($row);
+        }
+        return "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
+            "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps}" . ($waitFalse ? ' wait-for-connection=false' : '') . " {$tap}";
+    }
+
+    private function buildRtmpTail(array $row): string
+    {
+        $out = $this->sanitizeOutput($row);
+        if ($out['url'] === null || $out['key'] === null) {
+            throw new RuntimeException('RTMP-Ziel benoetigt Server-URL und Stream-Key');
+        }
+        $location = escapeshellarg($out['url'] . '/' . $out['key']);
+        // avc/au: flvmux verlangt H.264 ohne Startcodes; latency wie beim Transportstrom, damit der Ton beim Start nicht fehlt.
+        // Queues: vor flvmux (Latenzabfrage, siehe muxSetupFor) und vor rtmp2sink (3 s Puffer, damit ein kurzes Stocken des
+        // Netzes die Encoder-Kette und den Verteiler nicht blockiert).
+        return "queue ! video/x-h264,stream-format=avc,alignment=au ! flvmux name=mux streamable=true latency=200000000 ! " .
+            "queue max-size-buffers=0 max-size-bytes=0 max-size-time=3000000000 ! rtmp2sink location={$location} async=false ";
+    }
+
     private function sanitizeSrtSecurity(array $data): array
     {
         $passphrase = trim((string)($data['srt_passphrase'] ?? ''));
@@ -663,6 +779,10 @@ class PipelineManager
      */
     private function muxSetupFor(array $row): array
     {
+        if ($this->isRtmp($row)) {
+            // flvmux braucht vor jedem Eingang eine Queue, sonst meldet er tausendfach "clock problem" (Latenz nicht konfigurierbar)
+            return ['videoPad' => '', 'props' => '', 'audioPad' => fn(int $i) => 'queue ! mux.'];
+        }
         $audio = $this->sanitizeAudio($row);
         $ts = $this->sanitizeTsIds($row, $audio);
         if (!($ts['video'] || $ts['audio'] || $ts['pmt'] || $ts['program'])) {
@@ -852,6 +972,8 @@ class PipelineManager
 
     private function buildShmTargetCommand(array $p, array $target): string
     {
+        $target = $this->applyRtmpLimits($target);
+        $deint = $this->deinterlaceElement($target);
         $decklink = $this->sanitizeDecklink([
             'decklink_device_number' => $p['decklink_device_number'] ?? 0,
             'decklink_connection' => $p['decklink_connection'] ?? 'auto',
@@ -887,7 +1009,7 @@ class PipelineManager
         $port = (int)($target['srt_port'] ?? 8888);
         $latency = (int)($target['srt_latency'] ?? 120);
         $mode = $target['srt_mode'] ?? 'listener';
-        if ($mode === 'caller') {
+        if ($mode === 'caller' && !$this->isRtmp($target)) {
             $host = $target['srt_target_host'] ?? '';
             if (empty($host)) {
                 throw new RuntimeException('Caller-Modus benoetigt eine Ziel-Adresse (srt_target_host)');
@@ -902,7 +1024,7 @@ class PipelineManager
         $videoShm = escapeshellarg($this->shmVideoPath((int)$p['id']));
         $audioShm = escapeshellarg($this->shmAudioPath((int)$p['id']));
 
-        $prefix = "env GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
+        $prefix = "env GST_DEBUG=" . ($this->isRtmp($target) ? 'rtmp2sink:3' : 'srtsink:5') . " GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
         $tap = $this->tapBranch(isset($target['pipeline_id'])
             ? self::tapPort('target', (int)$target['id'])
             : self::tapPort('pipeline', (int)$p['id']));
@@ -921,8 +1043,8 @@ class PipelineManager
         // und srtsink schickt diese als Stream-Header an jeden neuen Empfaenger. Kommt der Ton (Verteiler/
         // AAC-Encoder) etwas spaeter, steht in dieser ersten PMT nur das Video und Empfaenger wie
         // Magewell ordnen die Tonspur falsch zu oder finden sie nicht. 0,2 s Wartezeit beim Start genuegen.
-        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! videoconvert ! {$scaleElement}{$formatCaps} ! " .
-            "{$videoEncoder} ! {$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
+        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! {$deint}videoconvert ! {$scaleElement}{$formatCaps} ! " .
+            "{$videoEncoder} ! " . $this->buildSenderTail($target, $mux, $srtUri, $latency, $srtSecurityProps, $tap, true);
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
         // liefert immer S32LE/interleaved/48kHz, nur die Kanalzahl variiert je nach Aufnahme-Konfiguration.
@@ -1060,7 +1182,7 @@ class PipelineManager
                 $t['pid'] = null;
             }
         }
-        return $targets;
+        return array_map(fn($row) => $this->maskOutputSecrets($row), $targets);
     }
 
     private function getTarget(int $targetId): array
@@ -1092,6 +1214,8 @@ class PipelineManager
             throw new RuntimeException("Zusaetzliche SRT-Ziele sind nur fuer SDI-Eingangs-Pipelines moeglich.");
         }
         $this->validateSettings($data);
+        $data = $this->applyRtmpLimits($data);
+        $out = $this->sanitizeOutput($data);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
@@ -1101,8 +1225,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_speed_preset)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_speed_preset)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -1136,6 +1260,10 @@ class PipelineManager
             ':video_open_gop' => $gop['open'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
+            ':output_protocol' => $out['protocol'],
+            ':rtmp_url' => $out['url'],
+            ':rtmp_key' => $out['key'],
+            ':rtmp_deinterlace' => $out['deinterlace'],
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -1147,6 +1275,8 @@ class PipelineManager
             throw new RuntimeException("Laufendes Ziel kann nicht bearbeitet werden. Bitte zuerst stoppen.");
         }
         $this->validateSettings($data);
+        $data = $this->applyRtmpLimits($data);
+        $out = $this->sanitizeOutput($data, $target['rtmp_key'] ?? null);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
@@ -1186,7 +1316,11 @@ class PipelineManager
                 video_scenecut = :video_scenecut,
                 video_open_gop = :video_open_gop,
                 audio_bitrate = :audio_bitrate,
-                video_speed_preset = :video_speed_preset
+                video_speed_preset = :video_speed_preset,
+                output_protocol = :output_protocol,
+                rtmp_url = :rtmp_url,
+                rtmp_key = :rtmp_key,
+                rtmp_deinterlace = :rtmp_deinterlace
             WHERE id = :id
         ");
         $stmt->execute([
@@ -1221,6 +1355,10 @@ class PipelineManager
             ':video_open_gop' => $gop['open'],
             ':audio_bitrate' => $audio['bitrate'],
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
+            ':output_protocol' => $out['protocol'],
+            ':rtmp_url' => $out['url'],
+            ':rtmp_key' => $out['key'],
+            ':rtmp_deinterlace' => $out['deinterlace'],
         ]);
     }
 
@@ -1376,6 +1514,8 @@ class PipelineManager
             return $this->buildReceiveCommand($p);
         }
 
+        $p = $this->applyRtmpLimits($p);
+        $deint = $this->deinterlaceElement($p);
         $width = (int)$p['width'];
         $height = (int)$p['height'];
         $framerate = (int)$p['framerate'];
@@ -1403,7 +1543,7 @@ class PipelineManager
             $formatCaps = "video/x-raw,format={$videoFormat}";
         }
 
-        if ($mode === 'caller') {
+        if ($mode === 'caller' && !$this->isRtmp($p)) {
             $host = $p['srt_target_host'] ?? '';
             if (empty($host)) {
                 throw new RuntimeException('Caller-Modus benoetigt eine Ziel-Adresse (srt_target_host)');
@@ -1414,7 +1554,7 @@ class PipelineManager
         }
 
         // TZ nur für die Pipeline selbst gesetzt (fuer clockoverlay) - aendert nicht die Systemzeitzone des Servers
-        $prefix = "env TZ=Europe/Berlin GST_DEBUG=srtsink:5 GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
+        $prefix = "env TZ=Europe/Berlin GST_DEBUG=" . ($this->isRtmp($p) ? 'rtmp2sink:3' : 'srtsink:5') . " GST_DEBUG_NO_COLOR=1 gst-launch-1.0 -v ";
         $tap = $this->tapBranch(self::tapPort('pipeline', (int)$p['id']));
         $mux = $this->muxSetupFor($p);
 
@@ -1437,10 +1577,9 @@ class PipelineManager
             $videoBranch = "decklinkvideosrc device-number={$decklink['device_number']} " .
                 "connection={$decklink['connection']} mode={$decklinkMode} profile={$decklink['profile']} ! " .
                 "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
-                "videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
+                "{$deint}videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
-                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
+                $this->buildSenderTail($p, $mux, $srtUri, $latency, $srtSecurityProps, $tap, true);
 
             $audio = $this->clampAudioToCapture($this->sanitizeAudio($p), (int)$decklink['audio_channels']);
             $channelSelect = $this->buildAudioChannelSelectElement($decklink['audio_channels'], $audio['channels'], $audio['codec']);
@@ -1459,8 +1598,7 @@ class PipelineManager
 
             $videoBranch = "demux.video_0 ! queue ! decodebin ! videoconvert ! {$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
-                "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
-                "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} {$tap}";
+                $this->buildSenderTail($p, $mux, $srtUri, $latency, $srtSecurityProps, $tap, false);
 
             $audio = $this->sanitizeAudio(array_merge($p, ['audio_track_mode' => 'multi']));
             // Mehr als 2 Ausgabekanaele: die ersten N Kanaele der Datei, der Rest bleibt still (wie beim
@@ -1480,8 +1618,7 @@ class PipelineManager
             "video/x-raw,format={$videoFormat},width={$width},height={$height},framerate={$framerate}/1 ! " .
             "videoconvert ! {$clockOverlayElement}" .
             "{$videoEncoder} ! " .
-            "{$mux['videoPad']}mpegtsmux name=mux latency=200000000{$mux['props']} ! tee name=tap ! " .
-            "srtsink uri=\"{$srtUri}\" latency={$latency}{$srtSecurityProps} wait-for-connection=false {$tap}";
+            $this->buildSenderTail($p, $mux, $srtUri, $latency, $srtSecurityProps, $tap, true);
 
         $audio = $this->sanitizeAudio(array_merge($p, ['audio_track_mode' => 'multi']));
         $audioTestWave = $this->sanitizeAudioTestWave($p);
@@ -1591,7 +1728,7 @@ class PipelineManager
 
     public function update(int $id, array $data): void
     {
-        $stmt = $this->db->prepare("SELECT status FROM pipelines WHERE id = :id");
+        $stmt = $this->db->prepare("SELECT status, rtmp_key FROM pipelines WHERE id = :id");
         $stmt->execute([':id' => $id]);
         $current = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -1605,6 +1742,8 @@ class PipelineManager
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
         $this->validateSettings($data);
+        $data = $this->applyRtmpLimits($data);
+        $out = $this->sanitizeOutput($data, $current['rtmp_key'] ?? null);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
         $videoCodec = $this->sanitizeVideoCodec($data);
@@ -1660,7 +1799,11 @@ class PipelineManager
                 preview_enabled = :preview_enabled,
                 test_pattern_enabled = :test_pattern_enabled,
                 target_name = :target_name,
-                video_speed_preset = :video_speed_preset
+                video_speed_preset = :video_speed_preset,
+                output_protocol = :output_protocol,
+                rtmp_url = :rtmp_url,
+                rtmp_key = :rtmp_key,
+                rtmp_deinterlace = :rtmp_deinterlace
             WHERE id = :id
         ");
         $stmt->execute([
@@ -1709,6 +1852,10 @@ class PipelineManager
             ':test_pattern_enabled' => (int)($data['test_pattern_enabled'] ?? 0) === 1 ? 1 : 0,
             ':target_name' => $this->sanitizeTargetName($data),
             ':video_speed_preset' => $this->sanitizeSpeedPreset($data),
+            ':output_protocol' => $out['protocol'],
+            ':rtmp_url' => $out['url'],
+            ':rtmp_key' => $out['key'],
+            ':rtmp_deinterlace' => $out['deinterlace'],
         ]);
     }
 

@@ -89,6 +89,12 @@ class Database
             // Latenz (die haengt allein an tune=zerolatency + Keyframe-Abstand). 'veryfast' war bisher
             // fest einprogrammiert; jetzt pro Ziel einstellbar (siehe [[project-noicecaster-repo]]).
             'video_speed_preset' => "TEXT DEFAULT 'veryfast'",
+            // Ausgabeprotokoll je Ziel: 'srt' (bisher, Standard) oder 'rtmp' (nur Senden, H.264 + AAC Stereo).
+            // rtmp_url ohne Stream-Key, der Key steht getrennt in rtmp_key (wird von der API nie ausgegeben).
+            'output_protocol' => "TEXT DEFAULT 'srt'",
+            'rtmp_url' => "TEXT DEFAULT NULL",
+            'rtmp_key' => "TEXT DEFAULT NULL",
+            'rtmp_deinterlace' => "INTEGER DEFAULT 0",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {
@@ -199,6 +205,12 @@ class Database
         foreach (['ts_video_pid', 'ts_audio_pid', 'ts_pmt_pid', 'ts_program'] as $tsColumn) {
             if (!in_array($tsColumn, $existingTargetColumns, true)) {
                 $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN {$tsColumn} INTEGER DEFAULT 0");
+            }
+        }
+        foreach (['output_protocol' => "TEXT DEFAULT 'srt'", 'rtmp_url' => 'TEXT DEFAULT NULL',
+                  'rtmp_key' => 'TEXT DEFAULT NULL', 'rtmp_deinterlace' => 'INTEGER DEFAULT 0'] as $rtmpColumn => $rtmpType) {
+            if (!in_array($rtmpColumn, $existingTargetColumns, true)) {
+                $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN {$rtmpColumn} {$rtmpType}");
             }
         }
     }

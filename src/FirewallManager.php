@@ -55,11 +55,11 @@ class FirewallManager
             $ports[$port]['users'][] = ['name' => $label, 'running' => $status === 'running'];
         };
         foreach ($manager->list() as $p) {
-            if (($p['srt_mode'] ?? 'listener') === 'listener') {
+            if (($p['srt_mode'] ?? 'listener') === 'listener' && ($p['output_protocol'] ?? 'srt') !== 'rtmp') {
                 $add((int)$p['srt_port'], (string)$p['name'], (string)($p['status'] ?? ''));
             }
             foreach ($manager->listTargets((int)$p['id']) as $t) {
-                if (($t['srt_mode'] ?? 'listener') === 'listener') {
+                if (($t['srt_mode'] ?? 'listener') === 'listener' && ($t['output_protocol'] ?? 'srt') !== 'rtmp') {
                     $add((int)$t['srt_port'], $p['name'] . ' / ' . ($t['name'] ?? 'Ziel'), (string)($t['status'] ?? ''));
                 }
             }

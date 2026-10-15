@@ -713,12 +713,31 @@
         <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
           <span style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
             <strong x-text="it.name"></strong>
-            <span class="badge" x-text="it.direction === 'sender' ? 'SDI → SRT' : 'SRT → SDI'"></span>
+            <span class="badge" x-text="it.direction === 'sender' ? (it.config && it.config.protocol === 'rtmp' ? 'SDI → RTMP' : 'SDI → SRT') : 'SRT → SDI'"></span>
             <span class="hint" style="margin: 0;" x-text="statsSrtLine(it.config)"></span>
           </span>
         </div>
         <template x-if="it.note">
           <div class="hint" x-text="it.note"></div>
+        </template>
+        <template x-if="it.config && it.config.protocol === 'rtmp'">
+          <div class="sg">
+            <div>
+              <div class="k">Protokoll</div>
+              <div class="v">RTMP</div>
+              <div class="s" x-text="(it.config.rtmp_url || '–') + (it.config.rtmp_deinterlace ? ' · Zeilensprung entfernt (Vollbilder)' : '')"></div>
+            </div>
+            <div>
+              <div class="k">Video (Soll)</div>
+              <div class="v" x-text="fmtKbit(it.config.video_kbit)"></div>
+              <div class="s" x-text="(it.config.video_codec || 'h264').toUpperCase().replace(/^H(\d)/, 'H.$1') + ' · 4:2:0 · 8 Bit'"></div>
+            </div>
+            <div>
+              <div class="k">Audio (Soll)</div>
+              <div class="v" x-text="(it.config.audio_codec || 'aac').toUpperCase() + ' · ' + (it.config.audio_channels || 2) + ' Kanäle'"></div>
+              <div class="s" x-text="it.config.audio_kbit ? fmtKbit(it.config.audio_kbit) : ''"></div>
+            </div>
+          </div>
         </template>
         <template x-if="it.direction === 'receiver' && it.srt">
           <div>
@@ -765,7 +784,7 @@
         <template x-if="it.direction === 'receiver' && !it.srt && !it.note">
           <div class="hint">Keine SRT-Zahlen vom Empfänger. Er muss nach dem Update einmal neu gestartet werden, oder er ist gerade gestoppt.</div>
         </template>
-        <template x-if="!it.note && !(it.probe && it.probe.active)">
+        <template x-if="!it.note && !(it.config && it.config.protocol === 'rtmp') && !(it.probe && it.probe.active)">
           <div class="hint" x-text="'Kein Messwert: ' + ((it.probe && it.probe.error) || 'noch nicht gemessen') + ((it.probe && it.probe.error === 'keine Daten am Abgriff') ? ' (Die Pipeline muss nach dem Update einmal neu gestartet werden, damit der Messabgriff aktiv ist.)' : '')"></div>
         </template>
         <template x-if="it.probe && it.probe.active">
@@ -857,7 +876,7 @@
   </div>
   <div class="card" x-show="!presetsCollapsed">
     <div class="hint" style="margin-bottom: 0.75rem;">Ein Preset enthält alle Einstellungen eines Anschlusses (Ziel 1 und alle weiteren Ziele). Anlegen: im Anschluss unten „Als Preset speichern …“. Laden: im Anschluss das Preset wählen und „Laden“; das füllt nur das Formular, mit „Speichern“ wird es übernommen. Ein Preset passt nur zu Anschlüssen derselben Richtung. Hier lassen sich Presets löschen sowie als Datei exportieren und auf dem anderen System importieren.</div>
-    <div class="hint" style="margin-bottom: 0.75rem; color: #d9a400;">Achtung: Presets enthalten die SRT-Passphrase im Klartext, auch in Exportdateien. Port und Ziel-Adresse stehen ebenfalls im Preset; auf zwei Anschlüssen geladen belegt das den Port doppelt.</div>
+    <div class="hint" style="margin-bottom: 0.75rem; color: #d9a400;">Achtung: Presets enthalten die SRT-Passphrase im Klartext, auch in Exportdateien. Port und Ziel-Adresse stehen ebenfalls im Preset; auf zwei Anschlüssen geladen belegt das den Port doppelt. Der RTMP-Stream-Key wird nie in Presets oder Exportdateien geschrieben (nach dem Laden eines RTMP-Presets den Key bei Bedarf neu eintragen).</div>
     <template x-if="!presets.length">
       <div class="hint">Noch keine Presets angelegt.</div>
     </template>
@@ -957,7 +976,8 @@
           <div class="hint" x-show="presetMsg[n]" x-text="presetMsg[n]" style="margin: -0.4rem 0 0.75rem;"></div>
           <div class="meta" style="margin-bottom: 0.75rem;">
             Modus: <span x-text="portMode(n)"></span> &middot;
-            SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span>
+            <span x-show="!(tileDirection(portFor(n)) === 'sdi_to_srt' && isRtmp(tileForms[n]))">SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span></span>
+            <span x-show="tileDirection(portFor(n)) === 'sdi_to_srt' && isRtmp(tileForms[n])">RTMP: <span class="srt-url" x-text="tileForms[n].rtmp_url || '(keine URL)'"></span></span>
             <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running'"> &middot; PID <span x-text="tilePipelineFor(n).pid"></span></template>
           </div>
 
@@ -991,8 +1011,16 @@
                 <input type="text" x-model="tileForms[n].target_name" placeholder="Ziel 1">
               </div>
               <div style="margin-top: 0.5rem;">
+                <label>Ausgabe</label>
+                <select x-model="tileForms[n].output_protocol" @change="onProtocolChange(tileForms[n])">
+                  <option value="srt">SRT</option>
+                  <option value="rtmp">RTMP</option>
+                </select>
+              </div>
+              <div class="hint" style="color: #d9a400;" x-show="isRtmp(tileForms[n])">RTMP: nur H.264 4:2:0 8 Bit und AAC Stereo, eine Tonspur.</div>
+              <div style="margin-top: 0.5rem;">
                 <label>Video-Codec</label>
-                <select x-model="tileForms[n].video_codec">
+                <select x-model="tileForms[n].video_codec" :disabled="isRtmp(tileForms[n])">
                   <option value="h264">H.264 (empfohlen, breite Kompatibilität)</option>
                   <option value="h265">H.265 / HEVC (bessere Kompression, mehr CPU-Last)</option>
                   <option value="mpeg2">MPEG-2 (klassischer Broadcast-Standard)</option>
@@ -1063,27 +1091,27 @@
                 </div>
                 <div>
                   <label>Ausgabe-Kanäle (für Encoding)</label>
-                  <select x-model.number="tileForms[n].audio_output_channels">
+                  <select x-model.number="tileForms[n].audio_output_channels" :disabled="isRtmp(tileForms[n])">
                     <template x-for="ch in audioChannelOptions(tileForms[n].audio_codec, tileForms[n].audio_track_mode, tileForms[n].decklink_audio_channels)" :key="ch">
                       <option :value="ch" x-text="ch"></option>
                     </template>
                   </select>
 <label style="margin-top: 0.5rem;">Tonspuren</label>
-<select x-model="tileForms[n].audio_track_mode" @change="clampAudioChannels(tileForms[n])">
+<select x-model="tileForms[n].audio_track_mode" @change="clampAudioChannels(tileForms[n])" :disabled="isRtmp(tileForms[n])">
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
 <div class="form-row" style="margin-top: 0.5rem;">
   <div>
     <label>Chroma-Subsampling</label>
-    <select x-model="tileForms[n].video_chroma">
+    <select x-model="tileForms[n].video_chroma" :disabled="isRtmp(tileForms[n])">
       <option value="420">4:2:0 (kompatibel)</option>
       <option value="422">4:2:2 (Broadcast)</option>
     </select>
   </div>
   <div>
     <label>Bittiefe</label>
-    <select x-model.number="tileForms[n].video_bitdepth">
+    <select x-model.number="tileForms[n].video_bitdepth" :disabled="isRtmp(tileForms[n])">
       <option value="8">8 Bit</option>
       <option value="10" :disabled="tileForms[n].video_codec === 'mpeg2'">10 Bit</option>
     </select>
@@ -1124,7 +1152,7 @@
   </div>
 </div>
 <div class="hint">Die GOP-Größe stellst du im Feld „GOP-Größe / Keyframe-Intervall“ weiter oben ein (1 bis 1000 Bilder, 0 = automatisch 1 Sekunde). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern und wirkt nur bei MPEG-2: Bei H.264 und H.265 bleibt die GOP wegen der festen B-Bild-Struktur auch bei „offen“ geschlossen. Bei Framing „I“ ist jedes Bild ein Keyframe, die GOP-Größe wird dann ignoriert. "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
-<details style="margin-top: 0.6rem;">
+<details style="margin-top: 0.6rem;" x-show="!isRtmp(tileForms[n])">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
     <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="tileForms[n].ts_video_pid" placeholder="0 = auto (65)"></div>
@@ -1141,7 +1169,7 @@
               <div class="form-row" style="margin-top: 0.5rem;">
                 <div>
                   <label>Audio-Codec</label>
-                  <select x-model="tileForms[n].audio_codec" @change="clampAudioChannels(tileForms[n])">
+                  <select x-model="tileForms[n].audio_codec" @change="clampAudioChannels(tileForms[n])" :disabled="isRtmp(tileForms[n])">
                     <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
                     <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
                     <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
@@ -1165,7 +1193,7 @@
           </template>
 
           <template x-if="!(tileDirection(portFor(n)) === 'srt_to_sdi' && tileForms[n].test_pattern_enabled)">
-            <div x-show="tileDirection(portFor(n)) !== 'sdi_to_srt' || targetsExpanded[n]">
+            <div x-show="tileDirection(portFor(n)) !== 'sdi_to_srt' || (targetsExpanded[n] && !isRtmp(tileForms[n]))">
               <div style="margin-top: 0.75rem;">
                 <label>SRT-Link einfügen</label>
                 <div style="display: flex; gap: 0.5rem;">
@@ -1229,6 +1257,33 @@
             </div>
           </template>
 
+          <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt' && isRtmp(tileForms[n])">
+            <div x-show="targetsExpanded[n]" x-data="{ showKey: false }">
+              <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">RTMP-Ziel</h2>
+              <div>
+                <label>Server-URL (ohne Stream-Key)</label>
+                <input type="text" x-model="tileForms[n].rtmp_url" placeholder="rtmp://a.rtmp.youtube.com/live2" autocomplete="off" spellcheck="false">
+              </div>
+              <div style="margin-top: 0.5rem;">
+                <label>Stream-Key <span style="color: #8b93a1;" x-text="'(' + (tileKeySet(n) ? 'Key gesetzt' : 'kein Key') + ')'"></span></label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <input :type="showKey ? 'text' : 'password'" x-model="tileForms[n].rtmp_key" autocomplete="off" spellcheck="false" :placeholder="rtmpKeyPlaceholder(tileKeySet(n))" style="flex: 1;">
+                  <button type="button" class="btn-secondary" @click="showKey = !showKey" x-text="showKey ? 'verbergen' : 'anzeigen'"></button>
+                </div>
+                <label x-show="tileKeySet(n)" style="margin-top: 0.4rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <input type="checkbox" :checked="tileForms[n].rtmp_key_clear === 1" @change="tileForms[n].rtmp_key_clear = $event.target.checked ? 1 : 0" style="width: auto;">
+                  <span>Gespeicherten Key beim Speichern löschen (z. B. beim Wechsel zu SRT)</span>
+                </label>
+                <div class="hint">Der Key wird im Klartext in der Datenbank des Gateways gespeichert (wie die SRT-Passphrase).</div>
+              </div>
+              <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" :checked="tileForms[n].rtmp_deinterlace === 1" @change="tileForms[n].rtmp_deinterlace = $event.target.checked ? 1 : 0" style="width: auto;">
+                <span>Zeilensprung entfernen</span>
+              </label>
+              <div class="hint" style="color: #d9a400;">RTMP: Zeilensprung-Signale (z. B. 1080i50) sendet YouTube/Twitch nur ungünstig. „Zeilensprung entfernen“: 1080i50 wird zu 1080p50 (Vollbilder). Für 1080p25 zusätzlich die Bildrate auf 25 stellen.</div>
+            </div>
+          </template>
+
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
             <div style="margin-top: 1rem; border-top: 1px solid #2a2e37; padding-top: 0.75rem;">
               <h2 style="margin: 0; font-size: 0.95rem; color: #cbd5e1;">Ziele</h2>
@@ -1265,7 +1320,7 @@
 
               <div x-show="targetsExpanded[n]" style="margin-top: 0.75rem;">
                 <div class="hint" style="margin-bottom: 0.75rem;">
-                  Zusätzliche, unabhängige SRT-Ziele für denselben SDI-Eingang - jedes mit eigenem Codec/Bitrate/SRT-Ziel, einzeln start-/stoppbar.
+                  Zusätzliche, unabhängige SRT- oder RTMP-Ziele für denselben SDI-Eingang - jedes mit eigenem Codec/Bitrate/Ziel, einzeln start-/stoppbar.
                   Nur für feste HD-Modi (720p/1080i/1080p), nicht für "Auto" oder SD-Modi. Ziel 1 (das Hauptziel) wird oben eingestellt.
                 </div>
 
@@ -1285,7 +1340,8 @@
 
                     <template x-if="target.status === 'running'">
                       <div class="meta">
-                        SRT: <span class="srt-url" x-text="target.srt_mode === 'caller' ? ('srt://' + target.srt_target_host + ':' + target.srt_port) : ('srt://' + srtHost() + ':' + target.srt_port)"></span>
+                        <span x-show="!isRtmp(target)">SRT: <span class="srt-url" x-text="target.srt_mode === 'caller' ? ('srt://' + target.srt_target_host + ':' + target.srt_port) : ('srt://' + srtHost() + ':' + target.srt_port)"></span></span>
+                        <span x-show="isRtmp(target)">RTMP: <span class="srt-url" x-text="target.rtmp_url || '(keine URL)'"></span></span>
                         &middot; PID <span x-text="target.pid"></span>
                       </div>
                     </template>
@@ -1308,10 +1364,18 @@
 
                     <template x-if="target.status !== 'running'">
                       <div style="margin-top: 0.5rem;">
-                        <div class="form-row">
+                        <div>
+                          <label>Ausgabe</label>
+                          <select x-model="target.output_protocol" @change="onProtocolChange(target)">
+                            <option value="srt">SRT</option>
+                            <option value="rtmp">RTMP</option>
+                          </select>
+                        </div>
+                        <div class="hint" style="color: #d9a400;" x-show="isRtmp(target)">RTMP: nur H.264 4:2:0 8 Bit und AAC Stereo, eine Tonspur.</div>
+                        <div class="form-row" style="margin-top: 0.5rem;">
                           <div>
                             <label>Video-Codec</label>
-                            <select x-model="target.video_codec">
+                            <select x-model="target.video_codec" :disabled="isRtmp(target)">
                               <option value="h264">H.264</option>
                               <option value="h265">H.265 / HEVC</option>
                               <option value="mpeg2">MPEG-2</option>
@@ -1364,7 +1428,7 @@
                         <div class="form-row" style="margin-top: 0.5rem;">
                           <div>
                             <label>Audio-Codec</label>
-                            <select x-model="target.audio_codec" @change="clampAudioChannels(target)">
+                            <select x-model="target.audio_codec" @change="clampAudioChannels(target)" :disabled="isRtmp(target)">
                               <option value="aac">AAC</option>
                               <option value="mp2">MP2</option>
                               <option value="ac3">AC-3 / Dolby Digital</option>
@@ -1374,27 +1438,27 @@
                           </div>
                           <div>
                             <label>Audio-Kanäle</label>
-                            <select x-model.number="target.audio_output_channels">
+                            <select x-model.number="target.audio_output_channels" :disabled="isRtmp(target)">
                               <template x-for="ch in audioChannelOptions(target.audio_codec, target.audio_track_mode)" :key="ch">
                                 <option :value="ch" x-text="ch"></option>
                               </template>
                             </select>
 <label style="margin-top: 0.5rem;">Tonspuren</label>
-<select x-model="target.audio_track_mode" @change="clampAudioChannels(target)">
+<select x-model="target.audio_track_mode" @change="clampAudioChannels(target)" :disabled="isRtmp(target)">
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
 <div class="form-row" style="margin-top: 0.5rem;">
   <div>
     <label>Chroma-Subsampling</label>
-    <select x-model="target.video_chroma">
+    <select x-model="target.video_chroma" :disabled="isRtmp(target)">
       <option value="420">4:2:0 (kompatibel)</option>
       <option value="422">4:2:2 (Broadcast)</option>
     </select>
   </div>
   <div>
     <label>Bittiefe</label>
-    <select x-model.number="target.video_bitdepth">
+    <select x-model.number="target.video_bitdepth" :disabled="isRtmp(target)">
       <option value="8">8 Bit</option>
       <option value="10" :disabled="target.video_codec === 'mpeg2'">10 Bit</option>
     </select>
@@ -1435,7 +1499,7 @@
   </div>
 </div>
 <div class="hint">Die GOP-Größe stellst du im Feld „GOP-Größe / Keyframe-Intervall“ weiter oben ein (1 bis 1000 Bilder, 0 = automatisch 1 Sekunde). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern und wirkt nur bei MPEG-2: Bei H.264 und H.265 bleibt die GOP wegen der festen B-Bild-Struktur auch bei „offen“ geschlossen. Bei Framing „I“ ist jedes Bild ein Keyframe, die GOP-Größe wird dann ignoriert. "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
-<details style="margin-top: 0.6rem;">
+<details style="margin-top: 0.6rem;" x-show="!isRtmp(target)">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
     <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="target.ts_video_pid" placeholder="0 = auto (65)"></div>
@@ -1454,7 +1518,7 @@
                           <input type="number" x-model.number="target.audio_bitrate">
                         </div>
 
-                        <div style="margin-top: 0.5rem;">
+                        <div x-show="!isRtmp(target)" style="margin-top: 0.5rem;">
                           <label>SRT-Link einfügen</label>
                           <div style="display: flex; gap: 0.5rem;">
                             <input type="text" x-model="targetSrtLinkInput[target.id]" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
@@ -1462,14 +1526,14 @@
                           </div>
                           <div class="hint" x-show="targetSrtLinkMessage[target.id]" x-text="targetSrtLinkMessage[target.id]"></div>
                         </div>
-                        <div style="margin-top: 0.5rem;">
+                        <div x-show="!isRtmp(target)" style="margin-top: 0.5rem;">
                           <label>Verbindungsmodus</label>
                           <select x-model="target.srt_mode">
                             <option value="listener">Listener (wartet auf Verbindung)</option>
                             <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
                           </select>
                         </div>
-                        <div class="form-row" style="margin-top: 0.5rem;">
+                        <div x-show="!isRtmp(target)" class="form-row" style="margin-top: 0.5rem;">
                           <div x-show="target.srt_mode === 'caller'">
                             <label>Ziel-Adresse (IP oder Hostname)</label>
                             <input type="text" x-model="target.srt_target_host" placeholder="z.B. 203.0.113.10">
@@ -1479,12 +1543,12 @@
                             <input type="number" x-model.number="target.srt_port">
                           </div>
                         </div>
-                        <div style="margin-top: 0.5rem;">
+                        <div x-show="!isRtmp(target)" style="margin-top: 0.5rem;">
                           <label>SRT Latenz (ms)</label>
                           <input type="number" x-model.number="target.srt_latency">
                         </div>
 
-                        <div class="form-row" style="margin-top: 0.5rem;">
+                        <div x-show="!isRtmp(target)" class="form-row" style="margin-top: 0.5rem;">
                           <div>
                             <label>Passphrase (Verschlüsselung)</label>
                             <input type="text" x-model="target.srt_passphrase" placeholder="leer = keine Verschlüsselung">
@@ -1498,9 +1562,32 @@
                             </select>
                           </div>
                         </div>
-                        <div style="margin-top: 0.5rem;">
+                        <div x-show="!isRtmp(target)" style="margin-top: 0.5rem;">
                           <label>Stream ID</label>
                           <input type="text" x-model="target.srt_streamid" placeholder="leer = keine">
+                        </div>
+                        <div x-show="isRtmp(target)" x-data="{ showKey: false }" style="margin-top: 0.5rem;">
+                          <div>
+                            <label>RTMP Server-URL (ohne Stream-Key)</label>
+                            <input type="text" x-model="target.rtmp_url" placeholder="rtmp://a.rtmp.youtube.com/live2" autocomplete="off" spellcheck="false">
+                          </div>
+                          <div style="margin-top: 0.5rem;">
+                            <label>Stream-Key <span style="color: #8b93a1;" x-text="'(' + (target.rtmp_key_set ? 'Key gesetzt' : 'kein Key') + ')'"></span></label>
+                            <div style="display: flex; gap: 0.5rem;">
+                              <input :type="showKey ? 'text' : 'password'" x-model="target.rtmp_key" autocomplete="off" spellcheck="false" :placeholder="rtmpKeyPlaceholder(!!target.rtmp_key_set)" style="flex: 1;">
+                              <button type="button" class="btn-secondary" @click="showKey = !showKey" x-text="showKey ? 'verbergen' : 'anzeigen'"></button>
+                            </div>
+                            <label x-show="!!target.rtmp_key_set" style="margin-top: 0.4rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                              <input type="checkbox" :checked="target.rtmp_key_clear === 1" @change="target.rtmp_key_clear = $event.target.checked ? 1 : 0" style="width: auto;">
+                              <span>Gespeicherten Key beim Speichern löschen (z. B. beim Wechsel zu SRT)</span>
+                            </label>
+                            <div class="hint">Der Key wird im Klartext in der Datenbank des Gateways gespeichert (wie die SRT-Passphrase).</div>
+                          </div>
+                          <label style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" :checked="target.rtmp_deinterlace === 1" @change="target.rtmp_deinterlace = $event.target.checked ? 1 : 0" style="width: auto;">
+                            <span>Zeilensprung entfernen</span>
+                          </label>
+                          <div class="hint" style="color: #d9a400;">RTMP: Zeilensprung-Signale (z. B. 1080i50) sendet YouTube/Twitch nur ungünstig. „Zeilensprung entfernen“: 1080i50 wird zu 1080p50 (Vollbilder). Für 1080p25 zusätzlich die Bildrate auf 25 stellen.</div>
                         </div>
                       </div>
                     </template>
@@ -1537,11 +1624,12 @@
         <span>
           Quelle: <span x-text="p.source_type"></span> (<span x-text="p.source_pattern"></span>) &middot;
           <span x-text="p.width"></span>x<span x-text="p.height"></span>@<span x-text="p.framerate"></span>fps &middot;
-          <span x-text="p.bitrate"></span> kbit/s &middot; Latenz <span x-text="p.srt_latency"></span>ms
+          <span x-text="p.bitrate"></span> kbit/s <span x-show="p.output_protocol !== 'rtmp'">&middot; Latenz <span x-text="p.srt_latency"></span>ms</span>
         </span>
         <br>
-        Modus: <span x-text="p.srt_mode === 'caller' ? 'Caller' : 'Listener'"></span><br>
-        SRT: <span class="srt-url" x-text="p.srt_mode === 'caller' ? ('srt://' + p.srt_target_host + ':' + p.srt_port) : ('srt://' + srtHost() + ':' + p.srt_port)"></span>
+        <span x-show="p.output_protocol !== 'rtmp'">Modus: <span x-text="p.srt_mode === 'caller' ? 'Caller' : 'Listener'"></span><br>
+        SRT: <span class="srt-url" x-text="p.srt_mode === 'caller' ? ('srt://' + p.srt_target_host + ':' + p.srt_port) : ('srt://' + srtHost() + ':' + p.srt_port)"></span></span>
+        <span x-show="p.output_protocol === 'rtmp'">RTMP: <span class="srt-url" x-text="p.rtmp_url || '(keine URL)'"></span></span>
         <template x-if="p.status === 'running'"> &middot; PID <span x-text="p.pid"></span></template>
       </div>
       <template x-if="p.status === 'running' && stats[p.id]">
@@ -1595,7 +1683,7 @@
 
     <div>
       <label>Video-Codec</label>
-      <select x-model="form.video_codec">
+      <select x-model="form.video_codec" :disabled="isRtmp(form)">
         <option value="h264">H.264 (empfohlen, breite Kompatibilität)</option>
         <option value="h265">H.265 / HEVC (bessere Kompression, mehr CPU-Last)</option>
         <option value="mpeg2">MPEG-2 (klassischer Broadcast-Standard)</option>
@@ -1645,7 +1733,7 @@
         </div>
         <div>
           <label>Audio-Codec</label>
-          <select x-model="form.audio_codec" @change="clampAudioChannels(form)">
+          <select x-model="form.audio_codec" @change="clampAudioChannels(form)" :disabled="isRtmp(form)">
             <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
             <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
             <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
@@ -1657,27 +1745,27 @@
       <div class="form-row" style="margin-top: 0.5rem;">
         <div>
           <label>Ausgabe-Kanäle</label>
-          <select x-model.number="form.audio_output_channels">
+          <select x-model.number="form.audio_output_channels" :disabled="isRtmp(form)">
             <template x-for="ch in audioChannelOptions(form.audio_codec, form.audio_track_mode)" :key="ch">
               <option :value="ch" x-text="ch"></option>
             </template>
           </select>
 <label style="margin-top: 0.5rem;">Tonspuren</label>
-<select x-model="form.audio_track_mode" @change="clampAudioChannels(form)">
+<select x-model="form.audio_track_mode" @change="clampAudioChannels(form)" :disabled="isRtmp(form)">
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
 <div class="form-row" style="margin-top: 0.5rem;">
   <div>
     <label>Chroma-Subsampling</label>
-    <select x-model="form.video_chroma">
+    <select x-model="form.video_chroma" :disabled="isRtmp(form)">
       <option value="420">4:2:0 (kompatibel)</option>
       <option value="422">4:2:2 (Broadcast)</option>
     </select>
   </div>
   <div>
     <label>Bittiefe</label>
-    <select x-model.number="form.video_bitdepth">
+    <select x-model.number="form.video_bitdepth" :disabled="isRtmp(form)">
       <option value="8">8 Bit</option>
       <option value="10" :disabled="form.video_codec === 'mpeg2'">10 Bit</option>
     </select>
@@ -1718,7 +1806,7 @@
   </div>
 </div>
 <div class="hint">Die GOP-Größe stellst du im Feld „GOP-Größe / Keyframe-Intervall“ weiter oben ein (1 bis 1000 Bilder, 0 = automatisch 1 Sekunde). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern und wirkt nur bei MPEG-2: Bei H.264 und H.265 bleibt die GOP wegen der festen B-Bild-Struktur auch bei „offen“ geschlossen. Bei Framing „I“ ist jedes Bild ein Keyframe, die GOP-Größe wird dann ignoriert. "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
-<details style="margin-top: 0.6rem;">
+<details style="margin-top: 0.6rem;" x-show="!isRtmp(form)">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
     <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="form.ts_video_pid" placeholder="0 = auto (65)"></div>
@@ -1769,7 +1857,7 @@
       <div class="form-row">
         <div>
           <label>Audio-Codec</label>
-          <select x-model="form.audio_codec" @change="clampAudioChannels(form)">
+          <select x-model="form.audio_codec" @change="clampAudioChannels(form)" :disabled="isRtmp(form)">
             <option value="aac">AAC (empfohlen, breite Kompatibilität)</option>
             <option value="mp2">MP2 (klassischer Broadcast-Standard)</option>
             <option value="ac3">AC-3 / Dolby Digital (für 5.1)</option>
@@ -1779,27 +1867,27 @@
         </div>
         <div>
           <label>Ausgabe-Kanäle</label>
-          <select x-model.number="form.audio_output_channels">
+          <select x-model.number="form.audio_output_channels" :disabled="isRtmp(form)">
             <template x-for="ch in audioChannelOptions(form.audio_codec, form.audio_track_mode)" :key="ch">
               <option :value="ch" x-text="ch"></option>
             </template>
           </select>
 <label style="margin-top: 0.5rem;">Tonspuren</label>
-<select x-model="form.audio_track_mode" @change="clampAudioChannels(form)">
+<select x-model="form.audio_track_mode" @change="clampAudioChannels(form)" :disabled="isRtmp(form)">
   <option value="multi">Eine Mehrkanal-Spur</option>
   <option value="pairs">Stereo-Spuren (je 2 Kanäle eine Spur, Bitrate gilt pro Spur)</option>
 </select>
 <div class="form-row" style="margin-top: 0.5rem;">
   <div>
     <label>Chroma-Subsampling</label>
-    <select x-model="form.video_chroma">
+    <select x-model="form.video_chroma" :disabled="isRtmp(form)">
       <option value="420">4:2:0 (kompatibel)</option>
       <option value="422">4:2:2 (Broadcast)</option>
     </select>
   </div>
   <div>
     <label>Bittiefe</label>
-    <select x-model.number="form.video_bitdepth">
+    <select x-model.number="form.video_bitdepth" :disabled="isRtmp(form)">
       <option value="8">8 Bit</option>
       <option value="10" :disabled="form.video_codec === 'mpeg2'">10 Bit</option>
     </select>
@@ -1840,7 +1928,7 @@
   </div>
 </div>
 <div class="hint">Die GOP-Größe stellst du im Feld „GOP-Größe / Keyframe-Intervall“ weiter oben ein (1 bis 1000 Bilder, 0 = automatisch 1 Sekunde). Mehr B-Bilder sparen Bitrate und verbessern die Qualität, erhöhen aber die Verzögerung um mehrere Bilder. Offen oder geschlossen gibt es nur mit B-Bildern und wirkt nur bei MPEG-2: Bei H.264 und H.265 bleibt die GOP wegen der festen B-Bild-Struktur auch bei „offen“ geschlossen. Bei Framing „I“ ist jedes Bild ein Keyframe, die GOP-Größe wird dann ignoriert. "Szenenwechsel aus" hält die GOP-Größe exakt ein. Bildrate 0 = wie der Eingang, kleinere Werte lassen Bilder weg.</div>
-<details style="margin-top: 0.6rem;">
+<details style="margin-top: 0.6rem;" x-show="!isRtmp(form)">
   <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Transportstrom: PIDs und Programm</summary>
   <div class="form-row" style="margin-top: 0.4rem;">
     <div><label>Video-PID</label><input type="number" min="0" max="8190" x-model.number="form.ts_video_pid" placeholder="0 = auto (65)"></div>
@@ -1882,6 +1970,32 @@
     </div>
 
     <div>
+      <label>Ausgabe</label>
+      <select x-model="form.output_protocol" @change="onProtocolChange(form)">
+        <option value="srt">SRT</option>
+        <option value="rtmp">RTMP</option>
+      </select>
+    </div>
+
+    <div x-show="isRtmp(form)" x-data="{ showKey: false }">
+      <div class="hint" style="color: #d9a400;">RTMP: nur H.264 4:2:0 8 Bit und AAC Stereo, eine Tonspur.</div>
+      <label>RTMP Server-URL (ohne Stream-Key)</label>
+      <input type="text" x-model="form.rtmp_url" placeholder="rtmp://a.rtmp.youtube.com/live2" autocomplete="off" spellcheck="false">
+      <div style="margin-top: 0.5rem;">
+        <label>Stream-Key <span style="color: #8b93a1;" x-text="'(' + (formKeySet() ? 'Key gesetzt' : 'kein Key') + ')'"></span></label>
+        <div style="display: flex; gap: 0.5rem;">
+          <input :type="showKey ? 'text' : 'password'" x-model="form.rtmp_key" autocomplete="off" spellcheck="false" :placeholder="rtmpKeyPlaceholder(formKeySet())" style="flex: 1;">
+          <button type="button" class="btn-secondary" @click="showKey = !showKey" x-text="showKey ? 'verbergen' : 'anzeigen'"></button>
+        </div>
+        <label x-show="formKeySet()" style="margin-top: 0.4rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+          <input type="checkbox" :checked="form.rtmp_key_clear === 1" @change="form.rtmp_key_clear = $event.target.checked ? 1 : 0" style="width: auto;">
+          <span>Gespeicherten Key beim Speichern löschen (z. B. beim Wechsel zu SRT)</span>
+        </label>
+        <div class="hint">Der Key wird im Klartext in der Datenbank des Gateways gespeichert (wie die SRT-Passphrase).</div>
+      </div>
+    </div>
+
+    <div x-show="!isRtmp(form)">
       <label>SRT-Link einfügen</label>
       <div style="display: flex; gap: 0.5rem;">
         <input type="text" x-model="srtLinkInput" placeholder="srt://host:port?mode=caller&streamid=...&passphrase=..." style="flex: 1;">
@@ -1890,14 +2004,14 @@
       <div class="hint" x-show="srtLinkMessage" x-text="srtLinkMessage"></div>
     </div>
 
-    <div>
+    <div x-show="!isRtmp(form)">
       <label>Verbindungsmodus</label>
       <select x-model="form.srt_mode">
         <option value="listener">Listener (wartet auf Verbindung)</option>
         <option value="caller">Caller (verbindet aktiv zu Ziel)</option>
       </select>
     </div>
-    <div class="form-row" style="margin-top: 0.5rem;">
+    <div class="form-row" style="margin-top: 0.5rem;" x-show="!isRtmp(form)">
       <div x-show="form.srt_mode === 'caller'">
         <label>Ziel-Adresse (IP oder Hostname)</label>
         <input type="text" x-model="form.srt_target_host" placeholder="z.B. 203.0.113.10">
@@ -1908,13 +2022,13 @@
       </div>
     </div>
 
-    <div>
+    <div x-show="!isRtmp(form)">
       <label>SRT Latenz (ms)</label>
       <input type="number" x-model.number="form.srt_latency">
     </div>
 
-    <h2 style="margin: 1.5rem 0 0.5rem; font-size: 1rem;">SRT-Sicherheit (optional)</h2>
-    <div class="form-row">
+    <h2 style="margin: 1.5rem 0 0.5rem; font-size: 1rem;" x-show="!isRtmp(form)">SRT-Sicherheit (optional)</h2>
+    <div class="form-row" x-show="!isRtmp(form)">
       <div>
         <label>Passphrase (Verschlüsselung)</label>
         <input type="text" x-model="form.srt_passphrase" placeholder="leer = keine Verschlüsselung">
@@ -1929,7 +2043,7 @@
         </select>
       </div>
     </div>
-    <div style="margin-top: 0.5rem;">
+    <div style="margin-top: 0.5rem;" x-show="!isRtmp(form)">
       <label>Stream ID</label>
       <input type="text" x-model="form.srt_streamid" placeholder="leer = keine, für Auth bei manchen SRT-Empfängern/CDNs">
     </div>
@@ -1970,7 +2084,12 @@ function defaultTileForm(deviceNumber) {
     srt_passphrase: '',
     srt_pbkeylen: 16,
     srt_streamid: '',
-    test_pattern_enabled: false
+    test_pattern_enabled: false,
+    output_protocol: 'srt',
+    rtmp_url: '',
+    rtmp_key: '',
+    rtmp_key_clear: 0,
+    rtmp_deinterlace: 0
   };
 }
 
@@ -2085,7 +2204,8 @@ function app() {
       clock_overlay_enabled: false,
       srt_passphrase: '',
       srt_pbkeylen: 16,
-      srt_streamid: ''
+      srt_streamid: '',
+      output_protocol: 'srt', rtmp_url: '', rtmp_key: '', rtmp_key_clear: 0, rtmp_deinterlace: 0
     },
 
     async load() {
@@ -2245,6 +2365,7 @@ function app() {
 
     statsSrtLine(c) {
       if (!c) return '';
+      if (c.protocol === 'rtmp') return 'RTMP' + (c.rtmp_url ? ' → ' + c.rtmp_url : '') + (c.rtmp_deinterlace ? ' · Zeilensprung entfernt' : '');
       const mode = c.srt_mode === 'caller' ? 'Caller → ' + (c.srt_host || '?') + ':' + c.srt_port : 'Listener :' + c.srt_port;
       return mode + ' · Latenz ' + (c.srt_latency ?? '–') + ' ms · ' + (c.encrypted ? 'verschlüsselt' : 'unverschlüsselt');
     },
@@ -2609,10 +2730,71 @@ function app() {
           srt_passphrase: p.srt_passphrase || '',
           srt_pbkeylen: p.srt_pbkeylen || 16,
           srt_streamid: p.srt_streamid || '',
-          test_pattern_enabled: !!(p.test_pattern_enabled && p.test_pattern_enabled != 0)
+          test_pattern_enabled: !!(p.test_pattern_enabled && p.test_pattern_enabled != 0),
+          output_protocol: p.output_protocol === 'rtmp' ? 'rtmp' : 'srt',
+          rtmp_url: p.rtmp_url || '',
+          rtmp_key: '',
+          rtmp_key_clear: 0,
+          rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0
         };
         this.tileSavedForms[n] = JSON.stringify(this.tileForms[n]);
       }
+    },
+
+    // --- Ausgabeprotokoll SRT/RTMP ---
+    isRtmp(o) {
+      return !!o && o.output_protocol === 'rtmp';
+    },
+
+    // RTMP kann nur H.264 4:2:0 8 Bit und AAC Stereo in einer Spur, keine TS-PIDs (der Server setzt das ebenfalls fest)
+    rtmpForceLimits(o) {
+      if (!this.isRtmp(o)) return;
+      o.video_codec = 'h264'; o.video_chroma = '420'; o.video_bitdepth = 8;
+      o.audio_codec = 'aac'; o.audio_output_channels = 2; o.audio_track_mode = 'multi';
+      o.ts_video_pid = 0; o.ts_audio_pid = 0; o.ts_pmt_pid = 0; o.ts_program = 0;
+    },
+
+    onProtocolChange(o) {
+      this.rtmpForceLimits(o);
+    },
+
+    rtmpKeyPlaceholder(isSet) {
+      return isSet ? 'gesetzt - leer lassen zum Behalten' : 'Stream-Key';
+    },
+
+    tileKeySet(n) {
+      const p = this.tilePipelineFor(n);
+      return !!(p && Number(p.rtmp_key_set));
+    },
+
+    formKeySet() {
+      const p = this.editingId !== null ? this.pipelines.find(x => x.id === this.editingId) : null;
+      return !!(p && Number(p.rtmp_key_set));
+    },
+
+    // Formular für "Neue Pipeline": Key nur senden, wenn RTMP gewählt ist
+    formPayload() {
+      const body = Object.assign({}, this.form);
+      if (body.output_protocol !== 'rtmp') delete body.rtmp_key;
+      return body;
+    },
+
+    // Presets ohne Protokollfelder (alte Presets) gelten als SRT; bei RTMP die festen Codec-Werte setzen
+    presetOutputFix(o) {
+      if (!('output_protocol' in o)) { o.output_protocol = 'srt'; o.rtmp_url = ''; o.rtmp_deinterlace = 0; }
+      if (o.output_protocol !== 'rtmp') o.output_protocol = 'srt';
+      this.rtmpForceLimits(o);
+      return o;
+    },
+
+    // Der Stream-Key darf nie in Presets oder Exportdateien landen
+    presetClean(data) {
+      if (!data || typeof data !== 'object') return data;
+      const d = JSON.parse(JSON.stringify(data));
+      const strip = (o) => { if (o && typeof o === 'object') { delete o.rtmp_key; delete o.rtmp_key_clear; delete o.rtmp_key_set; } };
+      strip(d.tile);
+      if (Array.isArray(d.targets)) d.targets.forEach(strip);
+      return d;
     },
 
     tileIsDirty(n) {
@@ -2644,7 +2826,7 @@ function app() {
       const t = (pr.data && pr.data.tile) || {};
       const extra = ((pr.data && pr.data.targets) || []).length;
       const video = (t.video_codec || 'h264').toUpperCase() + ' ' + (t.bitrate || 0) + ' kbit/s';
-      return video + ', ' + (t.audio_codec || 'aac').toUpperCase() + (extra ? ', +' + extra + (extra === 1 ? ' Ziel' : ' Ziele') : '');
+      return video + (t.output_protocol === 'rtmp' ? ' (RTMP)' : '') + ', ' + (t.audio_codec || 'aac').toUpperCase() + (extra ? ', +' + extra + (extra === 1 ? ' Ziel' : ' Ziele') : '');
     },
 
     async presetTargetsOf(p) {
@@ -2686,8 +2868,8 @@ function app() {
       const name = (prompt('Name des Presets (gleicher Name überschreibt nach Rückfrage):', selected ? selected.name : '') || '').trim();
       if (!name) return;
       const p = this.tilePipelineFor(n);
-      const tile = this.pickLike(defaultTileForm(n), this.tileForms[n], ['id']);
-      const targets = (await this.presetTargetsOf(p)).map(t => this.pickLike(this.newTargetDefaults(), t));
+      const tile = this.pickLike(defaultTileForm(n), this.tileForms[n], ['id', 'rtmp_key', 'rtmp_key_clear']);
+      const targets = (await this.presetTargetsOf(p)).map(t => this.pickLike(this.newTargetDefaults(), t, ['rtmp_key', 'rtmp_key_clear']));
       const post = async (overwrite) => {
         const res = await fetch('api.php?action=preset_save', {
           method: 'POST',
@@ -2722,9 +2904,12 @@ function app() {
         this.errorMsg = 'Erst die laufenden Ziele dieses Anschlusses stoppen.';
         return;
       }
-      const tile = this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id']);
+      const tile = this.presetOutputFix(this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id', 'rtmp_key', 'rtmp_key_clear']));
       for (const k of Object.keys(tile)) this.tileForms[n][k] = tile[k];
-      const wanted = ((pr.data && pr.data.targets) || []).map(t => this.pickLike(this.newTargetDefaults(), t));
+      // Stream-Key steht nie im Preset: Eingabefeld leeren, ein gespeicherter Key bleibt auf dem Server
+      this.tileForms[n].rtmp_key = '';
+      this.tileForms[n].rtmp_key_clear = 0;
+      const wanted = ((pr.data && pr.data.targets) || []).map(t => this.presetOutputFix(this.pickLike(this.newTargetDefaults(), t, ['rtmp_key', 'rtmp_key_clear'])));
       this.presetPending[n] = wanted;
       const p = this.tilePipelineFor(n);
       const have = (await this.presetTargetsOf(p)).length;
@@ -2765,7 +2950,7 @@ function app() {
     exportPresets(list) {
       const doc = {
         format: 'noicecaster-presets', version: 1, exported: new Date().toISOString(),
-        presets: list.map(pr => ({ name: pr.name, direction: pr.direction, data: pr.data }))
+        presets: list.map(pr => ({ name: pr.name, direction: pr.direction, data: this.presetClean(pr.data) }))
       };
       const label = list.length === 1 ? list[0].name : 'alle';
       const file = 'noicecaster-presets-' + label.replace(/[^A-Za-z0-9._-]+/g, '_') + '.json';
@@ -2777,7 +2962,7 @@ function app() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      this.presetsMsg = list.length + (list.length === 1 ? ' Preset' : ' Presets') + ' exportiert (' + file + '). Die Datei enthält SRT-Passphrasen im Klartext.';
+      this.presetsMsg = list.length + (list.length === 1 ? ' Preset' : ' Presets') + ' exportiert (' + file + '). Die Datei enthält SRT-Passphrasen im Klartext, aber keine RTMP-Stream-Keys.';
     },
 
     async importPresets(ev) {
@@ -2801,7 +2986,7 @@ function app() {
         const post = async (overwrite) => (await fetch('api.php?action=preset_save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: item && item.name, direction: item && item.direction, data: item && item.data, overwrite })
+          body: JSON.stringify({ name: item && item.name, direction: item && item.direction, data: item && this.presetClean(item.data), overwrite })
         })).json();
         try {
           let r = await post(false);
@@ -2839,6 +3024,23 @@ function app() {
       const direction = this.tileDirection(port);
       if (!direction) return;
       const tf = this.tileForms[n];
+      // RTMP braucht einen Stream-Key. Vorab pruefen (auch fuer Ziele aus einem geladenen Preset), damit nichts halb gespeichert wird.
+      if (direction === 'sdi_to_srt') {
+        const noKey = (o, isSet) => !!o && o.output_protocol === 'rtmp' && !String(o.rtmp_key || '').trim() && !isSet;
+        if (noKey(tf, this.tileKeySet(n))) {
+          this.errorMsg = 'Anschluss ' + (n + 1) + ': Für RTMP bitte den Stream-Key eintragen.';
+          return;
+        }
+        if (Array.isArray(this.presetPending[n])) {
+          const have = await this.presetTargetsOf(this.tilePipelineFor(n));
+          for (let i = 0; i < this.presetPending[n].length; i++) {
+            if (noKey(this.presetPending[n][i], have[i] && Number(have[i].rtmp_key_set))) {
+              this.errorMsg = 'Ziel ' + (i + 2) + ' (aus dem Preset) ist ein RTMP-Ziel: Bitte erst dort den Stream-Key eintragen (Ziel anlegen/öffnen) oder ein anderes Preset wählen. Es wurde nichts gespeichert.';
+              return;
+            }
+          }
+        }
+      }
       this.savingTile[n] = true;
       this.errorMsg = '';
       const payload = {
@@ -2872,8 +3074,16 @@ function app() {
         srt_passphrase: tf.srt_passphrase,
         srt_pbkeylen: tf.srt_pbkeylen,
         srt_streamid: tf.srt_streamid,
-        test_pattern_enabled: direction === 'srt_to_sdi' ? tf.test_pattern_enabled : false
+        test_pattern_enabled: direction === 'srt_to_sdi' ? tf.test_pattern_enabled : false,
+        output_protocol: direction === 'sdi_to_srt' ? tf.output_protocol : 'srt',
+        rtmp_url: tf.rtmp_url,
+        rtmp_deinterlace: tf.rtmp_deinterlace
       };
+      // Stream-Key nur mitsenden, wenn RTMP gewählt ist; leer = der Server behält den gespeicherten Key
+      if (direction === 'sdi_to_srt') {
+        if (tf.output_protocol === 'rtmp') payload.rtmp_key = tf.rtmp_key;
+        payload.rtmp_key_clear = tf.rtmp_key_clear;
+      }
       try {
         const url = tf.id ? ('api.php?action=update&id=' + tf.id) : 'api.php?action=create';
         const res = await fetch(url, {
@@ -2909,6 +3119,12 @@ function app() {
         const res = await fetch('api.php?action=targets_list&pipeline_id=' + pipelineId);
         this.targets[pipelineId] = await res.json();
         for (const target of this.targets[pipelineId]) {
+          // RTMP-Felder normalisieren; der Key wird nie vom Server geliefert (rtmp_key_set zeigt nur, ob einer gespeichert ist)
+          if (target.output_protocol !== 'rtmp') target.output_protocol = 'srt';
+          target.rtmp_url = target.rtmp_url || '';
+          target.rtmp_deinterlace = target.rtmp_deinterlace ? 1 : 0;
+          target.rtmp_key = '';
+          target.rtmp_key_clear = 0;
           this.targetSnapshots[target.id] = JSON.stringify(target);
           if (!(target.id in this.targetSrtLinkInput)) this.targetSrtLinkInput[target.id] = '';
           if (!(target.id in this.targetSrtLinkMessage)) this.targetSrtLinkMessage[target.id] = '';
@@ -2934,7 +3150,8 @@ function app() {
         video_codec: 'h264', bitrate: 2000, video_rate_control: 'cbr', video_speed_preset: 'veryfast', video_keyframe_interval: 0,
         video_scale_enabled: false, width: 1920, height: 1080,
         audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, video_framing: 'IP', video_framerate: 0, video_scenecut: 1, video_open_gop: 0, audio_bitrate: 192,
-        srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: ''
+        srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: '',
+        output_protocol: 'srt', rtmp_url: '', rtmp_key: '', rtmp_key_clear: 0, rtmp_deinterlace: 0
       };
     },
 
@@ -2954,14 +3171,21 @@ function app() {
     },
 
     async saveTarget(target) {
+      const body = Object.assign({}, target);
+      if (target.output_protocol !== 'rtmp') delete body.rtmp_key;
       try {
         const res = await fetch('api.php?action=target_update&id=' + target.id, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(target)
+          body: JSON.stringify(body)
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        // Key-Eingabe leeren (nur "gesetzt/nicht gesetzt" merken), damit der Key allein den Stand nicht dauerhaft "geändert" hält
+        if (body.rtmp_key) target.rtmp_key_set = 1;
+        else if (target.rtmp_key_clear === 1) target.rtmp_key_set = 0;
+        target.rtmp_key = '';
+        target.rtmp_key_clear = 0;
         this.targetSnapshots[target.id] = JSON.stringify(target);
       } catch (e) {
         this.errorMsg = 'Fehler beim Speichern des Ziels: ' + e.message;
@@ -3494,7 +3718,12 @@ function app() {
         clock_overlay_enabled: !!(p.clock_overlay_enabled && p.clock_overlay_enabled != 0),
         srt_passphrase: p.srt_passphrase || '',
         srt_pbkeylen: p.srt_pbkeylen || 16,
-        srt_streamid: p.srt_streamid || ''
+        srt_streamid: p.srt_streamid || '',
+        output_protocol: p.output_protocol === 'rtmp' ? 'rtmp' : 'srt',
+        rtmp_url: p.rtmp_url || '',
+        rtmp_key: '',
+        rtmp_key_clear: 0,
+        rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0
       };
     },
 
@@ -3535,7 +3764,8 @@ function app() {
         clock_overlay_enabled: false,
         srt_passphrase: '',
         srt_pbkeylen: 16,
-        srt_streamid: ''
+        srt_streamid: '',
+        output_protocol: 'srt', rtmp_url: '', rtmp_key: '', rtmp_key_clear: 0, rtmp_deinterlace: 0
       };
     },
 
@@ -3549,7 +3779,7 @@ function app() {
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.form)
+          body: JSON.stringify(this.formPayload())
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
