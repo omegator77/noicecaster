@@ -28,6 +28,16 @@ try {
             echo json_encode($manager->list());
             break;
 
+        case 'overlay_live':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode($manager->setOverlayLive((int)($data['id'] ?? 0), is_array($data) ? $data : []));
+            break;
+
         case 'ingest_status':
             echo json_encode(IngestManager::status($db->pdo()));
             break;

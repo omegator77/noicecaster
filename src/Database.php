@@ -95,6 +95,13 @@ class Database
             'rtmp_url' => "TEXT DEFAULT NULL",
             'rtmp_key' => "TEXT DEFAULT NULL",
             'rtmp_deinterlace' => "INTEGER DEFAULT 0",
+            // Text-Einblendung (Ziel 1 / Empfaenger-Ausgang): Text, Lage (9 Felder), Groesse in % der Bildhoehe, Farbe, Hintergrund
+            'overlay_enabled' => "INTEGER DEFAULT 0",
+            'overlay_text' => "TEXT DEFAULT NULL",
+            'overlay_pos' => "TEXT DEFAULT 'bottom-center'",
+            'overlay_size' => "INTEGER DEFAULT 5",
+            'overlay_color' => "TEXT DEFAULT '#FFFFFF'",
+            'overlay_bg' => "INTEGER DEFAULT 0",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {
@@ -208,7 +215,10 @@ class Database
             }
         }
         foreach (['output_protocol' => "TEXT DEFAULT 'srt'", 'rtmp_url' => 'TEXT DEFAULT NULL',
-                  'rtmp_key' => 'TEXT DEFAULT NULL', 'rtmp_deinterlace' => 'INTEGER DEFAULT 0'] as $rtmpColumn => $rtmpType) {
+                  'rtmp_key' => 'TEXT DEFAULT NULL', 'rtmp_deinterlace' => 'INTEGER DEFAULT 0',
+                  'overlay_enabled' => 'INTEGER DEFAULT 0', 'overlay_text' => 'TEXT DEFAULT NULL',
+                  'overlay_pos' => "TEXT DEFAULT 'bottom-center'", 'overlay_size' => 'INTEGER DEFAULT 5',
+                  'overlay_color' => "TEXT DEFAULT '#FFFFFF'", 'overlay_bg' => 'INTEGER DEFAULT 0'] as $rtmpColumn => $rtmpType) {
             if (!in_array($rtmpColumn, $existingTargetColumns, true)) {
                 $this->pdo->exec("ALTER TABLE srt_targets ADD COLUMN {$rtmpColumn} {$rtmpType}");
             }

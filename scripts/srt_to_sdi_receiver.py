@@ -15,6 +15,11 @@ RTMP (--rtmp-uri): rtmp2src holt den Strom von einem RTMP-Server ab (Client), fl
 Rest (Ausgabewege, Ton, Selbstueberwachung) ist derselbe wie bei SRT. Ein Abbruch oder Ende des Stroms fuehrt zum
 Neuaufbau nach 2 s, so holt sich der Empfaenger den Strom nach einer Unterbrechung selbst zurueck. Kein Stromabgriff:
 die Statistik kommt aus rtmp2src.stats.
+
+Text-Einblendung (--overlay-file): Ein textoverlay sitzt unmittelbar vor dem DeckLink-Ausgang. Seine Werte (Text, Lage,
+Groesse in % der Bildhoehe, Farbe, Hintergrund, an/aus) stehen in einer JSON-Steuerdatei, die der Empfaenger beim Start und
+danach jede halbe Sekunde liest (Aenderung der Datei = sofort sichtbar, ohne Neustart). Ohne --overlay-file gibt es das
+Element nicht, die Kette ist dann unveraendert.
 """
 import argparse
 import json
@@ -53,9 +58,57 @@ def interlaced_mode_rates(mode: str):
     return {"50": ("50/1", "25/1"), "5994": ("60000/1001", "30000/1001"), "60": ("60/1", "30/1")}.get(m.group(1))
 
 
+def apply_overlay(ovl, a, force=False) -> None:
+    """Liest die Steuerdatei und stellt das textoverlay entsprechend ein (nur wenn sich die Datei geaendert hat oder force)."""
+    if ovl is None or not a.overlay_file:
+        return
+    try:
+        st = os.stat(a.overlay_file)
+    except OSError:
+        return  # Datei (noch) nicht da: Element bleibt wie es ist
+    stamp = (st.st_mtime_ns, st.st_size)
+    if not force and state.get("overlay_stamp") == stamp:
+        return
+    try:
+        with open(a.overlay_file, encoding="utf-8") as f:
+            cfg = json.load(f)
+        text = str(cfg.get("text") or "")
+        enabled = bool(cfg.get("enabled")) and text.strip() != ""
+        height = max(1, a.overlay_height)
+        px = max(8, round(int(cfg.get("size", 5)) * height / 100))
+        pos = str(cfg.get("pos", "bottom-center"))
+        valign, _, halign = pos.partition("-")
+        valign = {"top": "top", "middle": "center", "bottom": "bottom"}.get(valign, "bottom")
+        halign = halign if halign in ("left", "center", "right") else "center"
+        color = str(cfg.get("color", "#FFFFFF"))
+        argb = 0xFF000000 | int(color.lstrip("#"), 16) if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else 0xFFFFFFFF
+        pad = max(8, round(height * 0.02))
+        # Pango-Markup: & < > ersetzen, der Text erscheint woertlich
+        ovl.set_property("text", GLib.markup_escape_text(text))
+        ovl.set_property("font-desc", f"Sans Bold {px}")
+        ovl.set_property("valignment", valign)
+        ovl.set_property("halignment", halign)
+        ovl.set_property("color", argb)
+        ovl.set_property("shaded-background", bool(cfg.get("bg")))
+        ovl.set_property("xpad", pad)
+        ovl.set_property("ypad", pad)
+        ovl.set_property("silent", not enabled)
+        state["overlay_stamp"] = stamp
+        log(f"Einblendung: {'an' if enabled else 'aus'}, {pos}, {px} px")
+    except (OSError, ValueError, TypeError) as e:
+        state["overlay_stamp"] = stamp  # dieselbe kaputte Datei nur einmal melden
+        log(f"Einblend-Steuerdatei nicht lesbar: {e}")
+
+
 def build(a):
     # --null-sinks: fakesink statt DeckLink-Ausgabe, nur zum Entwickeln und Testen ohne Karte
-    vsink = ("fakesink name=vsink sync=true" if a.null_sinks
+    if a.null_sinks and a.snapshot_dir:
+        # Test: statt fakesink jede Sekunde ein JPEG des Ausgangsbilds (Einblendung sichtbar machen)
+        vsink_null = ("videorate drop-only=true ! video/x-raw,framerate=1/1 ! videoconvert ! jpegenc ! "
+                      f"multifilesink name=vsink location={a.snapshot_dir}/f_%05d.jpg sync=true")
+    else:
+        vsink_null = "fakesink name=vsink sync=true"
+    vsink = (vsink_null if a.null_sinks
              else f"decklinkvideosink name=vsink device-number={a.device} mode={a.mode} profile={a.profile}")
     asink = ("fakesink name=asink sync=true" if a.null_sinks
              else f"decklinkaudiosink name=asink device-number={a.device}")
@@ -69,9 +122,12 @@ def build(a):
     # Zusaetzlich: MPEG-2-Decoder melden den Zeilensprung als "mixed" (je Bild); der DeckLink-Ausgang im
     # Halbbild-Modus nimmt nur "interleaved" an, deshalb wird das Caps-Event in on_video_pad umgeschrieben.
     rates = interlaced_mode_rates(a.mode)
+    # textoverlay vor dem Ausgang (auto-resize aus: die Schriftgroesse in Pixeln wird aus % der Bildhoehe berechnet);
+    # silent=true schaltet es durchlaessig, bis die Steuerdatei etwas anderes sagt
+    ovl = "textoverlay name=ovl auto-resize=false silent=true ! " if a.overlay_file else ""
     video = (
         "queue name=vq ! decodebin name=vdec  "
-        f"input-selector name=vsel ! {vsink}  "
+        f"input-selector name=vsel ! {ovl}{vsink}  "
         "videoconvert name=thA ! videoscale ! videorate name=tlastA ! vsel.  "
     )
     if rates:
@@ -146,6 +202,9 @@ def build(a):
             src.set_property("pbkeylen", a.pbkeylen or 16)
         if a.streamid:
             src.set_property("streamid", a.streamid)
+
+    if a.overlay_file:
+        apply_overlay(pipe.get_by_name("ovl"), a, force=True)
 
     demux = pipe.get_by_name("demux")
     targets = {"video": pipe.get_by_name("vq"), "audio": pipe.get_by_name("aq")}
@@ -386,11 +445,19 @@ def write_stats(a) -> bool:
     return True
 
 
+def poll_overlay(a) -> bool:
+    pipe = state.get("pipe")
+    if pipe is not None:
+        apply_overlay(pipe.get_by_name("ovl"), a)
+    return True
+
+
 def run_once(a) -> int:
     """Baut die Pipeline auf und laeuft bis Fehler, EOS oder Stop. 0 = ok/Stop, 1 = Fehler."""
     pipe = build(a)
     state["pipe"] = pipe
     stats_timer = GLib.timeout_add_seconds(1, write_stats, a)
+    overlay_timer = GLib.timeout_add(500, poll_overlay, a) if a.overlay_file else 0
     loop = GLib.MainLoop()
     state["loop"] = loop
     code = {"value": 0}
@@ -419,6 +486,8 @@ def run_once(a) -> int:
         loop.run()
     finally:
         GLib.source_remove(stats_timer)
+        if overlay_timer:
+            GLib.source_remove(overlay_timer)
         state["pipe"] = None
         pipe.set_state(Gst.State.NULL)  # schliesst die SRT-Verbindung sauber, gibt die Karte frei
         bus.remove_signal_watch()
@@ -450,6 +519,9 @@ def main() -> int:
     ap.add_argument("--streamid")
     ap.add_argument("--stats-file", help="JSON-Datei fuer SRT-Zahlen und Ausgabe-Zaehler (jede Sekunde neu)")
     ap.add_argument("--tap-port", type=int, default=0, help="UDP-Port auf 127.0.0.1 fuer den Stromabgriff (Statistik)")
+    ap.add_argument("--overlay-file", help="JSON-Steuerdatei der Text-Einblendung (wird laufend gelesen)")
+    ap.add_argument("--overlay-height", type=int, default=1080, help="Bildhoehe des Ausgangs fuer die Schriftgroesse")
+    ap.add_argument("--snapshot-dir", help="nur mit --null-sinks: jede Sekunde ein JPEG des Ausgangsbilds dorthin (Tests)")
     ap.add_argument("--null-sinks", action="store_true", help="fakesink statt DeckLink (nur Tests ohne Karte)")
     ap.add_argument("--audio-levels", action="store_true", help="Pegel je Ausgangskanal jede Sekunde ins Log (Tests)")
     a = ap.parse_args()

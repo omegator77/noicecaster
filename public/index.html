@@ -141,6 +141,10 @@
     font-size: 0.9rem;
   }
   .empty { color: #6b7280; font-style: italic; padding: 1rem 0; }
+  .ov-block textarea { width: 100%; padding: 0.5rem; background: #0f1115; border: 1px solid #2a2e37; border-radius: 6px; color: #e4e6eb; font-size: 0.9rem; font-family: inherit; resize: vertical; }
+  .ov-grid { display: grid; grid-template-columns: repeat(3, 2.4rem); gap: 0.25rem; }
+  .ov-grid button { padding: 0.3rem 0; background: #334155; color: #e4e6eb; font-size: 1rem; line-height: 1.2; }
+  .ov-grid button.active { background: #2563eb; color: #fff; }
   .srt-url {
     font-family: monospace;
     background: #0f1115;
@@ -1329,6 +1333,106 @@
             </div>
           </template>
 
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && !tileForms[n].test_pattern_enabled">
+            <details style="margin-top: 0.75rem;">
+              <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Text einblenden<span x-show="Number(tileForms[n].overlay_enabled) === 1" style="color: #4ade80;"> &middot; an</span></summary>
+              <div class="ov-block" x-data="{ get ov() { return tileForms[n]; } }" style="margin-top: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #e4e6eb; font-size: 0.9rem;">
+                  <input type="checkbox" :checked="Number(ov.overlay_enabled) === 1" @change="ov.overlay_enabled = $event.target.checked ? 1 : 0" style="width: auto;">
+                  <span>Einblendung an</span>
+                </label>
+                <div style="margin-top: 0.5rem;">
+                  <label>Text</label>
+                  <textarea rows="4" maxlength="200" x-model="ov.overlay_text" placeholder="Einblend-Text" spellcheck="false"></textarea>
+                  <div class="hint">bis zu 4 Zeilen &middot; <span x-text="overlayLen(ov) + '/200'"></span></div>
+                </div>
+                <div class="form-row" style="margin-top: 0.5rem;">
+                  <div>
+                    <label>Lage</label>
+                    <div class="ov-grid">
+                      <template x-for="p in overlayPositions" :key="p.value">
+                        <button type="button" :class="{ active: ov.overlay_pos === p.value }" :title="p.label" :aria-label="p.label" :aria-pressed="ov.overlay_pos === p.value" @click="ov.overlay_pos = p.value" x-text="p.arrow"></button>
+                      </template>
+                    </div>
+                    <div class="hint" x-text="overlayPosLabel(ov.overlay_pos)"></div>
+                  </div>
+                  <div>
+                    <label>Schriftgröße (% der Bildhöhe)</label>
+                    <select x-model.number="ov.overlay_size">
+                      <template x-for="sz in overlaySizeList(ov.overlay_size)" :key="sz">
+                        <option :value="sz" :selected="sz === Number(ov.overlay_size)" x-text="sz + ' %'"></option>
+                      </template>
+                    </select>
+                    <label style="margin-top: 0.5rem;">Farbe</label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <input type="color" :value="ov.overlay_color" @input="ov.overlay_color = $event.target.value.toUpperCase()" style="width: 3.5rem; height: 2.2rem; padding: 0.15rem;">
+                      <span class="srt-url" x-text="ov.overlay_color"></span>
+                    </div>
+                  </div>
+                </div>
+                <label style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #e4e6eb; font-size: 0.9rem;">
+                  <input type="checkbox" :checked="Number(ov.overlay_bg) === 1" @change="ov.overlay_bg = $event.target.checked ? 1 : 0" style="width: auto;">
+                  <span>Hintergrundbalken</span>
+                </label>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 0.6rem;">
+                <button type="button" class="btn-primary" :disabled="!tileForms[n].id || overlayBusy[n]" @click="overlayLive(n)">Übernehmen (live)</button>
+                <button type="button" class="btn-secondary" :disabled="!tileForms[n].id || overlayBusy[n]" @click="overlayLive(n, true)" x-text="Number(tileForms[n].overlay_enabled) === 1 ? 'Einblendung aus' : 'Einblendung an'"></button>
+              </div>
+              <div class="hint" x-show="!tileForms[n].id">Erst Anschluss speichern.</div>
+              <div class="hint" x-show="overlayMsg[n]" :style="'color:' + overlayMsgColor(n)" x-text="overlayMsg[n] && overlayMsg[n].text"></div>
+              <div class="hint">Live-Änderung am laufenden Ausgang geht nur, wenn der Anschluss mit eingetragenem Text gestartet wurde (auch bei ausgeschalteter Einblendung). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
+              </div>
+            </details>
+          </template>
+
+          <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
+            <div x-show="targetsExpanded[n]">
+              <details style="margin-top: 0.75rem;">
+                <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Text einblenden<span x-show="Number(tileForms[n].overlay_enabled) === 1" style="color: #4ade80;"> &middot; an</span></summary>
+                <div class="ov-block" x-data="{ get ov() { return tileForms[n]; } }" style="margin-top: 0.5rem;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #e4e6eb; font-size: 0.9rem;">
+                    <input type="checkbox" :checked="Number(ov.overlay_enabled) === 1" @change="ov.overlay_enabled = $event.target.checked ? 1 : 0" style="width: auto;">
+                    <span>Einblendung an</span>
+                  </label>
+                  <div style="margin-top: 0.5rem;">
+                    <label>Text</label>
+                    <textarea rows="4" maxlength="200" x-model="ov.overlay_text" placeholder="Einblend-Text" spellcheck="false"></textarea>
+                    <div class="hint">bis zu 4 Zeilen &middot; <span x-text="overlayLen(ov) + '/200'"></span></div>
+                  </div>
+                  <div class="form-row" style="margin-top: 0.5rem;">
+                    <div>
+                      <label>Lage</label>
+                      <div class="ov-grid">
+                        <template x-for="p in overlayPositions" :key="p.value">
+                          <button type="button" :class="{ active: ov.overlay_pos === p.value }" :title="p.label" :aria-label="p.label" :aria-pressed="ov.overlay_pos === p.value" @click="ov.overlay_pos = p.value" x-text="p.arrow"></button>
+                        </template>
+                      </div>
+                      <div class="hint" x-text="overlayPosLabel(ov.overlay_pos)"></div>
+                    </div>
+                    <div>
+                      <label>Schriftgröße (% der Bildhöhe)</label>
+                      <select x-model.number="ov.overlay_size">
+                        <template x-for="sz in overlaySizeList(ov.overlay_size)" :key="sz">
+                          <option :value="sz" :selected="sz === Number(ov.overlay_size)" x-text="sz + ' %'"></option>
+                        </template>
+                      </select>
+                      <label style="margin-top: 0.5rem;">Farbe</label>
+                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <input type="color" :value="ov.overlay_color" @input="ov.overlay_color = $event.target.value.toUpperCase()" style="width: 3.5rem; height: 2.2rem; padding: 0.15rem;">
+                        <span class="srt-url" x-text="ov.overlay_color"></span>
+                      </div>
+                    </div>
+                  </div>
+                  <label style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #e4e6eb; font-size: 0.9rem;">
+                    <input type="checkbox" :checked="Number(ov.overlay_bg) === 1" @change="ov.overlay_bg = $event.target.checked ? 1 : 0" style="width: auto;">
+                    <span>Hintergrundbalken</span>
+                  </label>
+                  <div class="hint">Wirkt ab dem nächsten Start dieses Ziels.</div>
+                </div>
+              </details>
+            </div>
+          </template>
+
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt' && isRtmp(tileForms[n])">
             <div x-show="targetsExpanded[n]" x-data="{ showKey: false }">
               <h2 style="margin: 1rem 0 0.5rem; font-size: 0.95rem; color: #cbd5e1;">RTMP-Ziel</h2>
@@ -1661,6 +1765,49 @@
                           </label>
                           <div class="hint" style="color: #d9a400;">RTMP: Zeilensprung-Signale (z. B. 1080i50) sendet YouTube/Twitch nur ungünstig. „Zeilensprung entfernen“: 1080i50 wird zu 1080p50 (Vollbilder). Für 1080p25 zusätzlich die Bildrate auf 25 stellen.</div>
                         </div>
+                        <details style="margin-top: 0.75rem;">
+                          <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Text einblenden<span x-show="Number(target.overlay_enabled) === 1" style="color: #4ade80;"> &middot; an</span></summary>
+                          <div class="ov-block" x-data="{ get ov() { return target; } }" style="margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #e4e6eb; font-size: 0.9rem;">
+                              <input type="checkbox" :checked="Number(ov.overlay_enabled) === 1" @change="ov.overlay_enabled = $event.target.checked ? 1 : 0" style="width: auto;">
+                              <span>Einblendung an</span>
+                            </label>
+                            <div style="margin-top: 0.5rem;">
+                              <label>Text</label>
+                              <textarea rows="4" maxlength="200" x-model="ov.overlay_text" placeholder="Einblend-Text" spellcheck="false"></textarea>
+                              <div class="hint">bis zu 4 Zeilen &middot; <span x-text="overlayLen(ov) + '/200'"></span></div>
+                            </div>
+                            <div class="form-row" style="margin-top: 0.5rem;">
+                              <div>
+                                <label>Lage</label>
+                                <div class="ov-grid">
+                                  <template x-for="p in overlayPositions" :key="p.value">
+                                    <button type="button" :class="{ active: ov.overlay_pos === p.value }" :title="p.label" :aria-label="p.label" :aria-pressed="ov.overlay_pos === p.value" @click="ov.overlay_pos = p.value" x-text="p.arrow"></button>
+                                  </template>
+                                </div>
+                                <div class="hint" x-text="overlayPosLabel(ov.overlay_pos)"></div>
+                              </div>
+                              <div>
+                                <label>Schriftgröße (% der Bildhöhe)</label>
+                                <select x-model.number="ov.overlay_size">
+                                  <template x-for="sz in overlaySizeList(ov.overlay_size)" :key="sz">
+                                    <option :value="sz" :selected="sz === Number(ov.overlay_size)" x-text="sz + ' %'"></option>
+                                  </template>
+                                </select>
+                                <label style="margin-top: 0.5rem;">Farbe</label>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                  <input type="color" :value="ov.overlay_color" @input="ov.overlay_color = $event.target.value.toUpperCase()" style="width: 3.5rem; height: 2.2rem; padding: 0.15rem;">
+                                  <span class="srt-url" x-text="ov.overlay_color"></span>
+                                </div>
+                              </div>
+                            </div>
+                            <label style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #e4e6eb; font-size: 0.9rem;">
+                              <input type="checkbox" :checked="Number(ov.overlay_bg) === 1" @change="ov.overlay_bg = $event.target.checked ? 1 : 0" style="width: auto;">
+                              <span>Hintergrundbalken</span>
+                            </label>
+                            <div class="hint">Wirkt ab dem nächsten Start dieses Ziels.</div>
+                          </div>
+                        </details>
                       </div>
                     </template>
 
@@ -2128,6 +2275,24 @@
 </div>
 
 <script>
+// Text-Einblendung: Standardwerte und Normalisierung der Serverwerte (gleiche Felder bei Anschluss und Zielen)
+const OVERLAY_KEYS = ['overlay_enabled', 'overlay_text', 'overlay_pos', 'overlay_size', 'overlay_color', 'overlay_bg'];
+function overlayDefaults() {
+  return { overlay_enabled: 0, overlay_text: '', overlay_pos: 'bottom-center', overlay_size: 5, overlay_color: '#FFFFFF', overlay_bg: 0 };
+}
+function overlayFromServer(p) {
+  const d = overlayDefaults();
+  const size = Number(p.overlay_size);
+  return {
+    overlay_enabled: Number(p.overlay_enabled) === 1 ? 1 : 0,
+    overlay_text: p.overlay_text === null || p.overlay_text === undefined ? '' : String(p.overlay_text),
+    overlay_pos: p.overlay_pos ? String(p.overlay_pos) : d.overlay_pos,
+    overlay_size: Number.isFinite(size) && size >= 1 ? size : d.overlay_size,
+    overlay_color: p.overlay_color ? String(p.overlay_color) : d.overlay_color,
+    overlay_bg: Number(p.overlay_bg) === 1 ? 1 : 0
+  };
+}
+
 function defaultTileForm(deviceNumber) {
   return {
     id: null,
@@ -2161,7 +2326,8 @@ function defaultTileForm(deviceNumber) {
     rtmp_url: '',
     rtmp_key: '',
     rtmp_key_clear: 0,
-    rtmp_deinterlace: 0
+    rtmp_deinterlace: 0,
+    ...overlayDefaults()
   };
 }
 
@@ -2222,6 +2388,20 @@ function app() {
     systemStats: null,
     tileForms: { 0: defaultTileForm(0), 1: defaultTileForm(1), 2: defaultTileForm(2), 3: defaultTileForm(3) },
     tileSavedForms: {},
+    overlayMsg: { 0: '', 1: '', 2: '', 3: '' },
+    overlayBusy: { 0: false, 1: false, 2: false, 3: false },
+    overlayPositions: [
+      { value: 'top-left', label: 'oben links', arrow: '↖' },
+      { value: 'top-center', label: 'oben mitte', arrow: '↑' },
+      { value: 'top-right', label: 'oben rechts', arrow: '↗' },
+      { value: 'middle-left', label: 'Mitte links', arrow: '←' },
+      { value: 'middle-center', label: 'Mitte', arrow: '●' },
+      { value: 'middle-right', label: 'Mitte rechts', arrow: '→' },
+      { value: 'bottom-left', label: 'unten links', arrow: '↙' },
+      { value: 'bottom-center', label: 'unten mitte', arrow: '↓' },
+      { value: 'bottom-right', label: 'unten rechts', arrow: '↘' }
+    ],
+    overlaySizes: [2, 3, 4, 5, 6, 8, 10, 12, 16, 20],
     savingTile: { 0: false, 1: false, 2: false, 3: false },
     presets: [],
     presetSelected: { 0: '', 1: '', 2: '', 3: '' },
@@ -2829,9 +3009,86 @@ function app() {
           rtmp_url: p.output_protocol === 'rtmp_in' ? '' : (p.rtmp_url || ''),
           rtmp_key: (p.output_protocol === 'rtmp_in' && p.pipeline_direction === 'srt_to_sdi') ? (p.rtmp_key || '') : '',
           rtmp_key_clear: 0,
-          rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0
+          rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0,
+          ...overlayFromServer(p)
         };
         this.tileSavedForms[n] = JSON.stringify(this.tileForms[n]);
+      }
+    },
+
+    // --- Text-Einblendung ---
+    overlayLen(o) {
+      return Array.from(String((o && o.overlay_text) || '')).length;
+    },
+
+    overlayPosLabel(v) {
+      const p = this.overlayPositions.find(x => x.value === v);
+      return p ? p.label : String(v || '');
+    },
+
+    // Ein gespeicherter Wert ausserhalb der Standardliste bleibt auswaehlbar
+    overlaySizeList(cur) {
+      const c = Number(cur);
+      const list = this.overlaySizes.slice();
+      if (Number.isFinite(c) && c >= 1 && !list.includes(c)) { list.push(c); list.sort((a, b) => a - b); }
+      return list;
+    },
+
+    // Die sechs Felder fuers Senden (Text immer als String)
+    overlayPayload(o) {
+      return {
+        overlay_enabled: Number(o.overlay_enabled) === 1 ? 1 : 0,
+        overlay_text: String(o.overlay_text === null || o.overlay_text === undefined ? '' : o.overlay_text),
+        overlay_pos: o.overlay_pos,
+        overlay_size: Number(o.overlay_size),
+        overlay_color: String(o.overlay_color || '#FFFFFF'),
+        overlay_bg: Number(o.overlay_bg) === 1 ? 1 : 0
+      };
+    },
+
+    overlayMsgColor(n) {
+      const m = this.overlayMsg[n];
+      return !m ? '#6b7280' : m.kind === 'err' ? '#f87171' : m.kind === 'warn' ? '#d9a400' : '#4ade80';
+    },
+
+    // Ausgangs-Anschluss: Einblendung speichern und am laufenden Empfaenger sofort uebernehmen
+    async overlayLive(n, toggle = false) {
+      const tf = this.tileForms[n];
+      if (!tf || !tf.id || this.overlayBusy[n]) return;
+      const vals = this.overlayPayload(tf);
+      if (toggle) vals.overlay_enabled = vals.overlay_enabled === 1 ? 0 : 1;
+      this.overlayBusy[n] = true;
+      this.overlayMsg[n] = '';
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=overlay_live', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({ id: tf.id }, vals))
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        tf.overlay_enabled = vals.overlay_enabled;
+        // Nur die Einblend-Felder im Snapshot angleichen, die uebrigen Aenderungen bleiben "ungespeichert"
+        try {
+          const snap = JSON.parse(this.tileSavedForms[n]);
+          for (const k of OVERLAY_KEYS) snap[k] = tf[k];
+          this.tileSavedForms[n] = JSON.stringify(snap);
+        } catch (e) { /* kein Snapshot: nichts anzugleichen */ }
+        const p = this.tilePipelineFor(n);
+        if (p) Object.assign(p, vals, { overlay_text: vals.overlay_text.trim() === '' ? null : vals.overlay_text });
+        if (data.live) {
+          this.overlayMsg[n] = { kind: 'ok', text: 'Übernommen, am Ausgang sichtbar' };
+        } else if (data.running) {
+          this.overlayMsg[n] = { kind: 'warn', text: 'Gespeichert. Der Anschluss läuft ohne Einblend-Element: gilt ab dem nächsten Start (zum Live-Schalten den Anschluss mit eingetragenem Text starten)' };
+        } else {
+          this.overlayMsg[n] = { kind: 'ok', text: 'Gespeichert, gilt ab dem nächsten Start' };
+        }
+      } catch (e) {
+        this.overlayMsg[n] = { kind: 'err', text: 'Fehler: ' + e.message };
+        this.errorMsg = 'Fehler bei der Einblendung (Anschluss ' + (n + 1) + '): ' + e.message;
+      } finally {
+        this.overlayBusy[n] = false;
       }
     },
 
@@ -2940,6 +3197,8 @@ function app() {
       if (o.output_protocol !== 'rtmp' && !(receiver && o.output_protocol === 'rtmp_in')) o.output_protocol = 'srt';
       if (receiver) o.rtmp_deinterlace = 0;
       if (receiver && o.output_protocol === 'rtmp_in') o.rtmp_url = '';
+      const od = overlayDefaults();
+      for (const k of OVERLAY_KEYS) if (!(k in o)) o[k] = od[k];
       this.rtmpForceLimits(o, receiver);
       return o;
     },
@@ -3244,7 +3503,8 @@ function app() {
         test_pattern_enabled: direction === 'srt_to_sdi' ? tf.test_pattern_enabled : false,
         output_protocol: tf.output_protocol === 'rtmp' ? 'rtmp' : (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' ? 'rtmp_in' : 'srt'),
         rtmp_url: (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in') ? '' : tf.rtmp_url,
-        rtmp_deinterlace: direction === 'sdi_to_srt' ? tf.rtmp_deinterlace : 0
+        rtmp_deinterlace: direction === 'sdi_to_srt' ? tf.rtmp_deinterlace : 0,
+        ...this.overlayPayload(tf)
       };
       // Stream-Key nur mitsenden, wenn RTMP gewählt ist; leer = der Server behält den gespeicherten Key
       // (Empfänger: Key optional, nur bei RTMP und nur wenn etwas eingetippt ist; SRT-Empfänger senden keine Key-Felder)
@@ -3297,6 +3557,7 @@ function app() {
           if (target.output_protocol !== 'rtmp') target.output_protocol = 'srt';
           target.rtmp_url = target.rtmp_url || '';
           target.rtmp_deinterlace = target.rtmp_deinterlace ? 1 : 0;
+          Object.assign(target, overlayFromServer(target));
           target.rtmp_key = '';
           target.rtmp_key_clear = 0;
           this.targetSnapshots[target.id] = JSON.stringify(target);
@@ -3325,7 +3586,8 @@ function app() {
         video_scale_enabled: false, width: 1920, height: 1080,
         audio_codec: 'aac', audio_output_channels: 2, audio_track_mode: 'multi', ts_video_pid: 0, ts_audio_pid: 0, ts_pmt_pid: 0, ts_program: 0, video_chroma: '420', video_bitdepth: 8, video_framing: 'IP', video_framerate: 0, video_scenecut: 1, video_open_gop: 0, audio_bitrate: 192,
         srt_passphrase: '', srt_pbkeylen: 16, srt_streamid: '',
-        output_protocol: 'srt', rtmp_url: '', rtmp_key: '', rtmp_key_clear: 0, rtmp_deinterlace: 0
+        output_protocol: 'srt', rtmp_url: '', rtmp_key: '', rtmp_key_clear: 0, rtmp_deinterlace: 0,
+        ...overlayDefaults()
       };
     },
 
@@ -3345,7 +3607,7 @@ function app() {
     },
 
     async saveTarget(target) {
-      const body = Object.assign({}, target);
+      const body = Object.assign({}, target, this.overlayPayload(target));
       if (target.output_protocol !== 'rtmp') delete body.rtmp_key;
       try {
         const res = await fetch('api.php?action=target_update&id=' + target.id, {

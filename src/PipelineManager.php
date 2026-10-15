@@ -45,6 +45,9 @@ class PipelineManager
     // Bei Empfaengern (SRT/RTMP -> SDI): 'rtmp' = Strom von einem RTMP-Server abrufen, 'rtmp_in' = ein Encoder sendet per RTMP
     // an das Gateway (Hilfsserver, siehe IngestManager).
     private const OUTPUT_PROTOCOLS = ['srt', 'rtmp', 'rtmp_in'];
+    // Text-Einblendung: Lage im Bild (senkrecht-waagerecht)
+    private const OVERLAY_POSITIONS = ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right',
+        'bottom-left', 'bottom-center', 'bottom-right'];
     private const VIDEO_RATE_CONTROLS = ['cbr', 'vbr'];
     // Chroma-Subsampling und Bittiefe des Videostroms (H.264/H.265; MPEG-2 nur 8 Bit)
     private const VIDEO_CHROMA = ['420', '422'];
@@ -185,6 +188,7 @@ class PipelineManager
     {
         $this->validateSettings($data);
         $data = $this->applyRtmpLimits($data);
+        $ov = $this->sanitizeOverlay($data);
         $out = $this->sanitizeOutput($data);
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
@@ -199,8 +203,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace, overlay_enabled, overlay_text, overlay_pos, overlay_size, overlay_color, overlay_bg)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace, :overlay_enabled, :overlay_text, :overlay_pos, :overlay_size, :overlay_color, :overlay_bg)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -251,6 +255,12 @@ class PipelineManager
             ':rtmp_url' => $out['url'],
             ':rtmp_key' => $out['key'],
             ':rtmp_deinterlace' => $out['deinterlace'],
+            ':overlay_enabled' => $ov['enabled'],
+            ':overlay_text' => $ov['text'],
+            ':overlay_pos' => $ov['pos'],
+            ':overlay_size' => $ov['size'],
+            ':overlay_color' => $ov['color'],
+            ':overlay_bg' => $ov['bg'],
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -692,6 +702,158 @@ class PipelineManager
             "queue max-size-buffers=0 max-size-bytes=0 max-size-time=3000000000 ! rtmp2sink location={$location} async=false ";
     }
 
+    /**
+     * Text-Einblendung pruefen: Text (bis 200 Zeichen, bis 4 Zeilen, UTF-8, keine Steuerzeichen ausser Zeilenumbruch), Lage in
+     * 9 Feldern, Groesse in Prozent der Bildhoehe (1 bis 30), Farbe #RRGGBB, optionaler Hintergrund. Nicht gesetzte Werte ergeben
+     * "aus" und die Standardwerte (unten mittig, 5 %, weiss, ohne Hintergrund).
+     * @return array{enabled: int, text: ?string, pos: string, size: int, color: string, bg: int}
+     */
+    private function sanitizeOverlay(array $data): array
+    {
+        $text = (string)($data['overlay_text'] ?? '');
+        if (preg_match('//u', $text) !== 1) {
+            throw new RuntimeException('Einblend-Text ist kein gueltiges UTF-8');
+        }
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = preg_replace('/[\x00-\x09\x0B-\x1F\x7F]/u', '', $text);
+        $text = trim($text);
+        if (preg_match_all('/./us', $text) > 200) {
+            throw new RuntimeException('Einblend-Text darf hoechstens 200 Zeichen lang sein');
+        }
+        if (substr_count($text, "\n") >= 4) {
+            throw new RuntimeException('Einblend-Text darf hoechstens 4 Zeilen haben');
+        }
+        $pos = (string)($data['overlay_pos'] ?? 'bottom-center');
+        if (!in_array($pos, self::OVERLAY_POSITIONS, true)) {
+            $pos = 'bottom-center';
+        }
+        $size = (int)($data['overlay_size'] ?? 5);
+        if ($size < 1 || $size > 30) {
+            $size = 5;
+        }
+        $color = strtoupper(trim((string)($data['overlay_color'] ?? '#FFFFFF')));
+        if (preg_match('/^#[0-9A-F]{6}$/', $color) !== 1) {
+            $color = '#FFFFFF';
+        }
+        return [
+            'enabled' => (int)($data['overlay_enabled'] ?? 0) === 1 ? 1 : 0,
+            'text' => $text !== '' ? $text : null,
+            'pos' => $pos,
+            'size' => $size,
+            'color' => $color,
+            'bg' => (int)($data['overlay_bg'] ?? 0) === 1 ? 1 : 0,
+        ];
+    }
+
+    /** Ist fuer diese Zeile eine Einblendung eingerichtet (Text vorhanden oder eingeschaltet)? Nur dann bekommt die Kette ein Element. */
+    private function overlayConfigured(array $row): bool
+    {
+        $ov = $this->sanitizeOverlay($row);
+        return $ov['enabled'] === 1 || $ov['text'] !== null;
+    }
+
+    /**
+     * Gemeinsame Eigenschaften der Einblendung fuer ein Bild der Hoehe $frameHeight: Schrift in Pixeln (Prozent der Bildhoehe,
+     * ohne auto-resize, damit die Groesse bei jeder Aufloesung gleich wirkt), Ausrichtung, Farbe als ARGB, Rand.
+     * @return array{valign: string, halign: string, font: string, color: int, shaded: bool, pad: int}
+     */
+    private function overlayProps(array $ov, int $frameHeight): array
+    {
+        [$v, $h] = explode('-', $ov['pos']);
+        $px = max(8, (int)round($ov['size'] * max(1, $frameHeight) / 100));
+        return [
+            'valign' => $v === 'middle' ? 'center' : $v,
+            'halign' => $h,
+            'font' => 'Sans Bold ' . $px,
+            'color' => 0xFF000000 | hexdec(substr($ov['color'], 1)),
+            'shaded' => $ov['bg'] === 1,
+            'pad' => max(8, (int)round($frameHeight * 0.02)),
+        ];
+    }
+
+    /**
+     * textoverlay-Element fuer eine gst-launch-Kette (Sender), leer wenn keine Einblendung eingeschaltet ist. Der Text ist
+     * Pango-Markup, deshalb werden & < > ersetzt (er erscheint woertlich); fuer gst-launch steht er in Anfuehrungszeichen
+     * (\ und " mit Rueckstrich), als EIN Shell-Argument: damit sind Leerzeichen, ! ; $ ` Klammern und fuehrende Minuszeichen
+     * im Text unkritisch (geprueft).
+     */
+    private function buildOverlayElement(array $row, int $frameHeight): string
+    {
+        $ov = $this->sanitizeOverlay($row);
+        if ($ov['enabled'] !== 1 || $ov['text'] === null) {
+            return '';
+        }
+        $p = $this->overlayProps($ov, $frameHeight);
+        $text = htmlspecialchars($ov['text'], ENT_NOQUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $text = str_replace(['\\', '"'], ['\\\\', '\\"'], $text);
+        return 'textoverlay ' . escapeshellarg('text="' . $text . '"') . ' ' . escapeshellarg('font-desc="' . $p['font'] . '"') .
+            " auto-resize=false halignment={$p['halign']} valignment={$p['valign']} color={$p['color']} " .
+            'shaded-background=' . ($p['shaded'] ? 'true' : 'false') . " xpad={$p['pad']} ypad={$p['pad']} ! ";
+    }
+
+    /** Bildhoehe des SDI-Modus (fuer die Schriftgroesse); unbekannte Modi (auto, SD) rechnen mit 1080. */
+    private function modeFrameHeight(string $mode): int
+    {
+        return (int)(self::HD_MODE_CAPS[$mode]['height'] ?? 1080);
+    }
+
+    public static function overlayPath(int $id): string
+    {
+        return __DIR__ . "/../data/overlay_{$id}.json";
+    }
+
+    /** Steuerdatei fuer den laufenden Empfaenger (liest scripts/srt_to_sdi_receiver.py jede halbe Sekunde). */
+    private function writeOverlayFile(array $p): void
+    {
+        $ov = $this->sanitizeOverlay($p);
+        $json = json_encode([
+            'enabled' => $ov['enabled'] === 1, 'text' => $ov['text'] ?? '', 'pos' => $ov['pos'], 'size' => $ov['size'],
+            'color' => $ov['color'], 'bg' => $ov['bg'] === 1,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $path = self::overlayPath((int)$p['id']);
+        $tmp = $path . '.tmp';
+        if (@file_put_contents($tmp, $json) === false || !@rename($tmp, $path)) {
+            throw new RuntimeException('Einblend-Steuerdatei nicht schreibbar');
+        }
+    }
+
+    /** Argumente fuer den Empfaenger: nur wenn eine Einblendung eingerichtet ist (sonst bleibt der Befehl wie bisher). */
+    private function receiverOverlayArgs(array $p, string $outputMode): string
+    {
+        if (!$this->overlayConfigured($p)) {
+            return '';
+        }
+        return ' --overlay-file ' . escapeshellarg(self::overlayPath((int)$p['id'])) .
+            ' --overlay-height ' . $this->modeFrameHeight($outputMode);
+    }
+
+    /**
+     * Einblendung eines Empfaengers im Betrieb aendern (ohne Neustart): speichert die Werte und schreibt die Steuerdatei.
+     * "live" ist nur wahr, wenn der laufende Empfaenger mit Einblendung gestartet wurde (sonst gilt der neue Wert ab dem naechsten Start).
+     * @return array{live: bool, running: bool}
+     */
+    public function setOverlayLive(int $id, array $data): array
+    {
+        $p = $this->getPipelineOrFail($id);
+        if (!$this->isReceiverRow($p)) {
+            throw new RuntimeException('Live-Einblendung gibt es nur bei Ausgangs-Anschluessen');
+        }
+        $ov = $this->sanitizeOverlay($data);
+        $stmt = $this->db->prepare('UPDATE pipelines SET overlay_enabled = :e, overlay_text = :t, overlay_pos = :p, overlay_size = :s, overlay_color = :c, overlay_bg = :b WHERE id = :id');
+        $stmt->execute([':e' => $ov['enabled'], ':t' => $ov['text'], ':p' => $ov['pos'], ':s' => $ov['size'], ':c' => $ov['color'], ':b' => $ov['bg'], ':id' => $id]);
+        $p = $this->getPipelineOrFail($id);
+        $running = $p['status'] === 'running' && $this->isProcRunning($p['pid'] !== null ? (int)$p['pid'] : null);
+        $live = false;
+        if ($running) {
+            $cmdline = (string)@file_get_contents('/proc/' . (int)$p['pid'] . '/cmdline');
+            $live = str_contains($cmdline, '--overlay-file');
+            if ($live) {
+                $this->writeOverlayFile($p);
+            }
+        }
+        return ['live' => $live, 'running' => $running];
+    }
+
     private function sanitizeSrtSecurity(array $data): array
     {
         $passphrase = trim((string)($data['srt_passphrase'] ?? ''));
@@ -1026,6 +1188,7 @@ class PipelineManager
         ]);
         $decklinkMode = $this->ports->getMode($decklink['device_number']);
         $rawCaps = $this->rawCapsStringForMode($decklinkMode);
+        $overlay = $this->buildOverlayElement($target, $this->modeFrameHeight($decklinkMode));
 
         $videoCodec = $this->sanitizeVideoCodec($target);
         $videoFormat = $this->videoFormatForCodec($videoCodec, $this->sanitizeVideoFormat($target, $videoCodec));
@@ -1087,7 +1250,7 @@ class PipelineManager
         // und srtsink schickt diese als Stream-Header an jeden neuen Empfaenger. Kommt der Ton (Verteiler/
         // AAC-Encoder) etwas spaeter, steht in dieser ersten PMT nur das Video und Empfaenger wie
         // Magewell ordnen die Tonspur falsch zu oder finden sie nicht. 0,2 s Wartezeit beim Start genuegen.
-        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! {$deint}videoconvert ! {$scaleElement}{$formatCaps} ! " .
+        $videoBranch = "shmsrc socket-path={$videoShm} is-live=true ! {$rawCaps} ! rawvideoparse use-sink-caps=true ! {$deint}{$overlay}videoconvert ! {$scaleElement}{$formatCaps} ! " .
             "{$videoEncoder} ! " . $this->buildSenderTail($target, $mux, $srtUri, $latency, $srtSecurityProps, $tap, true);
 
         // shmsrc uebertraegt Caps NICHT automatisch (siehe rawCaps oben fuer Video) - decklinkaudiosrc
@@ -1259,6 +1422,7 @@ class PipelineManager
         }
         $this->validateSettings($data);
         $data = $this->applyRtmpLimits($data);
+        $ov = $this->sanitizeOverlay($data);
         $out = $this->sanitizeOutput($data);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
@@ -1269,8 +1433,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
 
         $stmt = $this->db->prepare("
-            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace)
-            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace)
+            INSERT INTO srt_targets (pipeline_id, name, srt_mode, srt_port, srt_target_host, srt_latency, srt_passphrase, srt_pbkeylen, srt_streamid, video_codec, bitrate, video_rate_control, video_keyframe_interval, video_scale_enabled, width, height, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace, overlay_enabled, overlay_text, overlay_pos, overlay_size, overlay_color, overlay_bg)
+            VALUES (:pipeline_id, :name, :srt_mode, :srt_port, :srt_target_host, :srt_latency, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :video_codec, :bitrate, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :width, :height, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace, :overlay_enabled, :overlay_text, :overlay_pos, :overlay_size, :overlay_color, :overlay_bg)
         ");
         $stmt->execute([
             ':pipeline_id' => $pipelineId,
@@ -1308,6 +1472,12 @@ class PipelineManager
             ':rtmp_url' => $out['url'],
             ':rtmp_key' => $out['key'],
             ':rtmp_deinterlace' => $out['deinterlace'],
+            ':overlay_enabled' => $ov['enabled'],
+            ':overlay_text' => $ov['text'],
+            ':overlay_pos' => $ov['pos'],
+            ':overlay_size' => $ov['size'],
+            ':overlay_color' => $ov['color'],
+            ':overlay_bg' => $ov['bg'],
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -1320,6 +1490,7 @@ class PipelineManager
         }
         $this->validateSettings($data);
         $data = $this->applyRtmpLimits($data);
+        $ov = $this->sanitizeOverlay($data);
         $out = $this->sanitizeOutput($data, $target['rtmp_key'] ?? null);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
@@ -1364,7 +1535,13 @@ class PipelineManager
                 output_protocol = :output_protocol,
                 rtmp_url = :rtmp_url,
                 rtmp_key = :rtmp_key,
-                rtmp_deinterlace = :rtmp_deinterlace
+                rtmp_deinterlace = :rtmp_deinterlace,
+                overlay_enabled = :overlay_enabled,
+                overlay_text = :overlay_text,
+                overlay_pos = :overlay_pos,
+                overlay_size = :overlay_size,
+                overlay_color = :overlay_color,
+                overlay_bg = :overlay_bg
             WHERE id = :id
         ");
         $stmt->execute([
@@ -1403,6 +1580,12 @@ class PipelineManager
             ':rtmp_url' => $out['url'],
             ':rtmp_key' => $out['key'],
             ':rtmp_deinterlace' => $out['deinterlace'],
+            ':overlay_enabled' => $ov['enabled'],
+            ':overlay_text' => $ov['text'],
+            ':overlay_pos' => $ov['pos'],
+            ':overlay_size' => $ov['size'],
+            ':overlay_color' => $ov['color'],
+            ':overlay_bg' => $ov['bg'],
         ]);
     }
 
@@ -1488,6 +1671,11 @@ class PipelineManager
         // Ein Testsignal auf dieser Karte beenden, bevor die Pipeline die Karte braucht
         if (($p['pipeline_direction'] ?? '') === 'srt_to_sdi') {
             TestSignal::stop((int)$p['decklink_device_number']);
+        }
+
+        // Einblendung am SDI-Ausgang: Steuerdatei mit den gespeicherten Werten, der Empfaenger liest sie beim Start und danach laufend
+        if ($this->isReceiverRow($p) && (int)($p['test_pattern_enabled'] ?? 0) !== 1 && $this->overlayConfigured($p)) {
+            $this->writeOverlayFile($p);
         }
 
         // RTMP-Annahme: der Hilfsserver muss laufen (und den Pfad dieses Empfaengers kennen), bevor der Empfaenger abholt
@@ -1610,6 +1798,8 @@ class PipelineManager
         $tap = $this->tapBranch(self::tapPort('pipeline', (int)$p['id']));
         $mux = $this->muxSetupFor($p);
 
+        $overlayFile = $this->buildOverlayElement($p, (int)$height);
+        $overlayTest = $overlayFile;
         if ($sourceType === 'decklink') {
             $decklink = $this->sanitizeDecklink([
                 'decklink_device_number' => $p['decklink_device_number'] ?? 0,
@@ -1619,6 +1809,7 @@ class PipelineManager
             ]);
             $this->ports->assertRole($decklink['device_number'], 'input');
             $decklinkMode = $this->ports->getMode($decklink['device_number']);
+            $overlay = $this->buildOverlayElement($p, $this->modeFrameHeight($decklinkMode));
 
             // decklinkvideosrc taggt HD-SDI-Signale faelschlich als colorimetry=bt2020 (bestaetigt per
             // Monitor-Test 2026-09-28 - siehe [[project-noicecaster-decklink-hardware]]), obwohl alle
@@ -1629,7 +1820,7 @@ class PipelineManager
             $videoBranch = "decklinkvideosrc device-number={$decklink['device_number']} " .
                 "connection={$decklink['connection']} mode={$decklinkMode} profile={$decklink['profile']} ! " .
                 "capssetter caps=\"video/x-raw,colorimetry=(string)bt709\" join=true ! " .
-                "{$deint}videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
+                "{$deint}{$overlay}videoconvert ! {$previewElement}{$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
                 $this->buildSenderTail($p, $mux, $srtUri, $latency, $srtSecurityProps, $tap, true);
 
@@ -1648,7 +1839,7 @@ class PipelineManager
             }
             $fileArg = escapeshellarg($file);
 
-            $videoBranch = "demux.video_0 ! queue ! decodebin ! videoconvert ! {$clockOverlayElement}{$scaleElement}{$formatCaps} ! " .
+            $videoBranch = "demux.video_0 ! queue ! decodebin ! videoconvert ! {$clockOverlayElement}{$overlayFile}{$scaleElement}{$formatCaps} ! " .
                 "{$videoEncoder} ! " .
                 $this->buildSenderTail($p, $mux, $srtUri, $latency, $srtSecurityProps, $tap, false);
 
@@ -1668,7 +1859,7 @@ class PipelineManager
 
         $videoBranch = "{$source} ! " .
             "video/x-raw,format={$videoFormat},width={$width},height={$height},framerate={$framerate}/1 ! " .
-            "videoconvert ! {$clockOverlayElement}" .
+            "videoconvert ! {$clockOverlayElement}{$overlayTest}" .
             "{$videoEncoder} ! " .
             $this->buildSenderTail($p, $mux, $srtUri, $latency, $srtSecurityProps, $tap, true);
 
@@ -1763,7 +1954,8 @@ class PipelineManager
             ' --audio-channels ' . $this->deviceAudioChannels((int)$decklink['audio_channels']) .
             ' --audio-used ' . max(2, (int)$decklink['audio_channels']) .
             ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id'])) .
-            ' --tap-port ' . self::tapPort('receiver', (int)$p['id']);
+            ' --tap-port ' . self::tapPort('receiver', (int)$p['id']) .
+            $this->receiverOverlayArgs($p, $outputMode);
         if ($srtSecurity['passphrase'] !== null) {
             $args .= ' --passphrase ' . escapeshellarg($srtSecurity['passphrase']) . ' --pbkeylen ' . (int)$srtSecurity['pbkeylen'];
         }
@@ -1802,7 +1994,8 @@ class PipelineManager
             ' --profile ' . escapeshellarg($decklink['profile']) .
             ' --audio-channels ' . $this->deviceAudioChannels((int)$decklink['audio_channels']) .
             ' --audio-used ' . max(2, (int)$decklink['audio_channels']) .
-            ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id']));
+            ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id'])) .
+            $this->receiverOverlayArgs($p, $outputMode);
         return "env GST_DEBUG=rtmp2src:3 GST_DEBUG_NO_COLOR=1 python3 {$helper}{$args}";
     }
 
@@ -1830,6 +2023,7 @@ class PipelineManager
         $direction = $this->sanitizeDirection($data);
         $this->validateSettings($data);
         $data = $this->applyRtmpLimits($data);
+        $ov = $this->sanitizeOverlay($data);
         $out = $this->sanitizeOutput($data, $current['rtmp_key'] ?? null);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
@@ -1890,7 +2084,13 @@ class PipelineManager
                 output_protocol = :output_protocol,
                 rtmp_url = :rtmp_url,
                 rtmp_key = :rtmp_key,
-                rtmp_deinterlace = :rtmp_deinterlace
+                rtmp_deinterlace = :rtmp_deinterlace,
+                overlay_enabled = :overlay_enabled,
+                overlay_text = :overlay_text,
+                overlay_pos = :overlay_pos,
+                overlay_size = :overlay_size,
+                overlay_color = :overlay_color,
+                overlay_bg = :overlay_bg
             WHERE id = :id
         ");
         $stmt->execute([
@@ -1943,6 +2143,12 @@ class PipelineManager
             ':rtmp_url' => $out['url'],
             ':rtmp_key' => $out['key'],
             ':rtmp_deinterlace' => $out['deinterlace'],
+            ':overlay_enabled' => $ov['enabled'],
+            ':overlay_text' => $ov['text'],
+            ':overlay_pos' => $ov['pos'],
+            ':overlay_size' => $ov['size'],
+            ':overlay_color' => $ov['color'],
+            ':overlay_bg' => $ov['bg'],
         ]);
     }
 
