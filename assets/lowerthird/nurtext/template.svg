@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1500" height="220" viewBox="0 0 1500 220">
+  <!-- Nur Text: keine Flaechen, weisse Schrift mit dunkler Kontur (auch als Key-Signal brauchbar), Akzentfarbe als schmaler Balken -->
+  <rect x="0" y="22" width="10" height="176" fill="{{ACCENT}}"/>
+  {{LOGO}}
+  <g font-family="Nimbus Sans, DejaVu Sans, sans-serif" stroke="#000000" stroke-opacity="0.85" stroke-linejoin="round" paint-order="stroke fill">
+    <text x="36" y="52" font-size="{{TITLE_SIZE}}" font-weight="bold" letter-spacing="2" fill="{{ACCENT}}" stroke-width="7">{{TITLE}}</text>
+    <text x="36" y="128" font-size="{{MAIN_SIZE}}" font-weight="bold" fill="#FFFFFF" stroke-width="9">{{MAIN}}</text>
+    <text x="36" y="190" font-size="{{SUB_SIZE}}" fill="#FFFFFF" stroke-width="7">{{SUB}}</text>
+  </g>
+</svg>

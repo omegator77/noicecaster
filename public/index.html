@@ -729,12 +729,31 @@
         <div class="card-header" style="flex-wrap: wrap; gap: 0.5rem;">
           <span style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
             <strong x-text="it.name"></strong>
-            <span class="badge" x-text="it.direction === 'sender' ? (it.config && it.config.protocol === 'rtmp' ? 'SDI → RTMP' : 'SDI → SRT') : (statsIsRtmpIn(it) ? 'RTMP-Annahme → SDI' : statsIsRtmpRx(it) ? 'RTMP → SDI' : 'SRT → SDI')"></span>
-            <span class="hint" style="margin: 0;" x-text="statsIsRtmpRx(it) ? statsRtmpRxLine(it) : statsSrtLine(it.config)"></span>
+            <span class="badge" x-text="it.direction === 'sender' ? (it.config && it.config.protocol === 'rtmp' ? 'SDI → RTMP' : 'SDI → SRT') : (statsIsFillKey(it) ? 'Key & Fill' : statsIsRtmpIn(it) ? 'RTMP-Annahme → SDI' : statsIsRtmpRx(it) ? 'RTMP → SDI' : 'SRT → SDI')"></span>
+            <span class="hint" style="margin: 0;" x-text="statsIsFillKey(it) ? statsFillKeyLine(it) : statsIsRtmpRx(it) ? statsRtmpRxLine(it) : statsSrtLine(it.config)"></span>
           </span>
         </div>
         <template x-if="it.note">
           <div class="hint" x-text="it.note"></div>
+        </template>
+        <template x-if="statsIsFillKey(it)">
+          <div class="sg">
+            <div>
+              <div class="k">Fill-Ausgabe</div>
+              <div class="v" :class="statsFkDropped(it, 'fillsink') > 0 ? 'st-bad' : 'st-ok'" x-text="statsFkRendered(it, 'fillsink') + ' Bilder'"></div>
+              <div class="s" x-text="'gerendert · verworfen: ' + statsFkDropped(it, 'fillsink') + ' Bild'"></div>
+            </div>
+            <div>
+              <div class="k">Key-Ausgabe</div>
+              <div class="v" :class="statsFkDropped(it, 'keysink') > 0 ? 'st-bad' : 'st-ok'" x-text="statsFkRendered(it, 'keysink') + ' Bilder'"></div>
+              <div class="s" x-text="'gerendert · verworfen: ' + statsFkDropped(it, 'keysink') + ' Bild'"></div>
+            </div>
+            <div>
+              <div class="k">Bauchbinde</div>
+              <div class="v" x-text="statsFkLtText(it)"></div>
+              <div class="s">Zustand der Grafik am Ausgang</div>
+            </div>
+          </div>
         </template>
         <template x-if="it.config && it.config.protocol === 'rtmp' && it.direction !== 'receiver'">
           <div class="sg">
@@ -774,7 +793,7 @@
             </div>
           </div>
         </template>
-        <template x-if="it.direction === 'receiver' && it.srt && !statsIsRtmpRx(it)">
+        <template x-if="it.direction === 'receiver' && it.srt && !statsIsRtmpRx(it) && !statsIsFillKey(it)">
           <div>
             <div class="sg">
               <div>
@@ -816,7 +835,7 @@
             </div>
           </div>
         </template>
-        <template x-if="it.direction === 'receiver' && !it.srt && !it.note">
+        <template x-if="it.direction === 'receiver' && !it.srt && !it.note && !statsIsFillKey(it)">
           <div class="hint" x-text="statsIsRtmpRx(it) ? 'Noch keine Zahlen vom RTMP-Empfänger (er startet gerade oder ist gestoppt).' : 'Keine SRT-Zahlen vom Empfänger. Er muss nach dem Update einmal neu gestartet werden, oder er ist gerade gestoppt.'"></div>
         </template>
         <template x-if="!it.note && !(it.config && it.config.protocol === 'rtmp') && !(it.probe && it.probe.active)">
@@ -957,6 +976,10 @@
           </span>
           <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'sdi_to_srt'">Eingang</span>
           <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="tileDirection(portFor(n)) === 'srt_to_sdi'">Ausgang</span>
+          <span class="badge" style="background:#334155; color:#cbd5e1;" x-show="!!(tilePipelineFor(n) && tilePipelineFor(n).pipeline_direction === 'fillkey')">Key &amp; Fill</span>
+          <template x-if="keyOwner(n)">
+            <span class="badge" style="background:#334155; color:#cbd5e1;" x-text="'Key von Anschluss ' + (Number(keyOwner(n).decklink_device_number) + 1)"></span>
+          </template>
           <span class="badge" style="background:#3f3f46; color:#a1a1aa;" x-show="!tileDirection(portFor(n))">Nicht verwendet</span>
           <template x-if="tilePipelineFor(n)">
             <span class="badge" :class="tilePipelineFor(n).status" :title="tileForms[n].target_name || 'Ziel 1'" x-text="(tileForms[n].target_name || 'Ziel 1') + ': ' + (tilePipelineFor(n).status === 'running' ? 'Läuft' : 'Gestoppt')"></span>
@@ -967,18 +990,18 @@
         </span>
         <span style="display: flex; gap: 0.5rem; align-items: center;">
           <template x-if="tilePipelineFor(n) && !tileCollapsed[n]">
-            <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="savingTile[n]" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
+            <button type="button" class="btn-primary" @click="saveTile(n)" :disabled="!!(savingTile[n] || keyOwner(n))" :title="keyOwner(n) ? 'Dieser Anschluss ist der Key-Ausgang eines Key-&amp;-Fill-Paares' : ''" x-text="savingTile[n] ? 'Speichert...' : 'Speichern'"></button>
           </template>
           <template x-if="tilePipelineFor(n)">
             <span>
-              <button class="btn-start" x-show="tilePipelineFor(n).status !== 'running'" :disabled="tileIsDirty(n)" :title="tileIsDirty(n) ? 'Erst speichern, dann starten' : ''" @click="start(tileForms[n].id)">Start</button>
+              <button class="btn-start" x-show="tilePipelineFor(n).status !== 'running'" :disabled="!!(tileIsDirty(n) || keyOwner(n))" :title="keyOwner(n) ? 'Dieser Anschluss ist der Key-Ausgang eines Key-&amp;-Fill-Paares' : (tileIsDirty(n) ? 'Erst speichern, dann starten' : '')" @click="start(tileForms[n].id)">Start</button>
               <button class="btn-stop" x-show="tilePipelineFor(n).status === 'running'" @click="stop(tileForms[n].id)">Stop</button>
             </span>
           </template>
           <template x-if="tilePipelineFor(n) && !tileCollapsed[n] && tileDirection(portFor(n)) === 'sdi_to_srt'">
             <button type="button" class="btn-secondary" @click="toggleTargetsExpanded(n)" x-text="targetsExpanded[n] ? 'Ziele einklappen' : 'Ziele aufklappen'"></button>
           </template>
-          <template x-if="tilePipelineFor(n) && tileDirection(portFor(n)) === 'srt_to_sdi'">
+          <template x-if="tilePipelineFor(n) && tileDirection(portFor(n)) === 'srt_to_sdi' && tilePipelineFor(n).pipeline_direction === 'srt_to_sdi'">
             <button type="button" :class="tilePipelineFor(n).testsignal_running ? 'btn-stop' : 'btn-secondary'"
                     :disabled="tilePipelineFor(n).status === 'running' || !!testSignalBusy[n]"
                     :title="tilePipelineFor(n).status === 'running' ? 'Erst die Pipeline stoppen' : 'Bewegtes Bild und 16 Töne in unterschiedlichen Pegeln auf diesen Ausgang geben'"
@@ -989,12 +1012,16 @@
         </span>
       </div>
 
+      <template x-if="keyOwner(n)">
+        <div class="hint" style="color: #d9a400; margin-top: 0.5rem;">Dieser Anschluss ist der Key-Ausgang von Anschluss <span x-text="Number(keyOwner(n).decklink_device_number) + 1"></span> (Key &amp; Fill). Speichern und Starten sind gesperrt, bis die Betriebsart an Anschluss <span x-text="Number(keyOwner(n).decklink_device_number) + 1"></span> zurückgestellt wird.</div>
+      </template>
+
       <template x-if="!tileDirection(portFor(n))">
         <div class="hint">Anschluss ist als "Nicht verwendet" konfiguriert. Rolle oben unter "SDI-Anschlüsse" auf Eingang oder Ausgang setzen, um hier eine Pipeline einzurichten.</div>
       </template>
 
       <template x-if="tileDirection(portFor(n)) && !tileCollapsed[n]">
-        <div style="margin-top: 0.75rem;">
+        <fieldset :disabled="!!keyOwner(n)" style="border: 0; padding: 0; margin: 0; min-width: 0; margin-top: 0.75rem;">
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem;">
             <span style="color: #8b93a1; font-size: 0.85rem;">Preset</span>
             <select x-model="presetSelected[n]" style="flex: 1 1 14rem; min-width: 0;">
@@ -1009,11 +1036,32 @@
             <button type="button" class="btn-secondary" title="Aktuelle Einstellungen dieses Anschlusses inklusive aller Ziele als Preset ablegen" @click="saveTileAsPreset(n)">Als Preset speichern …</button>
           </div>
           <div class="hint" x-show="presetMsg[n]" x-text="presetMsg[n]" style="margin: -0.4rem 0 0.75rem;"></div>
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi'">
+            <div style="margin-bottom: 0.75rem;">
+              <label>Betriebsart</label>
+              <select x-model="tileForms[n].mode" @change="onModeChange(n)">
+                <option value="video">Video-Empfang (SRT/RTMP → SDI)</option>
+                <option value="fillkey">Key &amp; Fill (Grafik-Ausgang)</option>
+              </select>
+              <div x-show="isFK(n)" style="margin-top: 0.5rem;">
+                <label>Key-Ausgang</label>
+                <select x-model.number="tileForms[n].key_device_number">
+                  <option value="-1" :selected="Number(tileForms[n].key_device_number) < 0">– bitte wählen –</option>
+                  <template x-for="m in keyOptions(n)" :key="'ko-' + n + '-' + m">
+                    <option :value="m" :selected="m === Number(tileForms[n].key_device_number)" x-text="'Anschluss ' + (m + 1) + (keyCandidates(n).includes(m) ? '' : ' (kein Ausgang)')"></option>
+                  </template>
+                </select>
+                <div class="hint" style="color: #d9a400;" x-show="!keyCandidates(n).length">Für Key &amp; Fill ist ein zweiter Ausgang nötig: Unter „SDI-Anschlüsse“ einen weiteren Anschluss als Ausgang einstellen.</div>
+                <div class="hint">Dieser Anschluss gibt das Fill-Signal aus (Grafik auf Schwarz), der gewählte Key-Ausgang das Key-Signal (Deckkraft als Graustufenbild, Weiß = deckt). Beide Ausgänge müssen im selben Modus laufen und unter SDI-Anschlüsse als Ausgang eingestellt sein. Fill ist premultiplied (Grafik über Schwarz), der Key liegt im legalen Bereich (16 bis 235). Es gibt kein Programmbild und keine Text-Einblendung; Texte laufen über die Bauchbinde (Vorlage 'Nur Text' folgt).</div>
+              </div>
+            </div>
+          </template>
           <div class="meta" style="margin-bottom: 0.75rem;">
             Modus: <span x-text="portMode(n)"></span> &middot;
-            <span x-show="!isRtmp(tileForms[n]) && !isRtmpIn(tileForms[n])">SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span></span>
-            <span x-show="isRtmp(tileForms[n])">RTMP: <span class="srt-url" x-text="tileForms[n].rtmp_url || '(keine URL)'"></span></span>
-            <span x-show="isRtmpIn(tileForms[n])">RTMP-Annahme: <span class="srt-url" x-text="rtmpInUrl(tileForms[n])"></span></span>
+            <span x-show="isFK(n)">Key &amp; Fill: Fill Anschluss <span x-text="n + 1"></span>, Key <span x-text="Number(tileForms[n].key_device_number) >= 0 ? 'Anschluss ' + (Number(tileForms[n].key_device_number) + 1) : '(nicht gewählt)'"></span></span>
+            <span x-show="!isFK(n) && !isRtmp(tileForms[n]) && !isRtmpIn(tileForms[n])">SRT: <span class="srt-url" x-text="tileForms[n].srt_mode === 'caller' ? ('srt://' + tileForms[n].srt_target_host + ':' + tileForms[n].srt_port) : ('srt://' + srtHost() + ':' + tileForms[n].srt_port)"></span></span>
+            <span x-show="!isFK(n) && isRtmp(tileForms[n])">RTMP: <span class="srt-url" x-text="tileForms[n].rtmp_url || '(keine URL)'"></span></span>
+            <span x-show="!isFK(n) && isRtmpIn(tileForms[n])">RTMP-Annahme: <span class="srt-url" x-text="rtmpInUrl(tileForms[n])"></span></span>
             <template x-if="tilePipelineFor(n) && tilePipelineFor(n).status === 'running'"> &middot; PID <span x-text="tilePipelineFor(n).pid"></span></template>
           </div>
 
@@ -1221,14 +1269,14 @@
             </div>
           </template>
 
-          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi'">
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && !isFK(n)">
             <label style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
               <input type="checkbox" x-model="tileForms[n].test_pattern_enabled" style="width: auto;">
               <span>Testbild ausgeben (ignoriert SRT-Empfang, alle anderen Einstellungen unten inaktiv)</span>
             </label>
           </template>
 
-          <template x-if="!(tileDirection(portFor(n)) === 'srt_to_sdi' && tileForms[n].test_pattern_enabled)">
+          <template x-if="!(tileDirection(portFor(n)) === 'srt_to_sdi' && (tileForms[n].test_pattern_enabled || isFK(n)))">
             <div x-show="tileDirection(portFor(n)) !== 'sdi_to_srt' || (targetsExpanded[n] && !isRtmp(tileForms[n]))">
               <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi'">
                 <div x-data="{ showKey: false }" style="margin-top: 0.75rem;">
@@ -1345,7 +1393,7 @@
             </div>
           </template>
 
-          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && !tileForms[n].test_pattern_enabled">
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && !tileForms[n].test_pattern_enabled && !isFK(n)">
             <details style="margin-top: 0.75rem;">
               <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Text einblenden<span x-show="Number(tileForms[n].overlay_enabled) === 1" style="color: #4ade80;"> &middot; an</span></summary>
               <div class="ov-block" x-data="{ get ov() { return tileForms[n]; } }" style="margin-top: 0.5rem;">
@@ -1433,7 +1481,7 @@
             </details>
           </template>
 
-          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && !tileForms[n].test_pattern_enabled">
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && (isFK(n) || !tileForms[n].test_pattern_enabled)">
             <details style="margin-top: 0.75rem;" :open="ltOpen[n]" @toggle="ltToggle(n, $event.target.open)">
               <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Bauchbinde (Grafik mit Hintergrund)<span x-show="ltStateText(n) === 'sichtbar' || ltStateText(n) === 'fliegt ein'" style="color: #4ade80;"> &middot; sichtbar</span></summary>
               <div class="ov-block" x-data="{ get lt() { return tileForms[n]; } }" style="margin-top: 0.5rem;">
@@ -1577,7 +1625,8 @@
                   <div class="hint" x-show="!tileForms[n].id">Zum Einblenden erst Anschluss speichern („Laden“ geht immer).</div>
                   <div class="hint" x-show="tlMsg[n + ':lowerthird']" :style="'color:' + textlibMsgColor(n + ':lowerthird')" x-text="tlMsg[n + ':lowerthird'] && tlMsg[n + ':lowerthird'].text"></div>
                 </div>
-                <div class="hint">Die Bauchbinde fliegt am laufenden Ausgang nur live ein und aus, wenn der Anschluss mit eingetragenem Text oder Logo gestartet wurde (sonst gelten die Werte erst ab dem nächsten Start). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
+                <div class="hint" x-show="isFK(n)">Bei Key &amp; Fill ist die Grafik am Fill/Key-Paar sofort wirksam, sobald der Anschluss läuft (auch ohne eingetragenen Text beim Start). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
+                <div class="hint" x-show="!isFK(n)">Die Bauchbinde fliegt am laufenden Ausgang nur live ein und aus, wenn der Anschluss mit eingetragenem Text oder Logo gestartet wurde (sonst gelten die Werte erst ab dem nächsten Start). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
               </div>
             </details>
           </template>
@@ -2018,7 +2067,7 @@
               </div>
             </div>
           </template>
-        </div>
+        </fieldset>
       </template>
     </div>
   </template>
@@ -2548,6 +2597,8 @@ function defaultTileForm(deviceNumber) {
     rtmp_key: '',
     rtmp_key_clear: 0,
     rtmp_deinterlace: 0,
+    mode: 'video',
+    key_device_number: -1,
     ...overlayDefaults(),
     ...ltDefaults()
   };
@@ -2738,7 +2789,7 @@ function app() {
             if (hasRunning) await this.loadTargets(p.id);
           }
           // Bauchbinde: Zustand nur bei laufendem Ausgang und aufgeklapptem Block abfragen
-          if (this.ltOpen[n] && p.status === 'running' && p.pipeline_direction === 'srt_to_sdi') this.ltRefreshState(n);
+          if (this.ltOpen[n] && p.status === 'running' && (p.pipeline_direction === 'srt_to_sdi' || p.pipeline_direction === 'fillkey')) this.ltRefreshState(n);
         }
       } catch (e) {
         this.errorMsg = 'Fehler beim Laden: ' + e.message;
@@ -2967,6 +3018,38 @@ function app() {
       if (this.statsIsRtmpIn(it)) return 'RTMP-Annahme (Port ' + ((it.config && it.config.rtmp_in_port) || 1935) + ')';
       const url = (it.config && it.config.rtmp_url) || '';
       return 'RTMP ← ' + (url || '–');
+    },
+
+    // Key & Fill: Statistik-Eintrag mit config.protocol = 'fillkey' (Zaehler in it.srt.sinks.fillsink / keysink)
+    statsIsFillKey(it) {
+      return !!it && !!it.config && it.config.protocol === 'fillkey';
+    },
+
+    statsFillKeyLine(it) {
+      const p = this.pipelines.find(x => 'p' + x.id === it.key);
+      const fill = p ? Number(p.decklink_device_number) + 1 : '?';
+      const k = it.config && it.config.key_device !== null && it.config.key_device !== undefined ? Number(it.config.key_device) + 1 : '?';
+      return 'Fill: Anschluss ' + fill + ' · Key: Anschluss ' + k;
+    },
+
+    statsFkSink(it, name) {
+      return (it && it.srt && it.srt.sinks && it.srt.sinks[name]) || null;
+    },
+
+    statsFkRendered(it, name) {
+      const s = this.statsFkSink(it, name);
+      return s && s.rendered !== undefined && s.rendered !== null ? s.rendered : '–';
+    },
+
+    statsFkDropped(it, name) {
+      const s = this.statsFkSink(it, name);
+      return (s && Number(s.dropped)) || 0;
+    },
+
+    statsFkLtText(it) {
+      const map = { hidden: 'ausgeblendet', in: 'fliegt ein', shown: 'sichtbar', out: 'fliegt aus' };
+      const st = it && it.srt && it.srt.lowerthird && it.srt.lowerthird.state;
+      return map[st] || '–';
     },
 
     statsRxDropped(sinks) {
@@ -3205,7 +3288,7 @@ function app() {
 
     otherPipelines() {
       // Alles, was nicht über eine der 4 festen Anschluss-Kacheln verwaltet wird
-      return this.pipelines.filter(p => p.source_type !== 'decklink' && p.pipeline_direction !== 'srt_to_sdi');
+      return this.pipelines.filter(p => p.source_type !== 'decklink' && p.pipeline_direction !== 'srt_to_sdi' && p.pipeline_direction !== 'fillkey');
     },
 
     tileDirection(port) {
@@ -3215,12 +3298,47 @@ function app() {
 
     tilePipeline(deviceNumber, direction) {
       if (!direction) return null;
-      return this.pipelines.find(p => p.decklink_device_number === deviceNumber && p.pipeline_direction === direction &&
+      return this.pipelines.find(p => p.decklink_device_number === deviceNumber &&
+        (p.pipeline_direction === direction || (direction === 'srt_to_sdi' && p.pipeline_direction === 'fillkey')) &&
         (direction === 'sdi_to_srt' ? p.source_type === 'decklink' : true)) || null;
     },
 
     tilePipelineFor(deviceNumber) {
       return this.tilePipeline(deviceNumber, this.tileDirection(this.portFor(deviceNumber)));
+    },
+
+    // Key & Fill: Kachel n steht auf Betriebsart "Key & Fill" (nur Ausgangs-Anschluss)
+    isFK(n) {
+      return this.tileDirection(this.portFor(n)) === 'srt_to_sdi' && !!this.tileForms[n] && this.tileForms[n].mode === 'fillkey';
+    },
+
+    // Andere Anschluesse mit Rolle Ausgang (moegliche Key-Ausgaenge)
+    keyCandidates(n) {
+      return [0, 1, 2, 3].filter(m => m !== n && this.tileDirection(this.portFor(m)) === 'srt_to_sdi');
+    },
+
+    // Auswahlliste: die Kandidaten, ein gesetzter anderer Wert (z. B. aus einem Preset) bleibt sichtbar
+    keyOptions(n) {
+      const list = this.keyCandidates(n);
+      const cur = Number(this.tileForms[n] && this.tileForms[n].key_device_number);
+      if (Number.isInteger(cur) && cur >= 0 && cur <= 3 && cur !== n && !list.includes(cur)) list.push(cur);
+      return list;
+    },
+
+    onModeChange(n) {
+      const tf = this.tileForms[n];
+      if (!tf || tf.mode !== 'fillkey') return;
+      const c = this.keyCandidates(n);
+      if (!c.includes(Number(tf.key_device_number))) tf.key_device_number = c.length ? c[0] : -1;
+    },
+
+    // Gespeicherte Key-&-Fill-Pipeline, die diesen Anschluss als Key-Ausgang benutzt (sonst null)
+    keyOwner(n) {
+      const p = this.pipelines.find(x => x.pipeline_direction === 'fillkey' && x.key_device_number !== null && x.key_device_number !== undefined &&
+        Number(x.key_device_number) === n && Number(x.decklink_device_number) !== n);
+      if (!p) return null;
+      const fp = this.portFor(Number(p.decklink_device_number));
+      return fp && fp.role === 'output' ? p : null;
     },
 
     initTiles(onlyDevice = null) {
@@ -3267,6 +3385,8 @@ function app() {
           rtmp_key: (p.output_protocol === 'rtmp_in' && p.pipeline_direction === 'srt_to_sdi') ? (p.rtmp_key || '') : '',
           rtmp_key_clear: 0,
           rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0,
+          mode: p.pipeline_direction === 'fillkey' ? 'fillkey' : 'video',
+          key_device_number: (p.key_device_number === null || p.key_device_number === undefined || p.key_device_number === '') ? -1 : Number(p.key_device_number),
           ...overlayFromServer(p),
           ...ltFromServer(p)
         };
@@ -3586,7 +3706,7 @@ function app() {
 
     // Status des RTMP-Hilfsservers (MediaMTX); wird nur abgefragt, wenn ein Ausgangs-Anschluss auf RTMP-Annahme steht
     ingestWanted() {
-      return [0, 1, 2, 3].some(n => this.isRtmpIn(this.tileForms[n]) && this.tileDirection(this.portFor(n)) === 'srt_to_sdi')
+      return [0, 1, 2, 3].some(n => this.isRtmpIn(this.tileForms[n]) && this.tileDirection(this.portFor(n)) === 'srt_to_sdi' && this.tileForms[n].mode !== 'fillkey')
         || this.pipelines.some(p => p.pipeline_direction === 'srt_to_sdi' && p.output_protocol === 'rtmp_in');
     },
 
@@ -3635,6 +3755,8 @@ function app() {
       if (!('output_protocol' in o)) { o.output_protocol = 'srt'; o.rtmp_url = ''; o.rtmp_deinterlace = 0; }
       if (o.output_protocol !== 'rtmp' && !(receiver && o.output_protocol === 'rtmp_in')) o.output_protocol = 'srt';
       if (receiver) o.rtmp_deinterlace = 0;
+      // alte Presets ohne Betriebsart laden als Video-Empfang (der Key-Ausgang wird hier nicht geprueft, das macht der Server beim Speichern)
+      if (receiver && o.mode !== 'fillkey') o.mode = 'video';
       if (receiver && o.output_protocol === 'rtmp_in') o.rtmp_url = '';
       const od = overlayDefaults();
       for (const k of OVERLAY_KEYS) if (!(k in o)) o[k] = od[k];
@@ -3682,6 +3804,7 @@ function app() {
       const t = (pr.data && pr.data.tile) || {};
       const extra = ((pr.data && pr.data.targets) || []).length;
       const video = (t.video_codec || 'h264').toUpperCase() + ' ' + (t.bitrate || 0) + ' kbit/s';
+      if (t.mode === 'fillkey') return 'Key & Fill' + (Number(t.key_device_number) >= 0 ? ' (Key: Anschluss ' + (Number(t.key_device_number) + 1) + ')' : '');
       return video + (t.output_protocol === 'rtmp' ? ' (RTMP)' : t.output_protocol === 'rtmp_in' ? ' (RTMP-Annahme)' : '') + ', ' + (t.audio_codec || 'aac').toUpperCase() + (extra ? ', +' + extra + (extra === 1 ? ' Ziel' : ' Ziele') : '');
     },
 
@@ -3724,7 +3847,7 @@ function app() {
       const name = (prompt('Name des Presets (gleicher Name überschreibt nach Rückfrage):', selected ? selected.name : '') || '').trim();
       if (!name) return;
       const p = this.tilePipelineFor(n);
-      const tile = this.pickLike(defaultTileForm(n), this.tileForms[n], ['id', 'rtmp_key', 'rtmp_key_clear']);
+      const tile = this.pickLike(defaultTileForm(n), this.tileForms[n], ['id', 'rtmp_key', 'rtmp_key_clear'].concat(dir === 'srt_to_sdi' ? [] : ['mode', 'key_device_number']));
       const targets = (await this.presetTargetsOf(p)).map(t => this.pickLike(this.newTargetDefaults(), t, ['rtmp_key', 'rtmp_key_clear']));
       const post = async (overwrite) => {
         const res = await fetch('api.php?action=preset_save', {
@@ -3761,7 +3884,7 @@ function app() {
         return;
       }
       const receiver = pr.direction === 'srt_to_sdi';
-      const tile = this.presetOutputFix(this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id', 'rtmp_key', 'rtmp_key_clear']), receiver);
+      const tile = this.presetOutputFix(this.pickLike(defaultTileForm(n), (pr.data && pr.data.tile) || {}, ['id', 'rtmp_key', 'rtmp_key_clear'].concat(receiver ? [] : ['mode', 'key_device_number'])), receiver);
       for (const k of Object.keys(tile)) this.tileForms[n][k] = tile[k];
       // Stream-Key steht nie im Preset: Eingabefeld leeren, ein gespeicherter Key bleibt auf dem Server
       this.tileForms[n].rtmp_key = '';
@@ -4140,6 +4263,12 @@ function app() {
       const direction = this.tileDirection(port);
       if (!direction) return;
       const tf = this.tileForms[n];
+      // Key & Fill (nur Ausgangs-Anschluss): eigene Pipeline-Richtung 'fillkey', kein SRT/RTMP
+      const fk = direction === 'srt_to_sdi' && tf.mode === 'fillkey';
+      if (fk && !(Number(tf.key_device_number) >= 0)) {
+        this.errorMsg = 'Anschluss ' + (n + 1) + ': Bitte einen Key-Ausgang wählen.';
+        return;
+      }
       // RTMP braucht einen Stream-Key. Vorab pruefen (auch fuer Ziele aus einem geladenen Preset), damit nichts halb gespeichert wird.
       if (direction === 'sdi_to_srt') {
         const noKey = (o, isSet) => !!o && o.output_protocol === 'rtmp' && !String(o.rtmp_key || '').trim() && !isSet;
@@ -4158,11 +4287,11 @@ function app() {
         }
       }
       // RTMP-Empfang: Key optional, die URL ist Pflicht
-      if (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp' && !String(tf.rtmp_url || '').trim()) {
+      if (!fk && direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp' && !String(tf.rtmp_url || '').trim()) {
         this.errorMsg = 'Anschluss ' + (n + 1) + ': Bitte die RTMP-URL eintragen.';
         return;
       }
-      if (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' && !String(tf.rtmp_key || '').trim()) {
+      if (!fk && direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' && !String(tf.rtmp_key || '').trim()) {
         this.errorMsg = 'Anschluss ' + (n + 1) + ': Bitte einen Stream-Key eintragen (oder zufällig erzeugen).';
         return;
       }
@@ -4171,7 +4300,8 @@ function app() {
       const payload = {
         name: 'Anschluss ' + (n + 1) + (port.label ? ' – ' + port.label : ''),
         target_name: tf.target_name,
-        pipeline_direction: direction,
+        pipeline_direction: fk ? 'fillkey' : direction,
+        ...(fk ? { key_device_number: Number(tf.key_device_number) } : {}),
         source_type: direction === 'sdi_to_srt' ? 'decklink' : 'videotestsrc',
         decklink_device_number: n,
         decklink_connection: 'auto',
@@ -4199,9 +4329,9 @@ function app() {
         srt_passphrase: tf.srt_passphrase,
         srt_pbkeylen: tf.srt_pbkeylen,
         srt_streamid: tf.srt_streamid,
-        test_pattern_enabled: direction === 'srt_to_sdi' ? tf.test_pattern_enabled : false,
-        output_protocol: tf.output_protocol === 'rtmp' ? 'rtmp' : (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' ? 'rtmp_in' : 'srt'),
-        rtmp_url: (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in') ? '' : tf.rtmp_url,
+        test_pattern_enabled: (direction === 'srt_to_sdi' && !fk) ? tf.test_pattern_enabled : false,
+        output_protocol: fk ? 'srt' : (tf.output_protocol === 'rtmp' ? 'rtmp' : (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' ? 'rtmp_in' : 'srt')),
+        rtmp_url: fk ? '' : ((direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in') ? '' : tf.rtmp_url),
         rtmp_deinterlace: direction === 'sdi_to_srt' ? tf.rtmp_deinterlace : 0,
         ...this.overlayPayload(tf),
         ...(direction === 'srt_to_sdi' ? this.ltPayload(tf) : {})
@@ -4211,6 +4341,8 @@ function app() {
       if (direction === 'sdi_to_srt') {
         if (tf.output_protocol === 'rtmp') payload.rtmp_key = tf.rtmp_key;
         payload.rtmp_key_clear = tf.rtmp_key_clear;
+      } else if (fk) {
+        // Key & Fill: keine Key-Felder
       } else if (tf.output_protocol === 'rtmp_in') {
         payload.rtmp_key = String(tf.rtmp_key || '').trim();
       } else if (tf.output_protocol === 'rtmp') {

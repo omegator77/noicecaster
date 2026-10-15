@@ -68,7 +68,7 @@ class StreamStats
                 'key' => 'p' . $p['id'],
                 'name' => (string)$p['name'] . ($sender ? ' / ' . ($p['target_name'] ?? 'Ziel 1') : ''),
                 'direction' => $sender ? 'sender' : 'receiver',
-                'port' => ($testPattern || self::isRtmp($p) || self::isRtmpIn($p)) ? null : PipelineManager::tapPort($sender ? 'pipeline' : 'receiver', (int)$p['id']),
+                'port' => ($testPattern || self::isFillKey($p) || self::isRtmp($p) || self::isRtmpIn($p)) ? null : PipelineManager::tapPort($sender ? 'pipeline' : 'receiver', (int)$p['id']),
                 'config' => self::config($p),
             ];
             if (self::isRtmp($p)) {
@@ -76,6 +76,10 @@ class StreamStats
             }
             if (self::isRtmpIn($p)) {
                 $item['note'] = self::RTMP_IN_NOTE;
+            }
+            if (self::isFillKey($p)) {
+                $item['note'] = 'Key & Fill: Grafik-Ausgang ohne Programmbild auf Anschluss ' . ((int)$p['decklink_device_number'] + 1) . ' (Fill) und ' .
+                    ((int)($p['key_device_number'] ?? 0) + 1) . ' (Key). Es gibt keine Stromdaten, angezeigt werden die Ausgabe-Zaehler.';
             }
             if ($testPattern) {
                 $item['note'] = 'Der Ausgang gibt ein Testbild aus (kein SRT-Empfang), daher gibt es keine Stromdaten.';
@@ -115,6 +119,11 @@ class StreamStats
         return ($row['output_protocol'] ?? 'srt') === 'rtmp';
     }
 
+    private static function isFillKey(array $row): bool
+    {
+        return ($row['pipeline_direction'] ?? '') === 'fillkey';
+    }
+
     private static function isRtmpIn(array $row): bool
     {
         return ($row['output_protocol'] ?? 'srt') === 'rtmp_in';
@@ -137,7 +146,9 @@ class StreamStats
             'audio_kbit' => isset($row['audio_bitrate']) ? (int)$row['audio_bitrate'] : null,
             'audio_channels' => isset($row['audio_output_channels']) ? (int)$row['audio_output_channels'] : null,
             'audio_track_mode' => $row['audio_track_mode'] ?? 'multi',
-            'protocol' => self::isRtmp($row) ? 'rtmp' : (self::isRtmpIn($row) ? 'rtmp_in' : 'srt'),
+            'protocol' => self::isFillKey($row) ? 'fillkey' : (self::isRtmp($row) ? 'rtmp' : (self::isRtmpIn($row) ? 'rtmp_in' : 'srt')),
+            'key_device' => self::isFillKey($row) && isset($row['key_device_number']) ? (int)$row['key_device_number'] : null,
+            'fill_device' => self::isFillKey($row) && isset($row['decklink_device_number']) ? (int)$row['decklink_device_number'] : null,
             'rtmp_in_port' => self::isRtmpIn($row) ? IngestManager::PORT : null,
             // nur Server und Anwendung, der Stream-Key verlaesst den Server nie
             'rtmp_url' => self::isRtmp($row) ? ($row['rtmp_url'] ?? null) : null,

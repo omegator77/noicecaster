@@ -293,8 +293,9 @@ try {
                 }
                 foreach ($runningPipelines as $runningPipeline) {
                     $direction = $runningPipeline['pipeline_direction'] ?? 'sdi_to_srt';
-                    $isBoundToDevice = ($direction === 'srt_to_sdi' || $runningPipeline['source_type'] === 'decklink')
-                        && (int)$runningPipeline['decklink_device_number'] === $deviceNumber;
+                    $isBoundToDevice = (($direction === 'srt_to_sdi' || $direction === 'fillkey' || $runningPipeline['source_type'] === 'decklink')
+                        && (int)$runningPipeline['decklink_device_number'] === $deviceNumber)
+                        || ($direction === 'fillkey' && (int)($runningPipeline['key_device_number'] ?? -1) === $deviceNumber);
                     if ($isBoundToDevice) {
                         throw new RuntimeException("Anschluss " . ($deviceNumber + 1) . " hat eine laufende Pipeline - bitte zuerst stoppen, bevor die Rolle geändert wird.");
                     }

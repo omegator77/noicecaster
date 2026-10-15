@@ -20,7 +20,8 @@ class PipelineManager
         'four-sub-devices-half',
     ];
     private const DECKLINK_AUDIO_CHANNELS = [2, 8, 16, 0];
-    private const DIRECTIONS = ['sdi_to_srt', 'srt_to_sdi'];
+    // 'fillkey' = Grafik-Ausgang ohne Programmbild auf zwei SDI-Ausgaengen (Fill + Key), siehe scripts/fillkey_output.py
+    private const DIRECTIONS = ['sdi_to_srt', 'srt_to_sdi', 'fillkey'];
     private const AUDIO_CODECS = ['aac', 'mp2', 'ac3', 'opus', 'pcm'];
     // VORERST nur 2 und 4 Ausgabekanaele (4 = 4.0, vollbandig; Entscheidung 2026-10-07). Mehr geht mit dem
     // Magewell nicht sauber: AAC mit 6/8 Kanaelen hat einen LFE-Platz (Kanal 4, nur bis ca. 250 Hz), AAC mit
@@ -114,9 +115,11 @@ class PipelineManager
     private function validatePortUsage(array $data, array $decklink, string $direction, ?int $excludeId = null): void
     {
         $sourceType = $data['source_type'] ?? 'videotestsrc';
-        $isPortBound = $direction === 'srt_to_sdi' || $sourceType === 'decklink';
+        $isPortBound = $direction === 'srt_to_sdi' || $direction === 'fillkey' || $sourceType === 'decklink';
 
-        if ($direction === 'srt_to_sdi') {
+        if ($direction === 'fillkey') {
+            $this->assertFillKeyPorts($data);
+        } elseif ($direction === 'srt_to_sdi') {
             $this->ports->assertRole($decklink['device_number'], 'output');
         } elseif ($sourceType === 'decklink') {
             $this->ports->assertRole($decklink['device_number'], 'input');
@@ -191,6 +194,7 @@ class PipelineManager
         $data = $this->applyRtmpLimits($data);
         $ov = $this->sanitizeOverlay($data);
         $lt = LowerThird::sanitize($data);
+        $keyDevice = $this->sanitizeKeyDevice($data);
         $out = $this->sanitizeOutput($data);
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
@@ -205,8 +209,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace, overlay_enabled, overlay_text, overlay_pos, overlay_size, overlay_color, overlay_bg, lt_template, lt_title, lt_main, lt_sub, lt_color, lt_logo, lt_anim, lt_dur, lt_hold, lt_scale, lt_pos)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace, :overlay_enabled, :overlay_text, :overlay_pos, :overlay_size, :overlay_color, :overlay_bg, :lt_template, :lt_title, :lt_main, :lt_sub, :lt_color, :lt_logo, :lt_anim, :lt_dur, :lt_hold, :lt_scale, :lt_pos)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace, overlay_enabled, overlay_text, overlay_pos, overlay_size, overlay_color, overlay_bg, lt_template, lt_title, lt_main, lt_sub, lt_color, lt_logo, lt_anim, lt_dur, lt_hold, lt_scale, lt_pos, key_device_number)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace, :overlay_enabled, :overlay_text, :overlay_pos, :overlay_size, :overlay_color, :overlay_bg, :lt_template, :lt_title, :lt_main, :lt_sub, :lt_color, :lt_logo, :lt_anim, :lt_dur, :lt_hold, :lt_scale, :lt_pos, :key_device_number)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -274,6 +278,7 @@ class PipelineManager
             ':lt_hold' => $lt['lt_hold'],
             ':lt_scale' => $lt['lt_scale'],
             ':lt_pos' => $lt['lt_pos'],
+            ':key_device_number' => $keyDevice,
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -867,6 +872,87 @@ class PipelineManager
         return ['live' => $live, 'running' => $running];
     }
 
+    private function isFillKeyRow(array $row): bool
+    {
+        return ($row['pipeline_direction'] ?? '') === 'fillkey';
+    }
+
+    /** Key-Ausgang (0 bis 3) oder null; nur bei Key & Fill gesetzt. */
+    private function sanitizeKeyDevice(array $data): ?int
+    {
+        if (($data['pipeline_direction'] ?? '') !== 'fillkey' || !isset($data['key_device_number']) || $data['key_device_number'] === '') {
+            return null;
+        }
+        $k = (int)$data['key_device_number'];
+        return ($k >= 0 && $k <= 3) ? $k : null;
+    }
+
+    /**
+     * Key & Fill: Fill und Key brauchen zwei verschiedene Ausgaenge im selben Modus, keiner darf von einer anderen LAUFENDEN Pipeline
+     * (Empfaenger oder Key & Fill, auch als Key-Ausgang) benutzt werden.
+     */
+    private function assertFillKeyPorts(array $row): void
+    {
+        $fill = (int)($row['decklink_device_number'] ?? 0);
+        $key = isset($row['key_device_number']) && $row['key_device_number'] !== null && $row['key_device_number'] !== '' ? (int)$row['key_device_number'] : -1;
+        if ($key < 0) {
+            throw new RuntimeException('Key & Fill braucht einen Key-Ausgang.');
+        }
+        if ($key === $fill) {
+            throw new RuntimeException('Fill und Key brauchen zwei verschiedene Ausgaenge.');
+        }
+        $this->ports->assertRole($fill, 'output');
+        $this->ports->assertRole($key, 'output');
+        if ($this->ports->getMode($fill) !== $this->ports->getMode($key)) {
+            throw new RuntimeException('Fill (Anschluss ' . ($fill + 1) . ') und Key (Anschluss ' . ($key + 1) . ') brauchen denselben Ausgangsmodus.');
+        }
+    }
+
+    /** Laeuft auf einem dieser Ausgaenge schon eine andere Pipeline (als Hauptausgang oder als Key-Ausgang)? */
+    private function assertOutputsFree(array $devices, int $exceptId): void
+    {
+        foreach ($this->list() as $other) {
+            if ((int)$other['id'] === $exceptId || $other['status'] !== 'running') {
+                continue;
+            }
+            $dir = $other['pipeline_direction'] ?? '';
+            if ($dir !== 'srt_to_sdi' && $dir !== 'fillkey') {
+                continue;
+            }
+            $used = [(int)$other['decklink_device_number']];
+            if ($dir === 'fillkey' && isset($other['key_device_number']) && $other['key_device_number'] !== null) {
+                $used[] = (int)$other['key_device_number'];
+            }
+            foreach ($devices as $d) {
+                if (in_array((int)$d, $used, true)) {
+                    throw new RuntimeException('Anschluss ' . ((int)$d + 1) . ' wird schon von einer laufenden Pipeline benutzt (' . $other['name'] . ').');
+                }
+            }
+        }
+    }
+
+    /** Befehl fuer Key & Fill: Python-Programm mit beiden Ausgaengen, immer mit Steuerdatei der Bauchbinde. */
+    private function buildFillKeyCommand(array $p): string
+    {
+        $this->assertFillKeyPorts($p);
+        $fill = (int)$p['decklink_device_number'];
+        $key = (int)$p['key_device_number'];
+        $mode = $this->ports->getMode($fill);
+        if ($mode === 'auto') {
+            $mode = DecklinkPortManager::DEFAULT_OUTPUT_MODE;
+        }
+        if (!isset(self::HD_MODE_CAPS[$mode])) {
+            throw new RuntimeException('Key & Fill unterstuetzt nur feste HD-Modi (720p/1080i/1080p), nicht "' . $mode . '".');
+        }
+        $profile = $this->sanitizeDecklink($p)['profile'];
+        return 'python3 ' . escapeshellarg(__DIR__ . '/../scripts/fillkey_output.py') .
+            ' --fill-device ' . $fill . ' --key-device ' . $key .
+            ' --mode ' . escapeshellarg($mode) . ' --profile ' . escapeshellarg($profile) .
+            ' --frame-width ' . (int)self::HD_MODE_CAPS[$mode]['width'] . ' --frame-height ' . $this->modeFrameHeight($mode) .
+            ' --lt-file ' . escapeshellarg(self::lowerThirdPath((int)$p['id'])) .
+            ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id']));
+    }
+
     // --- Bauchbinde (Lower Third) am SDI-Ausgang: Grafik mit Hintergrund, die ein-/ausfliegt (siehe LowerThird.php) ---
 
     public static function lowerThirdPath(int $id): string
@@ -903,6 +989,11 @@ class PipelineManager
             $mode = $this->ltOutputMode($p);
             $frameW = (int)(self::HD_MODE_CAPS[$mode]['width'] ?? 1920);
             $r = LowerThird::render($cfg, $frameW, self::lowerThirdPng($id));
+            if ($this->isFillKeyRow($p)) {
+                // Key: weisse Silhouette mit derselben Deckkraft (siehe LowerThird::toKeySvg)
+                $k = LowerThird::render($cfg, $frameW, LowerThird::dataDir() . "/lt_{$id}_key.png", true);
+                $data['png_key'] = $k['png'] . '?' . filemtime($k['png']);
+            }
             $data['png'] = $r['png'] . '?' . filemtime($r['png']);
             $data['w'] = $r['w'];
             $data['h'] = $r['h'];
@@ -942,7 +1033,7 @@ class PipelineManager
     public function lowerThirdLive(int $id, array $data, string $action): array
     {
         $p = $this->getPipelineOrFail($id);
-        if (!$this->isReceiverRow($p)) {
+        if (!$this->isReceiverRow($p) && !$this->isFillKeyRow($p)) {
             throw new RuntimeException('Bauchbinden gibt es nur bei Ausgangs-Anschluessen');
         }
         if (!in_array($action, ['apply', 'show', 'hide', 'toggle'], true)) {
@@ -1795,8 +1886,18 @@ class PipelineManager
             throw new RuntimeException("Pipeline läuft bereits");
         }
 
+        // Key & Fill: beide Ausgaenge muessen frei sein; Testsignale darauf beenden; Steuerdatei (ausgeblendet) schreiben
+        if ($this->isFillKeyRow($p)) {
+            $this->assertFillKeyPorts($p);
+            $this->assertOutputsFree([(int)$p['decklink_device_number'], (int)$p['key_device_number']], (int)$p['id']);
+            TestSignal::stop((int)$p['decklink_device_number']);
+            TestSignal::stop((int)$p['key_device_number']);
+            $this->writeLowerThirdFile($p, 'none');
+        }
+
         // Ein Testsignal auf dieser Karte beenden, bevor die Pipeline die Karte braucht
         if (($p['pipeline_direction'] ?? '') === 'srt_to_sdi') {
+            $this->assertOutputsFree([(int)$p['decklink_device_number']], (int)$p['id']);
             TestSignal::stop((int)$p['decklink_device_number']);
         }
 
@@ -1882,6 +1983,9 @@ class PipelineManager
         }
 
         $direction = $p['pipeline_direction'] ?? 'sdi_to_srt';
+        if ($direction === 'fillkey') {
+            return $this->buildFillKeyCommand($p);
+        }
         if ($direction === 'srt_to_sdi') {
             return $this->buildReceiveCommand($p);
         }
@@ -2159,6 +2263,7 @@ class PipelineManager
         $data = $this->applyRtmpLimits($data);
         $ov = $this->sanitizeOverlay($data);
         $lt = LowerThird::sanitize($data);
+        $keyDevice = $this->sanitizeKeyDevice($data);
         $out = $this->sanitizeOutput($data, $current['rtmp_key'] ?? null);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
@@ -2236,7 +2341,8 @@ class PipelineManager
                 lt_dur = :lt_dur,
                 lt_hold = :lt_hold,
                 lt_scale = :lt_scale,
-                lt_pos = :lt_pos
+                lt_pos = :lt_pos,
+                key_device_number = :key_device_number
             WHERE id = :id
         ");
         $stmt->execute([
@@ -2306,6 +2412,7 @@ class PipelineManager
             ':lt_hold' => $lt['lt_hold'],
             ':lt_scale' => $lt['lt_scale'],
             ':lt_pos' => $lt['lt_pos'],
+            ':key_device_number' => $keyDevice,
         ]);
     }
 
@@ -2380,7 +2487,8 @@ class PipelineManager
         }
         $this->ports->assertRole($device, 'output');
         foreach ($this->list() as $p) {
-            if (($p['pipeline_direction'] ?? '') === 'srt_to_sdi' && (int)$p['decklink_device_number'] === $device && $p['status'] === 'running') {
+            $usesPort = (int)$p['decklink_device_number'] === $device || (($p['pipeline_direction'] ?? '') === 'fillkey' && (int)($p['key_device_number'] ?? -1) === $device);
+            if (in_array($p['pipeline_direction'] ?? '', ['srt_to_sdi', 'fillkey'], true) && $usesPort && $p['status'] === 'running') {
                 throw new RuntimeException('Auf diesem Anschluss läuft eine Pipeline. Erst stoppen, dann das Testsignal einschalten.');
             }
         }

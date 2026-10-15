@@ -114,6 +114,8 @@ class Database
             'lt_hold' => "INTEGER DEFAULT 0",
             'lt_scale' => "INTEGER DEFAULT 60",
             'lt_pos' => "TEXT DEFAULT 'bottom-left'",
+            // Key & Fill (pipeline_direction 'fillkey'): zweiter Ausgang fuer das Key-Signal; decklink_device_number ist der Fill-Ausgang
+            'key_device_number' => "INTEGER DEFAULT NULL",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {

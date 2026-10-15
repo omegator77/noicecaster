@@ -178,7 +178,7 @@ class LowerThird
     }
 
     /** SVG-Text aus Vorlage und Werten bauen. */
-    public static function buildSvg(array $cfg): string
+    public static function buildSvg(array $cfg, bool $key = false): string
     {
         $dir = self::templateDir((string)$cfg['lt_template']) ?? throw new RuntimeException('Vorlage nicht gefunden');
         $svg = (string)file_get_contents($dir . '/template.svg');
@@ -194,7 +194,7 @@ class LowerThird
             $logo = sprintf('<image x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="xMidYMid meet" xlink:href="data:%s;base64,%s"/>',
                 $l['x'], $l['y'], $l['w'], $l['h'], $mime, base64_encode((string)file_get_contents($file)));
         }
-        return strtr($svg, [
+        $svg = strtr($svg, [
             '{{ACCENT}}' => $cfg['lt_color'],
             '{{ACCENT2}}' => self::darken($cfg['lt_color'], 0.38),
             '{{TITLE}}' => $esc($title),
@@ -205,13 +205,33 @@ class LowerThird
             '{{SUB_SIZE}}' => (string)self::fit($cfg['lt_sub'], $boxes['sub'] ?? [], false),
             '{{LOGO}}' => $logo,
         ]);
+        return $key ? self::toKeySvg($svg) : $svg;
+    }
+
+    /**
+     * Key-Fassung: alles in Weiss mit derselben Deckkraft (feColorMatrix setzt RGB = 1 und behaelt Alpha). Auf Schwarz gelegt ergibt das
+     * Graustufen = Deckkraft der Grafik, also das Key-Signal; Schatten und weiche Kanten bleiben als Grauwerte erhalten.
+     */
+    private static function toKeySvg(string $svg): string
+    {
+        if (preg_match('/<svg(?:\s[^>]*)?>/i', $svg, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            throw new RuntimeException('Vorlage ist kein SVG');
+        }
+        $end = $m[0][1] + strlen($m[0][0]);
+        $close = strripos($svg, '</svg>');
+        if ($close === false) {
+            throw new RuntimeException('Vorlage ist kein SVG');
+        }
+        $filter = '<defs><filter id="gwKeyWhite" color-interpolation-filters="sRGB" x="0" y="0" width="100%" height="100%">' .
+            '<feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0"/></filter></defs><g filter="url(#gwKeyWhite)">';
+        return substr($svg, 0, $end) . $filter . substr($svg, $end, $close - $end) . '</g>' . substr($svg, $close);
     }
 
     /**
      * Grafik als PNG mit Transparenz rendern. Groesse: $scale Prozent der Bildbreite des Ausgangs.
      * @return array{w: int, h: int, png: string}
      */
-    public static function render(array $cfg, int $frameWidth, string $outPng): array
+    public static function render(array $cfg, int $frameWidth, string $outPng, bool $key = false): array
     {
         $dir = self::templateDir((string)$cfg['lt_template']) ?? throw new RuntimeException('Vorlage nicht gefunden');
         $meta = json_decode((string)file_get_contents($dir . '/meta.json'), true) ?: [];
@@ -220,7 +240,7 @@ class LowerThird
         $w -= $w % 2;
         $h -= $h % 2;
         $svgPath = $outPng . '.svg';
-        if (@file_put_contents($svgPath, self::buildSvg($cfg)) === false) {
+        if (@file_put_contents($svgPath, self::buildSvg($cfg, $key)) === false) {
             throw new RuntimeException('Bauchbinden-Vorlage nicht schreibbar');
         }
         $tmp = $outPng . '.tmp.png';

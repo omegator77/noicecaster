@@ -1,0 +1,11 @@
+{
+  "name": "Nur Text (ohne Flächen, Schrift mit Kontur)",
+  "width": 1500,
+  "height": 220,
+  "logo": {"x": 1290, "y": 40, "w": 170, "h": 130},
+  "boxes": {
+    "title": {"w": 1100, "size": 30, "upper": true},
+    "main": {"w": 1200, "size": 68},
+    "sub": {"w": 1200, "size": 40}
+  }
+}
