@@ -721,7 +721,7 @@ class PipelineManager
      * "aus" und die Standardwerte (unten mittig, 5 %, weiss, ohne Hintergrund).
      * @return array{enabled: int, text: ?string, pos: string, size: int, color: string, bg: int}
      */
-    private function sanitizeOverlay(array $data): array
+    public static function sanitizeOverlay(array $data): array
     {
         $text = (string)($data['overlay_text'] ?? '');
         if (preg_match('//u', $text) !== 1) {

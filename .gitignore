@@ -38,3 +38,4 @@ data/mediamtx.pid
 # Bauchbinde: erzeugte Grafiken, Logos und Steuerdateien
 data/lowerthird/
 data/lowerthird_*.json
+data/overlay_*.json

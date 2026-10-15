@@ -162,9 +162,10 @@ def lt_stop_anim() -> None:
         state["lt_hold_id"] = 0
 
 
-def lt_animate(a, direction: str) -> None:
-    """Ein- oder Ausflug starten (aus der aktuellen Lage heraus, ein laufender Flug wird abgeloest)."""
-    cfg = state.get("lt_cfg") or {}
+def lt_animate(a, direction: str, cfg=None, done=None) -> None:
+    """Ein- oder Ausflug starten (aus der aktuellen Lage heraus, ein laufender Flug wird abgeloest).
+    cfg: Werte fuer Lage/Groesse/Animation (Standard: die aktuellen); done: wird nach Ende des Fluges aufgerufen."""
+    cfg = cfg if cfg is not None else (state.get("lt_cfg") or {})
     if not cfg.get("png"):
         return
     lt_stop_anim()
@@ -183,6 +184,9 @@ def lt_animate(a, direction: str) -> None:
         if t >= 1.0:
             state["lt_anim_id"] = 0
             state["lt_state"] = "shown" if direction == "in" else "hidden"
+            if done is not None:
+                done()
+                return False
             if direction == "in":
                 hold = int(cfg.get("hold", 0))
                 if hold > 0:
@@ -215,13 +219,34 @@ def apply_lowerthird(a, force=False) -> None:
     state["lt_stamp"] = stamp
     png = str(cfg.get("png") or "")
     path = png.split("?", 1)[0]
-    if path and png != state.get("lt_png"):
+
+    def load_png() -> None:
         try:
             ltg.set_property("location", path)
             state["lt_png"] = png
             log(f"Bauchbinde: Grafik geladen ({cfg.get('w')}x{cfg.get('h')}, {cfg.get('anim')}, {cfg.get('pos')})")
         except Exception as e:  # noqa: BLE001
             log(f"Bauchbinden-Grafik nicht ladbar: {e}")
+
+    new_png = bool(path) and png != state.get("lt_png")
+    seq_new = state.get("lt_seq") is not None and int(cfg.get("seq", 0)) != state["lt_seq"]
+    # Neuer Inhalt waehrend die alte Grafik sichtbar ist und ein "show" kommt (naechster Eintrag aus der Bibliothek): erst die
+    # alte ausfliegen lassen, dann die neue einfliegen (sonst wuerde sie schlagartig ausgetauscht)
+    if new_png and seq_new and str(cfg.get("cmd")) == "show" and state["lt_state"] in ("shown", "in"):
+        state["lt_seq"] = int(cfg.get("seq", 0))
+        old_cfg = dict(state.get("lt_cfg") or {})
+
+        def then_in() -> None:
+            load_png()
+            state["lt_cfg"] = cfg
+            state["lt_progress"] = 0.0
+            lt_place(a, cfg, 0.0, "in")
+            lt_animate(a, "in")
+
+        lt_animate(a, "out", cfg=old_cfg, done=then_in)
+        return
+    if new_png:
+        load_png()
     state["lt_cfg"] = cfg
     if state["lt_state"] in ("shown", "in"):
         lt_place(a, cfg, state.get("lt_progress", 1.0) if state["lt_state"] == "in" else 1.0, "in")  # neue Lage/Groesse sofort

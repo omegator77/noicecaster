@@ -11,6 +11,7 @@ require_once __DIR__ . '/../src/StreamStats.php';
 require_once __DIR__ . '/../src/PeerInfo.php';
 require_once __DIR__ . '/../src/PowerManager.php';
 require_once __DIR__ . '/../src/PresetManager.php';
+require_once __DIR__ . '/../src/TextLibrary.php';
 
 header('Content-Type: application/json');
 
@@ -158,6 +159,33 @@ try {
         case 'preset_delete':
             (new PresetManager($db->pdo()))->delete((int)($_GET['id'] ?? 0));
             echo json_encode(['success' => true]);
+            break;
+
+        // Text-Bibliothek: Texte vorab speichern und bei Bedarf laden/einblenden (siehe TextLibrary)
+        case 'textlib_list':
+            echo json_encode((new TextLibrary($db->pdo()))->list(isset($_GET['kind']) ? (string)$_GET['kind'] : null));
+            break;
+
+        case 'textlib_save':
+        case 'textlib_delete':
+        case 'textlib_move':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            $data = is_array($data) ? $data : [];
+            $lib = new TextLibrary($db->pdo());
+            if ($action === 'textlib_save') {
+                echo json_encode(['success' => true] + $lib->save($data));
+            } elseif ($action === 'textlib_delete') {
+                $lib->delete((int)($data['id'] ?? 0));
+                echo json_encode(['success' => true]);
+            } else {
+                $lib->move((int)($data['id'] ?? 0), (string)($data['dir'] ?? ''));
+                echo json_encode(['success' => true]);
+            }
             break;
 
         case 'create':

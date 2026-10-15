@@ -147,6 +147,16 @@
   .ov-grid button.active { background: #2563eb; color: #fff; }
   .lt-preview { margin-top: 0.5rem; padding: 0.5rem; border-radius: 6px; border: 1px solid #2a2e37; background-color: #6b7280; background-image: linear-gradient(45deg, #5f6672 25%, transparent 25%, transparent 75%, #5f6672 75%), linear-gradient(45deg, #5f6672 25%, transparent 25%, transparent 75%, #5f6672 75%); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
   .lt-preview img { display: block; max-width: 100%; height: auto; }
+  .tl-box { margin-top: 0.9rem; padding: 0.6rem 0.75rem; border: 1px solid #2a2e37; border-left: 3px solid #2563eb; border-radius: 6px; background: #14171d; }
+  .tl-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .tl-list { margin-top: 0.4rem; max-height: 18rem; overflow-y: auto; }
+  .tl-item { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding: 0.35rem 0.25rem; border-top: 1px solid #2a2e37; }
+  .tl-item.tl-last { background: #1b2433; }
+  .tl-info { flex: 1 1 10rem; min-width: 0; }
+  .tl-name { color: #e4e6eb; font-size: 0.88rem; overflow-wrap: anywhere; }
+  .tl-prev { color: #8b93a1; font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+  .tl-btns button { padding: 0.25rem 0.55rem; font-size: 0.8rem; }
   .srt-url {
     font-family: monospace;
     background: #0f1115;
@@ -355,7 +365,7 @@
   }).catch(() => {});
 })();
 </script>
-<div class="container" x-data="app()" x-init="loadFiles(); loadPresets(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); loadPresets(); textlibLoad(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
   <header class="topbar" :style="sysInfo ? '--sys-accent:' + sysInfo.self.accent : ''">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -1382,6 +1392,42 @@
               </div>
               <div class="hint" x-show="!tileForms[n].id">Erst Anschluss speichern.</div>
               <div class="hint" x-show="overlayMsg[n]" :style="'color:' + overlayMsgColor(n)" x-text="overlayMsg[n] && overlayMsg[n].text"></div>
+              <div class="tl-box">
+                <div class="tl-row">
+                  <strong style="font-size: 0.85rem; color: #e4e6eb;">Text-Bibliothek</strong>
+                  <button type="button" class="btn-secondary" @click="textlibSave(n, 'text')">Aktuelle Werte speichern unter …</button>
+                </div>
+                <details style="margin-top: 0.4rem;" @toggle="$event.target.open && textlibLoad()">
+                  <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Gespeichert (<span x-text="textlibItemsOf('text').length"></span>)</summary>
+                  <div class="hint" x-show="!textlibItemsOf('text').length">Noch nichts gespeichert. Text oben eintragen und „Aktuelle Werte speichern unter …“ wählen.</div>
+                  <input type="text" x-show="textlibItemsOf('text').length > 8" x-model="tlSearch[n + ':text']" placeholder="Suchen (Name oder Inhalt) …" spellcheck="false" style="margin-top: 0.4rem;">
+                  <div class="hint" x-show="textlibItemsOf('text').length && !textlibFiltered(n, 'text').length">Keine Treffer.</div>
+                  <div class="tl-list">
+                    <template x-for="it in textlibFiltered(n, 'text')" :key="it.id">
+                      <div class="tl-item">
+                        <div class="tl-info">
+                          <div class="tl-name" x-text="it.name"></div>
+                          <div class="tl-prev" x-text="textlibPreview(it)"></div>
+                        </div>
+                        <div class="tl-btns">
+                          <button type="button" class="btn-secondary" @click="textlibFill(n, it)">Laden</button>
+                          <button type="button" class="btn-start" :disabled="!!(!tileForms[n].id || overlayBusy[n])" :title="tileForms[n].id ? '' : 'erst Anschluss speichern'" @click="textlibShow(n, it)">Einblenden</button>
+                          <button type="button" class="btn-secondary" title="nach oben" aria-label="nach oben" :disabled="!!(!textlibCanMove(n, it, 'up'))" @click="textlibMove(n, it, 'up')">▲</button>
+                          <button type="button" class="btn-secondary" title="nach unten" aria-label="nach unten" :disabled="!!(!textlibCanMove(n, it, 'down'))" @click="textlibMove(n, it, 'down')">▼</button>
+                          <button type="button" class="btn-delete" @click="textlibDelete(n, it)">Löschen</button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="tl-row" style="margin-top: 0.5rem;">
+                    <button type="button" class="btn-secondary" :disabled="!textlibItems.length" @click="textlibExport(n, 'text')">Bibliothek exportieren</button>
+                    <button type="button" class="btn-secondary" @click="textlibImport(n, 'text')">Importieren …</button>
+                    <span class="hint" style="margin: 0;">gilt für die ganze Bibliothek (Bauchbinden und Texte)</span>
+                  </div>
+                </details>
+                <div class="hint" x-show="!tileForms[n].id">Zum Einblenden erst Anschluss speichern („Laden“ geht immer).</div>
+                <div class="hint" x-show="tlMsg[n + ':text']" :style="'color:' + textlibMsgColor(n + ':text')" x-text="tlMsg[n + ':text'] && tlMsg[n + ':text'].text"></div>
+              </div>
               <div class="hint">Live-Änderung am laufenden Ausgang geht nur, wenn der Anschluss mit eingetragenem Text gestartet wurde (auch bei ausgeschalteter Einblendung). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
               </div>
             </details>
@@ -1489,6 +1535,47 @@
                   <img x-show="ltPrev[n] && ltPrev[n].url" :src="ltPrev[n] && ltPrev[n].url ? ltPrev[n].url : undefined" alt="Vorschau der Bauchbinde">
                   <div x-show="ltPrev[n] && ltPrev[n].busy" style="color: #e4e6eb; font-size: 0.85rem;">Vorschau wird erstellt …</div>
                   <div x-show="ltPrev[n] && ltPrev[n].err" style="color: #fecaca; background: #450a0a; border-radius: 4px; padding: 0.35rem 0.5rem; font-size: 0.85rem;" x-text="ltPrev[n] && ltPrev[n].err"></div>
+                </div>
+                <div class="tl-box">
+                  <div class="tl-row">
+                    <strong style="font-size: 0.85rem; color: #e4e6eb;">Bauchbinden-Bibliothek</strong>
+                    <button type="button" class="btn-secondary" @click="textlibSave(n, 'lowerthird')">Aktuelle Werte speichern unter …</button>
+                  </div>
+                  <div class="tl-row" style="margin-top: 0.4rem;">
+                    <button type="button" class="btn-secondary" :disabled="!!(!tileForms[n].id || ltBusy[n] || !textlibItemsOf('lowerthird').length)" :title="tileForms[n].id ? '' : 'erst Anschluss speichern'" @click="textlibStep(n, -1)">◀ Zurück</button>
+                    <button type="button" class="btn-start" :disabled="!!(!tileForms[n].id || ltBusy[n] || !textlibItemsOf('lowerthird').length)" :title="tileForms[n].id ? '' : 'erst Anschluss speichern'" @click="textlibStep(n, 1)">Nächster ▶</button>
+                    <span class="hint" style="margin: 0;" x-show="textlibLastItem(n)">zuletzt: <span x-text="textlibLastItem(n) && textlibLastItem(n).name"></span></span>
+                  </div>
+                  <details style="margin-top: 0.4rem;" @toggle="$event.target.open && textlibLoad()">
+                    <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Gespeichert (<span x-text="textlibItemsOf('lowerthird').length"></span>)</summary>
+                    <div class="hint" x-show="!textlibItemsOf('lowerthird').length">Noch nichts gespeichert. Werte oben eintragen und „Aktuelle Werte speichern unter …“ wählen.</div>
+                    <input type="text" x-show="textlibItemsOf('lowerthird').length > 8" x-model="tlSearch[n + ':lowerthird']" placeholder="Suchen (Name oder Inhalt) …" spellcheck="false" style="margin-top: 0.4rem;">
+                    <div class="hint" x-show="textlibItemsOf('lowerthird').length && !textlibFiltered(n, 'lowerthird').length">Keine Treffer.</div>
+                    <div class="tl-list">
+                      <template x-for="it in textlibFiltered(n, 'lowerthird')" :key="it.id">
+                        <div class="tl-item" :class="{ 'tl-last': textlibLastItem(n) && textlibLastItem(n).id === it.id }">
+                          <div class="tl-info">
+                            <div class="tl-name" x-text="it.name"></div>
+                            <div class="tl-prev" x-text="textlibPreview(it)"></div>
+                          </div>
+                          <div class="tl-btns">
+                            <button type="button" class="btn-secondary" @click="textlibFill(n, it)">Laden</button>
+                            <button type="button" class="btn-start" :disabled="!!(!tileForms[n].id || ltBusy[n])" :title="tileForms[n].id ? '' : 'erst Anschluss speichern'" @click="textlibShow(n, it)">Einblenden</button>
+                            <button type="button" class="btn-secondary" title="nach oben" aria-label="nach oben" :disabled="!!(!textlibCanMove(n, it, 'up'))" @click="textlibMove(n, it, 'up')">▲</button>
+                            <button type="button" class="btn-secondary" title="nach unten" aria-label="nach unten" :disabled="!!(!textlibCanMove(n, it, 'down'))" @click="textlibMove(n, it, 'down')">▼</button>
+                            <button type="button" class="btn-delete" @click="textlibDelete(n, it)">Löschen</button>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                    <div class="tl-row" style="margin-top: 0.5rem;">
+                      <button type="button" class="btn-secondary" :disabled="!textlibItems.length" @click="textlibExport(n, 'lowerthird')">Bibliothek exportieren</button>
+                      <button type="button" class="btn-secondary" @click="textlibImport(n, 'lowerthird')">Importieren …</button>
+                      <span class="hint" style="margin: 0;">gilt für die ganze Bibliothek (Bauchbinden und Texte)</span>
+                    </div>
+                  </details>
+                  <div class="hint" x-show="!tileForms[n].id">Zum Einblenden erst Anschluss speichern („Laden“ geht immer).</div>
+                  <div class="hint" x-show="tlMsg[n + ':lowerthird']" :style="'color:' + textlibMsgColor(n + ':lowerthird')" x-text="tlMsg[n + ':lowerthird'] && tlMsg[n + ':lowerthird'].text"></div>
                 </div>
                 <div class="hint">Die Bauchbinde fliegt am laufenden Ausgang nur live ein und aus, wenn der Anschluss mit eingetragenem Text oder Logo gestartet wurde (sonst gelten die Werte erst ab dem nächsten Start). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
               </div>
@@ -2563,6 +2650,13 @@ function app() {
       { value: 'top-center', label: 'oben mitte' },
       { value: 'top-right', label: 'oben rechts' }
     ],
+    // Text-Bibliothek (gilt fuer das ganze System, einmal geladen und nach jeder Aenderung neu geholt)
+    textlibItems: [],
+    textlibLoaded: false,
+    textlibLoading: false,
+    tlMsg: {},
+    tlSearch: {},
+    tlLast: { 0: null, 1: null, 2: null, 3: null },
     savingTile: { 0: false, 1: false, 2: false, 3: false },
     presets: [],
     presetSelected: { 0: '', 1: '', 2: '', 3: '' },
@@ -3769,6 +3863,265 @@ function app() {
       }
       await this.loadPresets();
       this.presetsMsg = 'Import: ' + added + ' neu, ' + replaced + ' überschrieben, ' + skipped + ' übersprungen' + (failed ? ', ' + failed + ' fehlerhaft' : '') + '.';
+    },
+
+    // --- Text-Bibliothek (Bauchbinden und einfache Texte unter einem Namen speichern, laden, einblenden) ---
+    // Einmal laden (Start / erstes Aufklappen) und nach jeder Aenderung neu holen; kein Poller.
+    async textlibLoad() {
+      if (this.textlibLoaded) return;
+      await this.textlibReload();
+    },
+
+    async textlibReload() {
+      if (this.textlibLoading) return;
+      this.textlibLoading = true;
+      try {
+        const res = await fetch('api.php?action=textlib_list');
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.textlibItems = data;
+          this.textlibLoaded = true;
+          // Gemerkten "zuletzt eingeblendet"-Eintrag zuruecksetzen, wenn es ihn nicht mehr gibt
+          for (const n of [0, 1, 2, 3]) {
+            if (this.tlLast[n] !== null && !data.some(it => it.id === this.tlLast[n])) this.tlLast[n] = null;
+          }
+        }
+      } catch (e) {
+        // nicht kritisch: beim naechsten Aufklappen erneut versuchen
+      } finally {
+        this.textlibLoading = false;
+      }
+    },
+
+    textlibItemsOf(kind) {
+      return this.textlibItems.filter(it => it.kind === kind);
+    },
+
+    textlibSearchActive(n, kind) {
+      return this.textlibItemsOf(kind).length > 8 && String(this.tlSearch[n + ':' + kind] || '').trim() !== '';
+    },
+
+    // Suchfeld erst ab 9 Eintraegen; filtert nur die Anzeige (Name und Textinhalt)
+    textlibFiltered(n, kind) {
+      const list = this.textlibItemsOf(kind);
+      if (!this.textlibSearchActive(n, kind)) return list;
+      const q = String(this.tlSearch[n + ':' + kind]).trim().toLowerCase();
+      return list.filter(it => {
+        const hay = [it.name].concat(Object.values(it.data || {}).filter(v => typeof v === 'string')).join('\n').toLowerCase();
+        return hay.indexOf(q) !== -1;
+      });
+    },
+
+    textlibShort(s, max) {
+      const a = Array.from(String(s || ''));
+      return a.length > max ? a.slice(0, max).join('') + '…' : a.join('');
+    },
+
+    textlibPreview(it) {
+      const d = it.data || {};
+      if (it.kind === 'lowerthird') {
+        const t = [d.lt_main, d.lt_sub].filter(x => x && String(x).trim() !== '').join(' · ');
+        return this.textlibShort(t || d.lt_title || (d.lt_logo ? '(nur Logo)' : ''), 80);
+      }
+      const lines = String(d.overlay_text || '').split(/\r?\n/);
+      const first = (lines.find(l => l.trim() !== '') || '').trim();
+      return this.textlibShort(first, 60) + (lines.filter(l => l.trim() !== '').length > 1 ? ' …' : '');
+    },
+
+    textlibCanMove(n, it, dir) {
+      if (this.textlibSearchActive(n, it.kind)) return false;
+      const list = this.textlibItemsOf(it.kind);
+      const i = list.findIndex(x => x.id === it.id);
+      return dir === 'up' ? i > 0 : i >= 0 && i < list.length - 1;
+    },
+
+    textlibLastItem(n) {
+      const id = this.tlLast[n];
+      return id === null || id === undefined ? null : (this.textlibItems.find(it => it.id === id) || null);
+    },
+
+    textlibMsgColor(key) {
+      const m = this.tlMsg[key];
+      return !m ? '#6b7280' : m.kind === 'err' ? '#f87171' : m.kind === 'warn' ? '#d9a400' : '#4ade80';
+    },
+
+    async textlibPost(action, body) {
+      const res = await fetch('api.php?action=' + action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return res.json();
+    },
+
+    // Aktuelle Werte des Blocks unter einem Namen speichern (vorhandener Name: Rueckfrage zum Ueberschreiben)
+    async textlibSave(n, kind) {
+      const tf = this.tileForms[n];
+      const key = n + ':' + kind;
+      let data, def;
+      if (kind === 'lowerthird') {
+        data = this.ltPayload(tf);
+        if (!data.lt_title && !data.lt_main && !data.lt_sub && !data.lt_logo) {
+          this.tlMsg[key] = { kind: 'err', text: 'Die Bauchbinde braucht mindestens einen Text oder ein Logo.' };
+          return;
+        }
+        def = data.lt_main || data.lt_title || data.lt_sub || '';
+      } else {
+        const o = this.overlayPayload(tf);
+        if (o.overlay_text.trim() === '') {
+          this.tlMsg[key] = { kind: 'err', text: 'Der Text ist leer.' };
+          return;
+        }
+        data = { overlay_text: o.overlay_text, overlay_pos: o.overlay_pos, overlay_size: o.overlay_size, overlay_color: o.overlay_color, overlay_bg: o.overlay_bg };
+        def = o.overlay_text.split(/\r?\n/).map(l => l.trim()).find(l => l !== '') || '';
+      }
+      const name = (prompt('Name des Eintrags (gleicher Name überschreibt nach Rückfrage):', this.textlibShort(def, 60).replace(/…$/, '')) || '').trim();
+      if (!name) return;
+      this.tlMsg[key] = '';
+      this.errorMsg = '';
+      try {
+        let r = await this.textlibPost('textlib_save', { kind, name, data, overwrite: false });
+        if (r.exists) {
+          if (!confirm('Ein Eintrag mit dem Namen "' + name + '" gibt es schon. Überschreiben?')) return;
+          r = await this.textlibPost('textlib_save', { kind, name, data, overwrite: true });
+        }
+        if (r.error) throw new Error(r.error);
+        await this.textlibReload();
+        this.tlMsg[key] = { kind: 'ok', text: 'Gespeichert: "' + name + '"' + (r.created === false ? ' (überschrieben)' : '') };
+      } catch (e) {
+        this.tlMsg[key] = { kind: 'err', text: 'Fehler: ' + e.message };
+        this.errorMsg = 'Fehler beim Speichern in der Bibliothek: ' + e.message;
+      }
+    },
+
+    // Formularfelder des Blocks mit den Werten des Eintrags fuellen (nur die Felder, die der Eintrag enthaelt); sendet nichts
+    textlibFill(n, it) {
+      const tf = this.tileForms[n];
+      const d = it.data || {};
+      if (it.kind === 'lowerthird') {
+        const v = ltFromServer(d);
+        for (const k of LT_KEYS) if (k in d) tf[k] = v[k];
+      } else {
+        const v = overlayFromServer(d);
+        for (const k of OVERLAY_KEYS) if (k !== 'overlay_enabled' && k in d) tf[k] = v[k];
+      }
+      this.tlMsg[n + ':' + it.kind] = { kind: 'ok', text: 'Geladen: "' + it.name + '". Noch nicht angewendet.' };
+    },
+
+    // Werte uebernehmen und mit den vorhandenen Live-Wegen einblenden
+    async textlibShow(n, it) {
+      const tf = this.tileForms[n];
+      const key = n + ':' + it.kind;
+      if (!tf || !tf.id) return;
+      this.errorMsg = '';
+      if (it.kind === 'lowerthird') {
+        if (this.ltBusy[n]) return;
+        this.textlibFill(n, it);
+        await this.ltLive(n, 'show');
+        const m = this.ltMsg[n];
+        this.tlMsg[key] = m ? { kind: m.kind, text: '"' + it.name + '": ' + m.text } : '';
+        if (m && m.kind !== 'err') this.tlLast[n] = it.id;
+      } else {
+        if (this.overlayBusy[n]) return;
+        const prev = tf.overlay_enabled;
+        this.textlibFill(n, it);
+        tf.overlay_enabled = 1;
+        await this.overlayLive(n);
+        const m = this.overlayMsg[n];
+        if (m && m.kind === 'err') tf.overlay_enabled = prev;
+        this.tlMsg[key] = m ? { kind: m.kind, text: '"' + it.name + '": ' + m.text } : '';
+      }
+    },
+
+    // Bauchbinde: naechsten (dir 1) bzw. vorherigen (dir -1) Eintrag der Liste einblenden, am Ende von vorn
+    async textlibStep(n, dir) {
+      const list = this.textlibItemsOf('lowerthird');
+      if (!list.length || this.ltBusy[n]) return;
+      const i = list.findIndex(it => it.id === this.tlLast[n]);
+      const next = i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length;
+      await this.textlibShow(n, list[next]);
+    },
+
+    async textlibMove(n, it, dir) {
+      this.errorMsg = '';
+      try {
+        const r = await this.textlibPost('textlib_move', { id: it.id, dir });
+        if (r.error) throw new Error(r.error);
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Verschieben: ' + e.message;
+      }
+      await this.textlibReload();
+    },
+
+    async textlibDelete(n, it) {
+      if (!confirm('Eintrag "' + it.name + '" wirklich löschen?')) return;
+      this.errorMsg = '';
+      const key = n + ':' + it.kind;
+      try {
+        const r = await this.textlibPost('textlib_delete', { id: it.id });
+        if (r.error) throw new Error(r.error);
+        this.tlMsg[key] = { kind: 'ok', text: 'Gelöscht: "' + it.name + '"' };
+      } catch (e) {
+        this.errorMsg = 'Fehler beim Löschen: ' + e.message;
+      }
+      await this.textlibReload();
+    },
+
+    // Export der ganzen Bibliothek (beide Arten)
+    textlibExport(n, kind) {
+      const items = this.textlibItems.map(it => ({ kind: it.kind, name: it.name, data: it.data }));
+      const doc = { format: 'noicecaster-textlib', version: 1, exported: new Date().toISOString(), items };
+      const file = 'noicecaster-textlib-' + new Date().toISOString().slice(0, 10) + '.json';
+      const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      this.tlMsg[n + ':' + kind] = { kind: 'ok', text: items.length + (items.length === 1 ? ' Eintrag' : ' Einträge') + ' exportiert (' + file + ').' };
+    },
+
+    textlibImport(n, kind) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.addEventListener('change', () => {
+        const f = input.files && input.files[0];
+        if (f) this.textlibImportFile(n, kind, f);
+      });
+      input.click();
+    },
+
+    async textlibImportFile(n, kind, f) {
+      const key = n + ':' + kind;
+      let doc;
+      try {
+        doc = JSON.parse(await f.text());
+      } catch (e) {
+        this.tlMsg[key] = { kind: 'err', text: 'Import fehlgeschlagen: keine gültige JSON-Datei.' };
+        return;
+      }
+      if (!doc || doc.format !== 'noicecaster-textlib' || !Array.isArray(doc.items)) {
+        this.tlMsg[key] = { kind: 'err', text: 'Import fehlgeschlagen: keine Bibliotheks-Datei von Noicecaster.' };
+        return;
+      }
+      const overwrite = confirm('Vorhandene Namen überschreiben?\n\nOK = überschreiben, Abbrechen = vorhandene Namen überspringen.');
+      let imported = 0, skipped = 0, failed = 0;
+      this.errorMsg = '';
+      for (const item of doc.items) {
+        if (!item || typeof item !== 'object' || (item.kind !== 'lowerthird' && item.kind !== 'text') || typeof item.name !== 'string' || !item.data || typeof item.data !== 'object') { failed++; continue; }
+        try {
+          const r = await this.textlibPost('textlib_save', { kind: item.kind, name: item.name, data: item.data, overwrite });
+          if (r.error) throw new Error(r.error);
+          if (r.exists) skipped++; else imported++;
+        } catch (e) {
+          failed++;
+        }
+      }
+      await this.textlibReload();
+      this.tlMsg[key] = { kind: failed ? 'warn' : 'ok', text: 'Import: ' + imported + ' importiert, ' + skipped + ' übersprungen, ' + failed + ' fehlerhaft.' };
     },
 
     toggleTileCollapsed(n) {
