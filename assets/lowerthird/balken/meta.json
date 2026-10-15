@@ -1,0 +1,11 @@
+{
+  "name": "Balken (dunkles Band, Titel-Reiter)",
+  "width": 1500,
+  "height": 210,
+  "logo": {"x": 1230, "y": 70, "w": 160, "h": 110},
+  "boxes": {
+    "title": {"w": 520, "size": 28, "upper": true},
+    "main": {"w": 1120, "size": 56},
+    "sub": {"w": 1120, "size": 36}
+  }
+}

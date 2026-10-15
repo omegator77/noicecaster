@@ -34,3 +34,7 @@ bin/
 data/mediamtx.yml
 data/mediamtx.yml.tmp
 data/mediamtx.pid
+
+# Bauchbinde: erzeugte Grafiken, Logos und Steuerdateien
+data/lowerthird/
+data/lowerthird_*.json

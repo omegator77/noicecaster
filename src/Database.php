@@ -102,6 +102,18 @@ class Database
             'overlay_size' => "INTEGER DEFAULT 5",
             'overlay_color' => "TEXT DEFAULT '#FFFFFF'",
             'overlay_bg' => "INTEGER DEFAULT 0",
+            // Bauchbinde (nur Empfaenger-Ausgaenge): Vorlage, Texte, Akzentfarbe, Logo, Animation, Groesse, Lage (siehe LowerThird.php)
+            'lt_template' => "TEXT DEFAULT 'classic'",
+            'lt_title' => "TEXT DEFAULT NULL",
+            'lt_main' => "TEXT DEFAULT NULL",
+            'lt_sub' => "TEXT DEFAULT NULL",
+            'lt_color' => "TEXT DEFAULT '#E1306C'",
+            'lt_logo' => "TEXT DEFAULT NULL",
+            'lt_anim' => "TEXT DEFAULT 'slide-left'",
+            'lt_dur' => "INTEGER DEFAULT 700",
+            'lt_hold' => "INTEGER DEFAULT 0",
+            'lt_scale' => "INTEGER DEFAULT 60",
+            'lt_pos' => "TEXT DEFAULT 'bottom-left'",
         ];
         foreach ($columns as $name => $definition) {
             if (!in_array($name, $existing, true)) {

@@ -145,6 +145,8 @@
   .ov-grid { display: grid; grid-template-columns: repeat(3, 2.4rem); gap: 0.25rem; }
   .ov-grid button { padding: 0.3rem 0; background: #334155; color: #e4e6eb; font-size: 1rem; line-height: 1.2; }
   .ov-grid button.active { background: #2563eb; color: #fff; }
+  .lt-preview { margin-top: 0.5rem; padding: 0.5rem; border-radius: 6px; border: 1px solid #2a2e37; background-color: #6b7280; background-image: linear-gradient(45deg, #5f6672 25%, transparent 25%, transparent 75%, #5f6672 75%), linear-gradient(45deg, #5f6672 25%, transparent 25%, transparent 75%, #5f6672 75%); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+  .lt-preview img { display: block; max-width: 100%; height: auto; }
   .srt-url {
     font-family: monospace;
     background: #0f1115;
@@ -1385,6 +1387,114 @@
             </details>
           </template>
 
+          <template x-if="tileDirection(portFor(n)) === 'srt_to_sdi' && !tileForms[n].test_pattern_enabled">
+            <details style="margin-top: 0.75rem;" :open="ltOpen[n]" @toggle="ltToggle(n, $event.target.open)">
+              <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Bauchbinde (Grafik mit Hintergrund)<span x-show="ltStateText(n) === 'sichtbar' || ltStateText(n) === 'fliegt ein'" style="color: #4ade80;"> &middot; sichtbar</span></summary>
+              <div class="ov-block" x-data="{ get lt() { return tileForms[n]; } }" style="margin-top: 0.5rem;">
+                <div class="form-row">
+                  <div>
+                    <label>Vorlage</label>
+                    <select x-model="lt.lt_template">
+                      <template x-for="t in ltTemplateList(lt.lt_template)" :key="t.id">
+                        <option :value="t.id" :selected="t.id === lt.lt_template" x-text="t.name"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Akzentfarbe</label>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <input type="color" :value="lt.lt_color" @input="lt.lt_color = $event.target.value.toUpperCase()" style="width: 3.5rem; height: 2.2rem; padding: 0.15rem;">
+                      <span class="srt-url" x-text="lt.lt_color"></span>
+                    </div>
+                  </div>
+                </div>
+                <div style="margin-top: 0.5rem;">
+                  <label>Reiter-Titel</label>
+                  <input type="text" maxlength="80" x-model="lt.lt_title" placeholder="z. B. LIVE" spellcheck="false">
+                  <div class="hint"><span x-text="ltLen(lt.lt_title) + '/80'"></span></div>
+                </div>
+                <div style="margin-top: 0.5rem;">
+                  <label>Haupttext</label>
+                  <input type="text" maxlength="80" x-model="lt.lt_main" placeholder="z. B. Name" spellcheck="false">
+                  <div class="hint"><span x-text="ltLen(lt.lt_main) + '/80'"></span></div>
+                </div>
+                <div style="margin-top: 0.5rem;">
+                  <label>Untertext</label>
+                  <input type="text" maxlength="80" x-model="lt.lt_sub" placeholder="z. B. Funktion" spellcheck="false">
+                  <div class="hint"><span x-text="ltLen(lt.lt_sub) + '/80'"></span></div>
+                </div>
+                <div style="margin-top: 0.5rem;">
+                  <label>Logo (PNG oder JPEG, bis 2 MB)</label>
+                  <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <template x-if="lt.lt_logo">
+                      <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <img :src="'api.php?action=lowerthird_logo&name=' + encodeURIComponent(lt.lt_logo)" alt="Logo" style="height: 2.4rem; max-width: 6rem; object-fit: contain; background: #5f6672; border-radius: 4px; padding: 0.15rem;">
+                        <button type="button" class="btn-secondary" @click="lt.lt_logo = ''; ltLogoMsg[n] = ''">Logo entfernen</button>
+                      </div>
+                    </template>
+                    <input type="file" accept="image/png,image/jpeg" @change="ltLogoUpload(n, $event)" style="width: auto;">
+                  </div>
+                  <div class="hint" x-show="ltLogoMsg[n]" style="color: #f87171;" x-text="ltLogoMsg[n]"></div>
+                </div>
+                <div class="form-row" style="margin-top: 0.5rem;">
+                  <div>
+                    <label>Animation</label>
+                    <select x-model="lt.lt_anim">
+                      <template x-for="a in ltAnims" :key="a.value">
+                        <option :value="a.value" :selected="a.value === lt.lt_anim" x-text="a.label"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Dauer des Ein-/Ausflugs</label>
+                    <select x-model.number="lt.lt_dur">
+                      <template x-for="d in ltList(ltDurs, lt.lt_dur)" :key="d">
+                        <option :value="d" :selected="d === Number(lt.lt_dur)" x-text="d + ' ms'"></option>
+                      </template>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row" style="margin-top: 0.5rem;">
+                  <div>
+                    <label>Automatisch ausblenden nach (Sekunden, 0 = nie)</label>
+                    <input type="number" min="0" max="3600" step="1" x-model.number="lt.lt_hold">
+                  </div>
+                  <div>
+                    <label>Größe (% der Bildbreite)</label>
+                    <select x-model.number="lt.lt_scale">
+                      <template x-for="s in ltList(ltScales, lt.lt_scale)" :key="s">
+                        <option :value="s" :selected="s === Number(lt.lt_scale)" x-text="s + ' %'"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Lage</label>
+                    <select x-model="lt.lt_pos">
+                      <template x-for="p in ltPositions" :key="p.value">
+                        <option :value="p.value" :selected="p.value === lt.lt_pos" x-text="p.label"></option>
+                      </template>
+                    </select>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-top: 0.6rem;">
+                  <button type="button" class="btn-secondary" :disabled="!!(ltPrev[n] && ltPrev[n].busy)" @click="ltPreview(n)">Vorschau</button>
+                  <button type="button" class="btn-primary" :disabled="!!(!tileForms[n].id || ltBusy[n])" @click="ltLive(n, 'apply')">Übernehmen</button>
+                  <button type="button" class="btn-start" :disabled="!!(!tileForms[n].id || ltBusy[n])" @click="ltLive(n, 'show')">Einblenden</button>
+                  <button type="button" class="btn-stop" :disabled="!!(!tileForms[n].id || ltBusy[n])" @click="ltLive(n, 'hide')">Ausblenden</button>
+                  <span class="hint" style="margin: 0;">Zustand: <span x-text="ltStateText(n)"></span></span>
+                </div>
+                <div class="hint" x-show="!tileForms[n].id">Erst Anschluss speichern.</div>
+                <div class="hint" x-show="ltMsg[n]" :style="'color:' + ltMsgColor(n)" x-text="ltMsg[n] && ltMsg[n].text"></div>
+                <div class="lt-preview" x-show="ltPrev[n] && (ltPrev[n].url || ltPrev[n].err || ltPrev[n].busy)">
+                  <img x-show="ltPrev[n] && ltPrev[n].url" :src="ltPrev[n] && ltPrev[n].url ? ltPrev[n].url : undefined" alt="Vorschau der Bauchbinde">
+                  <div x-show="ltPrev[n] && ltPrev[n].busy" style="color: #e4e6eb; font-size: 0.85rem;">Vorschau wird erstellt …</div>
+                  <div x-show="ltPrev[n] && ltPrev[n].err" style="color: #fecaca; background: #450a0a; border-radius: 4px; padding: 0.35rem 0.5rem; font-size: 0.85rem;" x-text="ltPrev[n] && ltPrev[n].err"></div>
+                </div>
+                <div class="hint">Die Bauchbinde fliegt am laufenden Ausgang nur live ein und aus, wenn der Anschluss mit eingetragenem Text oder Logo gestartet wurde (sonst gelten die Werte erst ab dem nächsten Start). Mit „Speichern“ der Kachel werden die Werte ebenfalls abgelegt.</div>
+              </div>
+            </details>
+          </template>
+
           <template x-if="tileDirection(portFor(n)) === 'sdi_to_srt'">
             <div x-show="targetsExpanded[n]">
               <details style="margin-top: 0.75rem;">
@@ -2293,6 +2403,30 @@ function overlayFromServer(p) {
   };
 }
 
+// Bauchbinde (Lower Third) am Ausgang: Standardwerte und Normalisierung der Serverwerte
+const LT_KEYS = ['lt_template', 'lt_title', 'lt_main', 'lt_sub', 'lt_color', 'lt_logo', 'lt_anim', 'lt_dur', 'lt_hold', 'lt_scale', 'lt_pos'];
+function ltDefaults() {
+  return { lt_template: 'classic', lt_title: '', lt_main: '', lt_sub: '', lt_color: '#E1306C', lt_logo: '', lt_anim: 'slide-left', lt_dur: 700, lt_hold: 0, lt_scale: 60, lt_pos: 'bottom-left' };
+}
+function ltFromServer(p) {
+  const d = ltDefaults();
+  const str = (v, def) => (v === null || v === undefined || v === '') ? def : String(v);
+  const num = (v, def) => { const x = Number(v); return (v === null || v === undefined || v === '' || !Number.isFinite(x)) ? def : x; };
+  return {
+    lt_template: str(p.lt_template, d.lt_template),
+    lt_title: str(p.lt_title, ''),
+    lt_main: str(p.lt_main, ''),
+    lt_sub: str(p.lt_sub, ''),
+    lt_color: str(p.lt_color, d.lt_color).toUpperCase(),
+    lt_logo: str(p.lt_logo, ''),
+    lt_anim: str(p.lt_anim, d.lt_anim),
+    lt_dur: num(p.lt_dur, d.lt_dur),
+    lt_hold: num(p.lt_hold, d.lt_hold),
+    lt_scale: num(p.lt_scale, d.lt_scale),
+    lt_pos: str(p.lt_pos, d.lt_pos)
+  };
+}
+
 function defaultTileForm(deviceNumber) {
   return {
     id: null,
@@ -2327,7 +2461,8 @@ function defaultTileForm(deviceNumber) {
     rtmp_key: '',
     rtmp_key_clear: 0,
     rtmp_deinterlace: 0,
-    ...overlayDefaults()
+    ...overlayDefaults(),
+    ...ltDefaults()
   };
 }
 
@@ -2402,6 +2537,32 @@ function app() {
       { value: 'bottom-right', label: 'unten rechts', arrow: '↘' }
     ],
     overlaySizes: [2, 3, 4, 5, 6, 8, 10, 12, 16, 20],
+    // Bauchbinde
+    ltOpen: { 0: false, 1: false, 2: false, 3: false },
+    ltMsg: { 0: '', 1: '', 2: '', 3: '' },
+    ltBusy: { 0: false, 1: false, 2: false, 3: false },
+    ltState: { 0: '', 1: '', 2: '', 3: '' },
+    ltLogoMsg: { 0: '', 1: '', 2: '', 3: '' },
+    ltPrev: { 0: null, 1: null, 2: null, 3: null },
+    ltTemplates: null,
+    ltTemplatesLoading: false,
+    ltDurs: [300, 500, 700, 1000, 1500, 2000],
+    ltScales: [30, 40, 50, 60, 70, 80, 100],
+    ltAnims: [
+      { value: 'slide-left', label: 'Einflug von links' },
+      { value: 'slide-right', label: 'Einflug von rechts' },
+      { value: 'slide-up', label: 'Einflug von unten' },
+      { value: 'slide-down', label: 'Einflug von oben' },
+      { value: 'fade', label: 'Blende' }
+    ],
+    ltPositions: [
+      { value: 'bottom-left', label: 'unten links' },
+      { value: 'bottom-center', label: 'unten mitte' },
+      { value: 'bottom-right', label: 'unten rechts' },
+      { value: 'top-left', label: 'oben links' },
+      { value: 'top-center', label: 'oben mitte' },
+      { value: 'top-right', label: 'oben rechts' }
+    ],
     savingTile: { 0: false, 1: false, 2: false, 3: false },
     presets: [],
     presetSelected: { 0: '', 1: '', 2: '', 3: '' },
@@ -2482,6 +2643,8 @@ function app() {
             const hasRunning = (this.targets[p.id] || []).some(t => t.status === 'running');
             if (hasRunning) await this.loadTargets(p.id);
           }
+          // Bauchbinde: Zustand nur bei laufendem Ausgang und aufgeklapptem Block abfragen
+          if (this.ltOpen[n] && p.status === 'running' && p.pipeline_direction === 'srt_to_sdi') this.ltRefreshState(n);
         }
       } catch (e) {
         this.errorMsg = 'Fehler beim Laden: ' + e.message;
@@ -3010,7 +3173,8 @@ function app() {
           rtmp_key: (p.output_protocol === 'rtmp_in' && p.pipeline_direction === 'srt_to_sdi') ? (p.rtmp_key || '') : '',
           rtmp_key_clear: 0,
           rtmp_deinterlace: p.rtmp_deinterlace ? 1 : 0,
-          ...overlayFromServer(p)
+          ...overlayFromServer(p),
+          ...ltFromServer(p)
         };
         this.tileSavedForms[n] = JSON.stringify(this.tileForms[n]);
       }
@@ -3089,6 +3253,187 @@ function app() {
         this.errorMsg = 'Fehler bei der Einblendung (Anschluss ' + (n + 1) + '): ' + e.message;
       } finally {
         this.overlayBusy[n] = false;
+      }
+    },
+
+    // --- Bauchbinde (Lower Third) am Ausgang ---
+    ltLen(v) {
+      return Array.from(String(v || '')).length;
+    },
+
+    // Standardliste plus ein gespeicherter Wert ausserhalb davon (bleibt sichtbar/auswaehlbar)
+    ltList(base, cur) {
+      const c = Number(cur);
+      const list = base.slice();
+      if (cur !== '' && cur !== null && cur !== undefined && Number.isFinite(c) && !list.includes(c)) { list.push(c); list.sort((a, b) => a - b); }
+      return list;
+    },
+
+    ltTemplateList(cur) {
+      const list = (this.ltTemplates || []).map(t => ({ id: String(t.id), name: String(t.name || t.id) }));
+      if (cur && !list.some(t => t.id === cur)) list.unshift({ id: cur, name: cur });
+      if (!list.length) list.push({ id: 'classic', name: 'classic' });
+      return list;
+    },
+
+    async ltLoadTemplates() {
+      if (this.ltTemplates !== null || this.ltTemplatesLoading) return;
+      this.ltTemplatesLoading = true;
+      try {
+        const res = await fetch('api.php?action=lowerthird_templates');
+        const data = await res.json();
+        if (data && Array.isArray(data.templates)) this.ltTemplates = data.templates;
+      } catch (e) {
+        // nicht kritisch: beim naechsten Aufklappen erneut versuchen
+      } finally {
+        this.ltTemplatesLoading = false;
+      }
+    },
+
+    // Aufklappen: Vorlagen laden (einmal) und Zustand abfragen
+    ltToggle(n, open) {
+      this.ltOpen[n] = !!open;
+      if (open) { this.ltLoadTemplates(); this.ltRefreshState(n); }
+    },
+
+    ltStateText(n) {
+      const p = this.tilePipelineFor(n);
+      if (!p || p.status !== 'running') return 'unbekannt / nicht laufend';
+      const map = { hidden: 'ausgeblendet', in: 'fliegt ein', shown: 'sichtbar', out: 'fliegt aus' };
+      return map[this.ltState[n]] || 'unbekannt / nicht laufend';
+    },
+
+    async ltRefreshState(n) {
+      const p = this.tilePipelineFor(n);
+      if (!p || p.status !== 'running') { this.ltState[n] = 'unknown'; return; }
+      try {
+        const res = await fetch('api.php?action=lowerthird_state&id=' + p.id);
+        const data = await res.json();
+        this.ltState[n] = data && data.state ? String(data.state) : 'unknown';
+      } catch (e) {
+        this.ltState[n] = 'unknown';
+      }
+    },
+
+    // Felder fuers Senden (Texte leer = null)
+    ltPayload(o) {
+      const d = ltDefaults();
+      const txt = (v) => { const s = String(v === null || v === undefined ? '' : v); return s.trim() === '' ? null : s; };
+      const num = (v, def) => { const x = Number(v); return (v === '' || v === null || v === undefined || !Number.isFinite(x)) ? def : x; };
+      return {
+        lt_template: String(o.lt_template || d.lt_template),
+        lt_title: txt(o.lt_title),
+        lt_main: txt(o.lt_main),
+        lt_sub: txt(o.lt_sub),
+        lt_color: String(o.lt_color || d.lt_color),
+        lt_logo: o.lt_logo ? String(o.lt_logo) : null,
+        lt_anim: String(o.lt_anim || d.lt_anim),
+        lt_dur: num(o.lt_dur, d.lt_dur),
+        lt_hold: num(o.lt_hold, d.lt_hold),
+        lt_scale: num(o.lt_scale, d.lt_scale),
+        lt_pos: String(o.lt_pos || d.lt_pos)
+      };
+    },
+
+    ltMsgColor(n) {
+      const m = this.ltMsg[n];
+      return !m ? '#6b7280' : m.kind === 'err' ? '#f87171' : m.kind === 'warn' ? '#d9a400' : '#4ade80';
+    },
+
+    // act: 'apply' | 'show' | 'hide'
+    async ltLive(n, act) {
+      const tf = this.tileForms[n];
+      if (!tf || !tf.id || this.ltBusy[n]) return;
+      const vals = this.ltPayload(tf);
+      const body = act === 'hide' ? { id: tf.id, action: 'hide' } : Object.assign({ id: tf.id, action: act }, vals);
+      this.ltBusy[n] = true;
+      this.ltMsg[n] = '';
+      this.errorMsg = '';
+      try {
+        const res = await fetch('api.php?action=lowerthird_live', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (act !== 'hide') {
+          // Nur die Bauchbinden-Felder im Snapshot angleichen, die uebrigen Aenderungen bleiben "ungespeichert"
+          try {
+            const snap = JSON.parse(this.tileSavedForms[n]);
+            for (const k of LT_KEYS) snap[k] = tf[k];
+            this.tileSavedForms[n] = JSON.stringify(snap);
+          } catch (e) { /* kein Snapshot: nichts anzugleichen */ }
+          const p = this.tilePipelineFor(n);
+          if (p) Object.assign(p, vals);
+        }
+        if (data.state) this.ltState[n] = String(data.state);
+        const verb = act === 'show' ? 'Eingeblendet' : act === 'hide' ? 'Ausgeblendet' : 'Übernommen';
+        if (data.live) {
+          this.ltMsg[n] = { kind: 'ok', text: verb };
+        } else if (data.running) {
+          this.ltMsg[n] = { kind: 'warn', text: 'Gespeichert. Der Anschluss läuft ohne Bauchbinde: gilt ab dem nächsten Start (zum Live-Schalten den Anschluss mit eingetragenen Texten starten)' };
+          if (act === 'hide') this.ltMsg[n].text = 'Der Anschluss läuft ohne Bauchbinde: es gibt nichts auszublenden';
+        } else if (act === 'hide') {
+          this.ltMsg[n] = { kind: 'ok', text: 'Der Anschluss läuft nicht: es gibt nichts auszublenden' };
+        } else {
+          this.ltMsg[n] = { kind: 'ok', text: 'Gespeichert, gilt ab dem nächsten Start' + (act === 'show' ? '. Die Bauchbinde erscheint erst, wenn der Anschluss läuft' : '') };
+        }
+        if (data.running) this.ltRefreshState(n);
+      } catch (e) {
+        this.ltMsg[n] = { kind: 'err', text: 'Fehler: ' + e.message };
+      } finally {
+        this.ltBusy[n] = false;
+      }
+    },
+
+    async ltPreview(n) {
+      const prev = this.ltPrev[n];
+      if (prev && prev.busy) return;
+      if (prev && prev.url) { try { URL.revokeObjectURL(prev.url); } catch (e) {} }
+      this.ltPrev[n] = { url: '', err: '', busy: true };
+      try {
+        const res = await fetch('api.php?action=lowerthird_preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.ltPayload(this.tileForms[n]))
+        });
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (res.ok && ct.indexOf('image/png') === 0) {
+          this.ltPrev[n] = { url: URL.createObjectURL(await res.blob()), err: '', busy: false };
+          return;
+        }
+        let msg = 'Vorschau nicht möglich (HTTP ' + res.status + ')';
+        try {
+          const txt = await res.text();
+          try { const j = JSON.parse(txt); if (j && j.error) msg = String(j.error); } catch (e) { if (txt.trim()) msg = txt.trim().slice(0, 300); }
+        } catch (e) { /* Standardtext */ }
+        this.ltPrev[n] = { url: '', err: msg, busy: false };
+      } catch (e) {
+        this.ltPrev[n] = { url: '', err: 'Fehler: ' + e.message, busy: false };
+      }
+    },
+
+    async ltLogoUpload(n, ev) {
+      const input = ev.target;
+      const file = input.files && input.files[0];
+      if (!file) return;
+      this.ltLogoMsg[n] = '';
+      try {
+        if (file.size > 2 * 1024 * 1024) throw new Error('Logo ist größer als 2 MB');
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch('api.php?action=lowerthird_logo_upload', { method: 'POST', body: fd });
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* keine JSON-Antwort */ }
+        if (!data) throw new Error('Unerwartete Antwort vom Server (HTTP ' + res.status + ')');
+        if (data.error) throw new Error(data.error);
+        if (!data.name) throw new Error('Kein Dateiname vom Server erhalten');
+        this.tileForms[n].lt_logo = String(data.name);
+      } catch (e) {
+        this.ltLogoMsg[n] = e.message;
+      } finally {
+        input.value = '';
       }
     },
 
@@ -3199,6 +3544,7 @@ function app() {
       if (receiver && o.output_protocol === 'rtmp_in') o.rtmp_url = '';
       const od = overlayDefaults();
       for (const k of OVERLAY_KEYS) if (!(k in o)) o[k] = od[k];
+      if (receiver) { const ld = ltDefaults(); for (const k of LT_KEYS) if (!(k in o)) o[k] = ld[k]; }
       this.rtmpForceLimits(o, receiver);
       return o;
     },
@@ -3504,7 +3850,8 @@ function app() {
         output_protocol: tf.output_protocol === 'rtmp' ? 'rtmp' : (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in' ? 'rtmp_in' : 'srt'),
         rtmp_url: (direction === 'srt_to_sdi' && tf.output_protocol === 'rtmp_in') ? '' : tf.rtmp_url,
         rtmp_deinterlace: direction === 'sdi_to_srt' ? tf.rtmp_deinterlace : 0,
-        ...this.overlayPayload(tf)
+        ...this.overlayPayload(tf),
+        ...(direction === 'srt_to_sdi' ? this.ltPayload(tf) : {})
       };
       // Stream-Key nur mitsenden, wenn RTMP gewählt ist; leer = der Server behält den gespeicherten Key
       // (Empfänger: Key optional, nur bei RTMP und nur wenn etwas eingetippt ist; SRT-Empfänger senden keine Key-Felder)

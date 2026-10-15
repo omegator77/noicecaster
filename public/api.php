@@ -38,6 +38,74 @@ try {
             echo json_encode($manager->setOverlayLive((int)($data['id'] ?? 0), is_array($data) ? $data : []));
             break;
 
+        case 'lowerthird_templates':
+            echo json_encode(['templates' => LowerThird::templates(), 'positions' => LowerThird::POSITIONS, 'anims' => LowerThird::ANIMS]);
+            break;
+
+        case 'lowerthird_live':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            $data = is_array($data) ? $data : [];
+            echo json_encode($manager->lowerThirdLive((int)($data['id'] ?? 0), $data, (string)($data['action'] ?? 'apply')));
+            break;
+
+        case 'lowerthird_state':
+            $stats = json_decode((string)@file_get_contents(PipelineManager::receiverStatsPath((int)($_GET['id'] ?? 0))), true);
+            $fresh = is_array($stats) && (microtime(true) - (float)($stats['time'] ?? 0)) < 6;
+            echo json_encode(['state' => $fresh ? (string)($stats['lowerthird']['state'] ?? 'unknown') : 'unknown']);
+            break;
+
+        case 'lowerthird_logo_upload':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $file = $_FILES['file'] ?? null;
+            if (!$file || ($file['error'] ?? 1) !== UPLOAD_ERR_OK) {
+                throw new RuntimeException('Datei nicht empfangen');
+            }
+            echo json_encode(['name' => LowerThird::storeLogo((string)$file['tmp_name'], (int)$file['size'])]);
+            break;
+
+        case 'lowerthird_preview':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            $cfg = LowerThird::sanitize(is_array($data) ? $data : []);
+            if (!LowerThird::configured($cfg)) {
+                throw new RuntimeException('Fuer die Vorschau fehlen Texte oder ein Logo');
+            }
+            $tmp = LowerThird::dataDir() . '/preview_' . bin2hex(random_bytes(6)) . '.png';
+            try {
+                LowerThird::render($cfg, 1920, $tmp);
+                header('Content-Type: image/png');
+                header('Cache-Control: no-store');
+                readfile($tmp);
+            } finally {
+                @unlink($tmp);
+            }
+            break;
+
+        case 'lowerthird_logo':
+            $name = (string)($_GET['name'] ?? '');
+            if (preg_match('/^[a-f0-9]{16,64}\.(png|jpg)$/', $name) !== 1 || !is_file(LowerThird::logoPath($name))) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Logo nicht gefunden']);
+                break;
+            }
+            header('Content-Type: ' . (str_ends_with($name, '.png') ? 'image/png' : 'image/jpeg'));
+            header('Cache-Control: max-age=3600');
+            readfile(LowerThird::logoPath($name));
+            break;
+
         case 'ingest_status':
             echo json_encode(IngestManager::status($db->pdo()));
             break;

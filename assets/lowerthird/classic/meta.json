@@ -1,0 +1,11 @@
+{
+  "name": "Klassisch (Icon-Block, zwei Bänder)",
+  "width": 1500,
+  "height": 270,
+  "logo": {"x": 38, "y": 48, "w": 190, "h": 140},
+  "boxes": {
+    "title": {"w": 560, "size": 26, "upper": true},
+    "main": {"w": 1020, "size": 48},
+    "sub": {"w": 860, "size": 34}
+  }
+}

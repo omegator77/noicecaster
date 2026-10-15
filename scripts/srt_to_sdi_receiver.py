@@ -20,6 +20,13 @@ Text-Einblendung (--overlay-file): Ein textoverlay sitzt unmittelbar vor dem Dec
 Groesse in % der Bildhoehe, Farbe, Hintergrund, an/aus) stehen in einer JSON-Steuerdatei, die der Empfaenger beim Start und
 danach jede halbe Sekunde liest (Aenderung der Datei = sofort sichtbar, ohne Neustart). Ohne --overlay-file gibt es das
 Element nicht, die Kette ist dann unveraendert.
+
+Bauchbinde (--lt-file): Ein gdkpixbufoverlay (positioning-mode pixels-absolute) legt ein vorgerendertes PNG mit Transparenz
+(Grafik, Hintergrund, Texte, Logo; erzeugt von LowerThird.php) ueber das Bild und animiert Position und Transparenz
+(Einflug von links/rechts/unten/oben oder Blende, mit Verzoegerungsprofil, optional automatisches Ausblenden nach N s).
+Die JSON-Steuerdatei wird jede halbe Sekunde gelesen: ein neues PNG (Aenderung der Datei) wird ohne Animation getauscht,
+ein neuer Befehl (seq erhoeht, cmd show/hide) loest genau einmal die Animation aus. Der Zustand (hidden/in/shown/out) steht
+in der Statistikdatei unter "lowerthird". Ohne --lt-file gibt es das Element nicht.
 """
 import argparse
 import json
@@ -34,7 +41,7 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst  # noqa: E402
 
-state = {"stopping": False, "loop": None, "pipe": None}
+state = {"stopping": False, "loop": None, "pipe": None, "lt_el": None, "lt_state": "hidden", "lt_progress": 0.0, "lt_seq": None}
 
 
 def log(msg: str) -> None:
@@ -100,11 +107,142 @@ def apply_overlay(ovl, a, force=False) -> None:
         log(f"Einblend-Steuerdatei nicht lesbar: {e}")
 
 
+def ease_out(p: float) -> float:
+    return 1.0 - (1.0 - p) ** 3
+
+
+def ease_in(p: float) -> float:
+    return p ** 3
+
+
+def lt_rest(a, cfg) -> tuple:
+    """Endposition (x, y) der Grafik im Bild nach Lage; Rand 4 % der Breite bzw. 5 % der Hoehe."""
+    w, h = int(cfg.get("w", 0)), int(cfg.get("h", 0))
+    mx, my = round(a.frame_width * 0.04), round(a.frame_height * 0.05)
+    pos = str(cfg.get("pos", "bottom-left"))
+    vert, _, horiz = pos.partition("-")
+    x = {"left": mx, "center": (a.frame_width - w) // 2, "right": a.frame_width - w - mx}.get(horiz, mx)
+    y = my if vert == "top" else a.frame_height - h - my
+    return x, y
+
+
+def lt_place(a, cfg, progress: float, direction: str) -> None:
+    """Grafik fuer den Animationsfortschritt (0 = ausgeblendet, 1 = voll da) setzen."""
+    ltg = state["lt_el"]
+    if ltg is None:
+        return
+    w, h = int(cfg.get("w", 0)), int(cfg.get("h", 0))
+    x, y = lt_rest(a, cfg)
+    anim = str(cfg.get("anim", "slide-left"))
+    e = ease_out(progress) if direction == "in" else 1.0 - ease_in(1.0 - progress)
+    alpha = 1.0
+    if anim == "fade":
+        alpha = e
+    elif anim == "slide-left":
+        x = round(-w + (x + w) * e)
+    elif anim == "slide-right":
+        x = round(a.frame_width + (x - a.frame_width) * e)
+    elif anim == "slide-up":
+        y = round(a.frame_height + (y - a.frame_height) * e)
+    elif anim == "slide-down":
+        y = round(-h + (y + h) * e)
+    if progress <= 0.0:
+        alpha = 0.0
+    ltg.set_property("offset-x", x)
+    ltg.set_property("offset-y", y)
+    ltg.set_property("alpha", max(0.0, min(1.0, alpha)))
+
+
+def lt_stop_anim() -> None:
+    if state.get("lt_anim_id"):
+        GLib.source_remove(state["lt_anim_id"])
+        state["lt_anim_id"] = 0
+    if state.get("lt_hold_id"):
+        GLib.source_remove(state["lt_hold_id"])
+        state["lt_hold_id"] = 0
+
+
+def lt_animate(a, direction: str) -> None:
+    """Ein- oder Ausflug starten (aus der aktuellen Lage heraus, ein laufender Flug wird abgeloest)."""
+    cfg = state.get("lt_cfg") or {}
+    if not cfg.get("png"):
+        return
+    lt_stop_anim()
+    dur = max(100, int(cfg.get("dur", 700))) / 1000.0
+    start = time.monotonic()
+    p0 = state.get("lt_progress", 0.0)
+    state["lt_state"] = "in" if direction == "in" else "out"
+    target = 1.0 if direction == "in" else 0.0
+
+    def step() -> bool:
+        t = min(1.0, (time.monotonic() - start) / dur)
+        # von der aktuellen Lage zum Ziel (kein Sprung, wenn ein Flug mittendrin umgedreht wird)
+        prog = p0 + (target - p0) * t
+        state["lt_progress"] = prog
+        lt_place(a, cfg, prog, direction)
+        if t >= 1.0:
+            state["lt_anim_id"] = 0
+            state["lt_state"] = "shown" if direction == "in" else "hidden"
+            if direction == "in":
+                hold = int(cfg.get("hold", 0))
+                if hold > 0:
+                    state["lt_hold_id"] = GLib.timeout_add_seconds(hold, lambda: (state.__setitem__("lt_hold_id", 0), lt_animate(a, "out"), False)[2])
+            return False
+        return True
+
+    state["lt_anim_id"] = GLib.timeout_add(20, step)
+
+
+def apply_lowerthird(a, force=False) -> None:
+    """Steuerdatei lesen: neues PNG laden, neue Befehle ausfuehren."""
+    ltg = state.get("lt_el")
+    if ltg is None or not a.lt_file:
+        return
+    try:
+        st = os.stat(a.lt_file)
+    except OSError:
+        return
+    stamp = (st.st_mtime_ns, st.st_size)
+    if not force and state.get("lt_stamp") == stamp:
+        return
+    try:
+        with open(a.lt_file, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError) as e:
+        state["lt_stamp"] = stamp
+        log(f"Bauchbinden-Steuerdatei nicht lesbar: {e}")
+        return
+    state["lt_stamp"] = stamp
+    png = str(cfg.get("png") or "")
+    path = png.split("?", 1)[0]
+    if path and png != state.get("lt_png"):
+        try:
+            ltg.set_property("location", path)
+            state["lt_png"] = png
+            log(f"Bauchbinde: Grafik geladen ({cfg.get('w')}x{cfg.get('h')}, {cfg.get('anim')}, {cfg.get('pos')})")
+        except Exception as e:  # noqa: BLE001
+            log(f"Bauchbinden-Grafik nicht ladbar: {e}")
+    state["lt_cfg"] = cfg
+    if state["lt_state"] in ("shown", "in"):
+        lt_place(a, cfg, state.get("lt_progress", 1.0) if state["lt_state"] == "in" else 1.0, "in")  # neue Lage/Groesse sofort
+    seq = int(cfg.get("seq", 0))
+    if state.get("lt_seq") is None:
+        state["lt_seq"] = seq  # beim Start/Neuaufbau keinen alten Befehl wiederholen
+        return
+    if seq != state["lt_seq"]:
+        state["lt_seq"] = seq
+        cmd = str(cfg.get("cmd", "none"))
+        if cmd == "show":
+            lt_animate(a, "in")
+        elif cmd == "hide":
+            lt_animate(a, "out")
+
+
 def build(a):
     # --null-sinks: fakesink statt DeckLink-Ausgabe, nur zum Entwickeln und Testen ohne Karte
     if a.null_sinks and a.snapshot_dir:
         # Test: statt fakesink jede Sekunde ein JPEG des Ausgangsbilds (Einblendung sichtbar machen)
-        vsink_null = ("videorate drop-only=true ! video/x-raw,framerate=1/1 ! videoconvert ! jpegenc ! "
+        vsink_null = (f"videorate drop-only=true ! video/x-raw,framerate={a.snapshot_fps}/1 ! videoconvert ! jpegenc ! "
                       f"multifilesink name=vsink location={a.snapshot_dir}/f_%05d.jpg sync=true")
     else:
         vsink_null = "fakesink name=vsink sync=true"
@@ -125,9 +263,11 @@ def build(a):
     # textoverlay vor dem Ausgang (auto-resize aus: die Schriftgroesse in Pixeln wird aus % der Bildhoehe berechnet);
     # silent=true schaltet es durchlaessig, bis die Steuerdatei etwas anderes sagt
     ovl = "textoverlay name=ovl auto-resize=false silent=true ! " if a.overlay_file else ""
+    # Bauchbinde: unsichtbar (alpha 0, ausserhalb des Bildes), bis ein show-Befehl kommt
+    ltg = "gdkpixbufoverlay name=ltg positioning-mode=pixels-absolute alpha=0.0 offset-x=-100000 offset-y=0 ! " if a.lt_file else ""
     video = (
         "queue name=vq ! decodebin name=vdec  "
-        f"input-selector name=vsel ! {ovl}{vsink}  "
+        f"input-selector name=vsel ! {ltg}{ovl}{vsink}  "
         "videoconvert name=thA ! videoscale ! videorate name=tlastA ! vsel.  "
     )
     if rates:
@@ -205,6 +345,12 @@ def build(a):
 
     if a.overlay_file:
         apply_overlay(pipe.get_by_name("ovl"), a, force=True)
+    state["lt_el"] = pipe.get_by_name("ltg") if a.lt_file else None
+    if a.lt_file:
+        # Neuaufbau der Pipeline: Grafik zurueck in den Ruhezustand (ausgeblendet), Befehlszaehler bleibt
+        lt_stop_anim()
+        state["lt_state"], state["lt_progress"], state["lt_png"], state["lt_stamp"] = "hidden", 0.0, None, None
+        apply_lowerthird(a, force=True)
 
     demux = pipe.get_by_name("demux")
     targets = {"video": pipe.get_by_name("vq"), "audio": pipe.get_by_name("aq")}
@@ -413,6 +559,8 @@ def write_stats(a) -> bool:
     if pipe is None or not a.stats_file:
         return True
     data = {"time": time.time(), "srt": {}, "queues": {}, "sinks": {}}
+    if a.lt_file:
+        data["lowerthird"] = {"state": state.get("lt_state", "hidden")}
     if a.rtmp_uri:
         data["protocol"] = "rtmp"
     try:
@@ -448,7 +596,10 @@ def write_stats(a) -> bool:
 def poll_overlay(a) -> bool:
     pipe = state.get("pipe")
     if pipe is not None:
-        apply_overlay(pipe.get_by_name("ovl"), a)
+        if a.overlay_file:
+            apply_overlay(pipe.get_by_name("ovl"), a)
+        if a.lt_file:
+            apply_lowerthird(a)
     return True
 
 
@@ -457,7 +608,7 @@ def run_once(a) -> int:
     pipe = build(a)
     state["pipe"] = pipe
     stats_timer = GLib.timeout_add_seconds(1, write_stats, a)
-    overlay_timer = GLib.timeout_add(500, poll_overlay, a) if a.overlay_file else 0
+    overlay_timer = GLib.timeout_add(500, poll_overlay, a) if (a.overlay_file or a.lt_file) else 0
     loop = GLib.MainLoop()
     state["loop"] = loop
     code = {"value": 0}
@@ -488,6 +639,8 @@ def run_once(a) -> int:
         GLib.source_remove(stats_timer)
         if overlay_timer:
             GLib.source_remove(overlay_timer)
+        lt_stop_anim()
+        state["lt_el"] = None
         state["pipe"] = None
         pipe.set_state(Gst.State.NULL)  # schliesst die SRT-Verbindung sauber, gibt die Karte frei
         bus.remove_signal_watch()
@@ -519,8 +672,12 @@ def main() -> int:
     ap.add_argument("--streamid")
     ap.add_argument("--stats-file", help="JSON-Datei fuer SRT-Zahlen und Ausgabe-Zaehler (jede Sekunde neu)")
     ap.add_argument("--tap-port", type=int, default=0, help="UDP-Port auf 127.0.0.1 fuer den Stromabgriff (Statistik)")
+    ap.add_argument("--lt-file", help="JSON-Steuerdatei der Bauchbinde (wird laufend gelesen)")
+    ap.add_argument("--frame-width", type=int, default=1920, help="Bildbreite des Ausgangs (Lage der Bauchbinde)")
+    ap.add_argument("--frame-height", type=int, default=1080, help="Bildhoehe des Ausgangs (Lage der Bauchbinde)")
     ap.add_argument("--overlay-file", help="JSON-Steuerdatei der Text-Einblendung (wird laufend gelesen)")
     ap.add_argument("--overlay-height", type=int, default=1080, help="Bildhoehe des Ausgangs fuer die Schriftgroesse")
+    ap.add_argument("--snapshot-fps", type=int, default=1, help="Bilder pro Sekunde fuer --snapshot-dir (Tests)")
     ap.add_argument("--snapshot-dir", help="nur mit --null-sinks: jede Sekunde ein JPEG des Ausgangsbilds dorthin (Tests)")
     ap.add_argument("--null-sinks", action="store_true", help="fakesink statt DeckLink (nur Tests ohne Karte)")
     ap.add_argument("--audio-levels", action="store_true", help="Pegel je Ausgangskanal jede Sekunde ins Log (Tests)")

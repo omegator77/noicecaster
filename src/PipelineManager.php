@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/TestSignal.php';
 require_once __DIR__ . '/IngestManager.php';
+require_once __DIR__ . '/LowerThird.php';
 
 class PipelineManager
 {
@@ -189,6 +190,7 @@ class PipelineManager
         $this->validateSettings($data);
         $data = $this->applyRtmpLimits($data);
         $ov = $this->sanitizeOverlay($data);
+        $lt = LowerThird::sanitize($data);
         $out = $this->sanitizeOutput($data);
         $decklink = $this->sanitizeDecklink($data);
         $direction = $this->sanitizeDirection($data);
@@ -203,8 +205,8 @@ class PipelineManager
         $srtSecurity = $this->sanitizeSrtSecurity($data);
         $this->validatePortUsage($data, $decklink, $direction);
         $stmt = $this->db->prepare("
-            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace, overlay_enabled, overlay_text, overlay_pos, overlay_size, overlay_color, overlay_bg)
-            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace, :overlay_enabled, :overlay_text, :overlay_pos, :overlay_size, :overlay_color, :overlay_bg)
+            INSERT INTO pipelines (name, source_type, source_pattern, width, height, framerate, bitrate, srt_port, srt_latency, srt_mode, srt_target_host, source_file, decklink_device_number, decklink_connection, decklink_profile, decklink_audio_channels, pipeline_direction, audio_codec, audio_output_channels, audio_track_mode, ts_video_pid, ts_audio_pid, ts_pmt_pid, ts_program, video_chroma, video_bitdepth, video_framing, video_framerate, video_scenecut, video_open_gop, audio_bitrate, video_codec, video_rate_control, video_keyframe_interval, video_scale_enabled, srt_passphrase, srt_pbkeylen, srt_streamid, clock_overlay_enabled, audio_test_wave, preview_enabled, test_pattern_enabled, target_name, video_speed_preset, output_protocol, rtmp_url, rtmp_key, rtmp_deinterlace, overlay_enabled, overlay_text, overlay_pos, overlay_size, overlay_color, overlay_bg, lt_template, lt_title, lt_main, lt_sub, lt_color, lt_logo, lt_anim, lt_dur, lt_hold, lt_scale, lt_pos)
+            VALUES (:name, :source_type, :source_pattern, :width, :height, :framerate, :bitrate, :srt_port, :srt_latency, :srt_mode, :srt_target_host, :source_file, :decklink_device_number, :decklink_connection, :decklink_profile, :decklink_audio_channels, :pipeline_direction, :audio_codec, :audio_output_channels, :audio_track_mode, :ts_video_pid, :ts_audio_pid, :ts_pmt_pid, :ts_program, :video_chroma, :video_bitdepth, :video_framing, :video_framerate, :video_scenecut, :video_open_gop, :audio_bitrate, :video_codec, :video_rate_control, :video_keyframe_interval, :video_scale_enabled, :srt_passphrase, :srt_pbkeylen, :srt_streamid, :clock_overlay_enabled, :audio_test_wave, :preview_enabled, :test_pattern_enabled, :target_name, :video_speed_preset, :output_protocol, :rtmp_url, :rtmp_key, :rtmp_deinterlace, :overlay_enabled, :overlay_text, :overlay_pos, :overlay_size, :overlay_color, :overlay_bg, :lt_template, :lt_title, :lt_main, :lt_sub, :lt_color, :lt_logo, :lt_anim, :lt_dur, :lt_hold, :lt_scale, :lt_pos)
         ");
         $stmt->execute([
             ':name' => $data['name'],
@@ -261,6 +263,17 @@ class PipelineManager
             ':overlay_size' => $ov['size'],
             ':overlay_color' => $ov['color'],
             ':overlay_bg' => $ov['bg'],
+            ':lt_template' => $lt['lt_template'],
+            ':lt_title' => $lt['lt_title'],
+            ':lt_main' => $lt['lt_main'],
+            ':lt_sub' => $lt['lt_sub'],
+            ':lt_color' => $lt['lt_color'],
+            ':lt_logo' => $lt['lt_logo'],
+            ':lt_anim' => $lt['lt_anim'],
+            ':lt_dur' => $lt['lt_dur'],
+            ':lt_hold' => $lt['lt_hold'],
+            ':lt_scale' => $lt['lt_scale'],
+            ':lt_pos' => $lt['lt_pos'],
         ]);
         return (int)$this->db->lastInsertId();
     }
@@ -852,6 +865,120 @@ class PipelineManager
             }
         }
         return ['live' => $live, 'running' => $running];
+    }
+
+    // --- Bauchbinde (Lower Third) am SDI-Ausgang: Grafik mit Hintergrund, die ein-/ausfliegt (siehe LowerThird.php) ---
+
+    public static function lowerThirdPath(int $id): string
+    {
+        return __DIR__ . "/../data/lowerthird_{$id}.json";
+    }
+
+    public static function lowerThirdPng(int $id): string
+    {
+        return LowerThird::dataDir() . "/lt_{$id}.png";
+    }
+
+    /** Ausgangsmodus des Anschlusses (fuer Bildgroesse der Bauchbinde). */
+    private function ltOutputMode(array $p): string
+    {
+        $mode = $this->ports->getMode((int)($p['decklink_device_number'] ?? 0));
+        return $mode === 'auto' ? DecklinkPortManager::DEFAULT_OUTPUT_MODE : $mode;
+    }
+
+    /**
+     * Grafik rendern und die Steuerdatei fuer den Empfaenger schreiben. $cmd: 'none' (nur Werte), 'show' oder 'hide'
+     * (erhoeht die Laufnummer seq, der Empfaenger fuehrt jeden neuen Befehl genau einmal aus).
+     * @return array{seq: int, cmd: string}
+     */
+    private function writeLowerThirdFile(array $p, string $cmd = 'none'): array
+    {
+        $id = (int)$p['id'];
+        $path = self::lowerThirdPath($id);
+        $old = json_decode((string)@file_get_contents($path), true);
+        $seq = is_array($old) ? (int)($old['seq'] ?? 0) : 0;
+        $data = ['png' => null, 'w' => 0, 'h' => 0, 'pos' => 'bottom-left', 'anim' => 'slide-left', 'dur' => 700, 'hold' => 0, 'seq' => $seq, 'cmd' => 'none'];
+        $cfg = LowerThird::sanitize($p);
+        if (LowerThird::configured($cfg)) {
+            $mode = $this->ltOutputMode($p);
+            $frameW = (int)(self::HD_MODE_CAPS[$mode]['width'] ?? 1920);
+            $r = LowerThird::render($cfg, $frameW, self::lowerThirdPng($id));
+            $data['png'] = $r['png'] . '?' . filemtime($r['png']);
+            $data['w'] = $r['w'];
+            $data['h'] = $r['h'];
+            $data['pos'] = $cfg['lt_pos'];
+            $data['anim'] = $cfg['lt_anim'];
+            $data['dur'] = $cfg['lt_dur'];
+            $data['hold'] = $cfg['lt_hold'];
+        }
+        if ($cmd === 'show' || $cmd === 'hide') {
+            $data['seq'] = $seq + 1;
+            $data['cmd'] = $cmd;
+        }
+        $tmp = $path . '.tmp';
+        if (@file_put_contents($tmp, json_encode($data, JSON_UNESCAPED_SLASHES)) === false || !@rename($tmp, $path)) {
+            throw new RuntimeException('Bauchbinden-Steuerdatei nicht schreibbar');
+        }
+        return ['seq' => $data['seq'], 'cmd' => $data['cmd']];
+    }
+
+    /** Argumente fuer den Empfaenger: nur wenn eine Bauchbinde eingerichtet ist (sonst bleibt der Befehl wie bisher). */
+    private function receiverLowerThirdArgs(array $p, string $outputMode): string
+    {
+        if (!LowerThird::configured(LowerThird::sanitize($p))) {
+            return '';
+        }
+        return ' --lt-file ' . escapeshellarg(self::lowerThirdPath((int)$p['id'])) .
+            ' --frame-width ' . (int)(self::HD_MODE_CAPS[$outputMode]['width'] ?? 1920) .
+            ' --frame-height ' . $this->modeFrameHeight($outputMode);
+    }
+
+    /**
+     * Bauchbinde eines Empfaengers bedienen. $action: 'apply' (Werte speichern, Grafik neu rendern), 'show', 'hide', 'toggle'.
+     * Bei 'show'/'apply' koennen lt_*-Felder mitgegeben werden (werden gespeichert). "live" ist nur wahr, wenn der laufende
+     * Empfaenger mit Bauchbinde gestartet wurde (--lt-file); sonst gelten die gespeicherten Werte ab dem naechsten Start.
+     * @return array{live: bool, running: bool, seq: int, state: string}
+     */
+    public function lowerThirdLive(int $id, array $data, string $action): array
+    {
+        $p = $this->getPipelineOrFail($id);
+        if (!$this->isReceiverRow($p)) {
+            throw new RuntimeException('Bauchbinden gibt es nur bei Ausgangs-Anschluessen');
+        }
+        if (!in_array($action, ['apply', 'show', 'hide', 'toggle'], true)) {
+            throw new RuntimeException('Unbekannte Aktion');
+        }
+        // Mitgegebene lt_*-Felder ueberschreiben die gespeicherten (fehlende bleiben, sonst wuerden 'show'/'hide' ohne Felder alles auf
+        // Standard setzen); gespeichert wird bei 'apply' und bei 'show' mit Feldern
+        $given = array_intersect_key($data, array_flip(array_filter(array_keys(LowerThird::sanitize([])), fn($k) => true)));
+        $lt = LowerThird::sanitize(array_merge($p, $given));
+        if ($action === 'show' && !LowerThird::configured($lt)) {
+            throw new RuntimeException('Fuer die Bauchbinde fehlen Texte oder ein Logo');
+        }
+        if ($action === 'apply' || ($action === 'show' && $given)) {
+            $set = [];
+            $params = [':id' => $id];
+            foreach ($lt as $k => $v) {
+                $set[] = "{$k} = :{$k}";
+                $params[':' . $k] = $v;
+            }
+            $this->db->prepare('UPDATE pipelines SET ' . implode(', ', $set) . ' WHERE id = :id')->execute($params);
+            $p = $this->getPipelineOrFail($id);
+        }
+        $running = $p['status'] === 'running' && $this->isProcRunning($p['pid'] !== null ? (int)$p['pid'] : null);
+        $live = $running && str_contains((string)@file_get_contents('/proc/' . (int)$p['pid'] . '/cmdline'), '--lt-file');
+        $seq = 0;
+        $state = 'unbekannt';
+        if ($live) {
+            $stats = json_decode((string)@file_get_contents(self::receiverStatsPath($id)), true);
+            $state = (string)($stats['lowerthird']['state'] ?? 'hidden');
+            if ($action === 'toggle') {
+                $action = ($state === 'hidden' || $state === 'out') ? 'show' : 'hide';
+            }
+            $res = $this->writeLowerThirdFile($p, in_array($action, ['show', 'hide'], true) ? $action : 'none');
+            $seq = $res['seq'];
+        }
+        return ['live' => $live, 'running' => $running, 'seq' => $seq, 'state' => $state];
     }
 
     private function sanitizeSrtSecurity(array $data): array
@@ -1678,6 +1805,11 @@ class PipelineManager
             $this->writeOverlayFile($p);
         }
 
+        // Bauchbinde: Grafik rendern, Steuerdatei schreiben (beim Start immer ausgeblendet)
+        if ($this->isReceiverRow($p) && (int)($p['test_pattern_enabled'] ?? 0) !== 1 && LowerThird::configured(LowerThird::sanitize($p))) {
+            $this->writeLowerThirdFile($p, 'none');
+        }
+
         // RTMP-Annahme: der Hilfsserver muss laufen (und den Pfad dieses Empfaengers kennen), bevor der Empfaenger abholt
         if ($this->isRtmpIn($p) && (int)($p['test_pattern_enabled'] ?? 0) !== 1) {
             IngestManager::sync($this->db, [(string)$p['rtmp_key']]);
@@ -1955,7 +2087,8 @@ class PipelineManager
             ' --audio-used ' . max(2, (int)$decklink['audio_channels']) .
             ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id'])) .
             ' --tap-port ' . self::tapPort('receiver', (int)$p['id']) .
-            $this->receiverOverlayArgs($p, $outputMode);
+            $this->receiverOverlayArgs($p, $outputMode) .
+            $this->receiverLowerThirdArgs($p, $outputMode);
         if ($srtSecurity['passphrase'] !== null) {
             $args .= ' --passphrase ' . escapeshellarg($srtSecurity['passphrase']) . ' --pbkeylen ' . (int)$srtSecurity['pbkeylen'];
         }
@@ -1995,7 +2128,8 @@ class PipelineManager
             ' --audio-channels ' . $this->deviceAudioChannels((int)$decklink['audio_channels']) .
             ' --audio-used ' . max(2, (int)$decklink['audio_channels']) .
             ' --stats-file ' . escapeshellarg(self::receiverStatsPath((int)$p['id'])) .
-            $this->receiverOverlayArgs($p, $outputMode);
+            $this->receiverOverlayArgs($p, $outputMode) .
+            $this->receiverLowerThirdArgs($p, $outputMode);
         return "env GST_DEBUG=rtmp2src:3 GST_DEBUG_NO_COLOR=1 python3 {$helper}{$args}";
     }
 
@@ -2024,6 +2158,7 @@ class PipelineManager
         $this->validateSettings($data);
         $data = $this->applyRtmpLimits($data);
         $ov = $this->sanitizeOverlay($data);
+        $lt = LowerThird::sanitize($data);
         $out = $this->sanitizeOutput($data, $current['rtmp_key'] ?? null);
         $audio = $this->sanitizeAudio($data);
         $ts = $this->sanitizeTsIds($data, $audio);
@@ -2090,7 +2225,18 @@ class PipelineManager
                 overlay_pos = :overlay_pos,
                 overlay_size = :overlay_size,
                 overlay_color = :overlay_color,
-                overlay_bg = :overlay_bg
+                overlay_bg = :overlay_bg,
+                lt_template = :lt_template,
+                lt_title = :lt_title,
+                lt_main = :lt_main,
+                lt_sub = :lt_sub,
+                lt_color = :lt_color,
+                lt_logo = :lt_logo,
+                lt_anim = :lt_anim,
+                lt_dur = :lt_dur,
+                lt_hold = :lt_hold,
+                lt_scale = :lt_scale,
+                lt_pos = :lt_pos
             WHERE id = :id
         ");
         $stmt->execute([
@@ -2149,6 +2295,17 @@ class PipelineManager
             ':overlay_size' => $ov['size'],
             ':overlay_color' => $ov['color'],
             ':overlay_bg' => $ov['bg'],
+            ':lt_template' => $lt['lt_template'],
+            ':lt_title' => $lt['lt_title'],
+            ':lt_main' => $lt['lt_main'],
+            ':lt_sub' => $lt['lt_sub'],
+            ':lt_color' => $lt['lt_color'],
+            ':lt_logo' => $lt['lt_logo'],
+            ':lt_anim' => $lt['lt_anim'],
+            ':lt_dur' => $lt['lt_dur'],
+            ':lt_hold' => $lt['lt_hold'],
+            ':lt_scale' => $lt['lt_scale'],
+            ':lt_pos' => $lt['lt_pos'],
         ]);
     }
 
