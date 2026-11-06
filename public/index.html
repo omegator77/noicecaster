@@ -944,6 +944,7 @@
     <svg class="chev" :class="{ open: !gfxCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
   </div>
   <div class="card" x-show="!gfxCollapsed">
+    <div style="margin: 0 0 0.75rem;"><a href="zeitnahme.html" target="_blank" class="btn" style="text-decoration: none; display: inline-block;">Zeitnahme öffnen (Traktor-Pulling)</a></div>
     <div class="hint" style="margin: 0 0 0.75rem;">Grafik-Maschine mit CasparCG: Key und Fill (und ein Videoausgang) über die SDI-Anschlüsse, gesteuert von hier. Die Anschlüsse bekommen zuerst unter „SDI-Anschlüsse“ die Rolle „CasparCG“ und sind danach für Pipelines gesperrt.</div>
 
     <template x-if="gfx.loaded && !gfx.status.installed">

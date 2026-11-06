@@ -249,7 +249,7 @@ try {
             break;
 
         case 'zeit_state':
-            echo json_encode((new Zeitnahme($db->pdo()))->zustand(), JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+            echo json_encode((new Zeitnahme($db->pdo()))->zustand() + ['gfx' => ZeitGrafik::status()], JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
             break;
 
         case 'zeit_grafik':

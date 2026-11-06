@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zeitnahme</title>
+<style>
+:root{
+  --akzent:#f47c1c; --akzent-d:#d96a0f; --text:#1b1b1b; --grau:#6b6b6b; --linie:#e2ddd5;
+  --bg:#f4f1ec; --card:#fff; --gruen:#1f9d3a; --rot:#c62828;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:18px/1.35 "Segoe UI",Roboto,Arial,sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+
+header{position:sticky;top:0;z-index:5;background:#161616;color:#fff;display:flex;align-items:center;gap:18px;padding:10px 16px;flex-wrap:wrap}
+.brand{font-size:20px;display:flex;align-items:center;gap:10px}
+.conn{width:12px;height:12px;border-radius:50%;background:#777;display:inline-block}
+.conn.ok{background:#3ddc61}.conn.bad{background:#ff4d4d}
+#tabs{display:flex;gap:6px;flex-wrap:wrap}
+#tabs button{background:#2a2a2a;border:0;color:#ddd;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:600}
+#tabs button i{font-style:normal;display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:#444;margin-right:6px;font-size:14px}
+#tabs button.on{background:var(--akzent);color:#111}
+#tabs button.on i{background:rgba(0,0,0,.25);color:#fff}
+
+main{max-width:1100px;margin:0 auto;padding:18px 16px 80px}
+h2{font-size:24px;margin:0 0 12px}
+h3{font-size:14px;text-transform:uppercase;letter-spacing:2px;color:var(--grau);margin:22px 0 8px}
+.card{background:var(--card);border-radius:14px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.08);margin-bottom:16px}
+.muted{color:var(--grau)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.spacer{flex:1}
+
+button.b{border:0;border-radius:12px;padding:0 20px;min-height:52px;font-weight:700;cursor:pointer;background:#e9e4db}
+button.b:hover{background:#ded8cc}
+button.b.pri{background:var(--akzent);color:#111}
+button.b.pri:hover{background:var(--akzent-d)}
+button.b.gruen{background:var(--gruen);color:#fff}
+button.b.rot{background:#fbe4e4;color:var(--rot)}
+button.b.klein{min-height:40px;padding:0 14px;font-size:16px}
+button.b.gross{min-height:68px;font-size:22px;padding:0 28px}
+button.b:disabled{opacity:.45;cursor:not-allowed}
+
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{border:2px solid var(--linie);background:#fff;border-radius:999px;padding:9px 18px;font-weight:700;cursor:pointer}
+.chip.on{background:#161616;color:#fff;border-color:#161616}
+.chip small{opacity:.7;font-weight:500;margin-left:4px}
+
+table{width:100%;border-collapse:collapse}
+th{font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:var(--grau);text-align:left;padding:8px 8px;border-bottom:2px solid var(--linie)}
+td{padding:11px 8px;border-bottom:1px solid var(--linie);vertical-align:middle}
+td.nr{font-weight:800;width:64px}
+td.r,th.r{text-align:right}
+td.akt{width:1%;white-space:nowrap;text-align:right}
+tr.klick{cursor:pointer}
+tr.klick:hover td{background:#faf7f1}
+tr.jetzt td{background:#fff1e3}
+.mini{border:0;background:#eee;border-radius:8px;min-width:40px;height:40px;cursor:pointer;font-size:17px}
+.mini:hover{background:#ddd}
+
+.badge{display:inline-block;padding:4px 12px;border-radius:999px;font-size:14px;font-weight:700}
+.badge.offen{background:#eee;color:#666}
+.badge.ok{background:#dff3e4;color:#14702a}
+.badge.dq{background:#fbe4e4;color:var(--rot)}
+.badge.na{background:#fff0cc;color:#8a6200}
+.badge.fp{background:var(--gruen);color:#fff}
+
+label{display:block;font-weight:600;margin:12px 0 4px}
+input[type=text],input[type=number],select,textarea{width:100%;border:2px solid var(--linie);border-radius:10px;padding:12px 14px;background:#fff;min-height:50px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--akzent)}
+textarea{min-height:170px;font-family:Consolas,monospace;font-size:16px}
+
+.aktuell{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.aktuell .nr{background:var(--akzent);color:#111;font-size:44px;font-weight:900;min-width:96px;text-align:center;border-radius:12px;padding:8px 14px}
+.aktuell .name{font-size:32px;font-weight:800;line-height:1.1}
+.aktuell .tr{color:var(--grau);font-size:20px}
+.schritte{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px}
+.schritt h3{margin-top:0}
+.gross-zahl{font-size:64px;font-weight:900;font-variant-numeric:tabular-nums;line-height:1}
+.gross-zahl small{font-size:28px;color:var(--grau);margin-left:6px}
+.weite-input{font-size:36px;font-weight:800;text-align:center;min-height:68px}
+.okbox{background:#dff3e4;border:2px solid var(--gruen);color:#14702a;padding:14px 18px;border-radius:12px;font-weight:700;margin-bottom:12px;font-size:20px}
+.hinweis{background:#fff4d6;border:2px solid #f0c040;padding:14px 18px;border-radius:12px;margin-bottom:14px}
+.leer{text-align:center;padding:40px 10px;color:var(--grau)}
+.leer b{display:block;font-size:22px;color:var(--text);margin-bottom:6px}
+.platz{font-weight:900;font-size:22px;width:58px}
+.fpmark{color:var(--gruen);font-weight:800}
+.links a{display:inline-block;margin:0 8px 8px 0}
+a.b{display:inline-flex;align-items:center;text-decoration:none;color:inherit}
+.url{font-family:Consolas,monospace;background:#f1ede5;padding:4px 8px;border-radius:6px;word-break:break-all}
+
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 12px;overflow:auto;z-index:20}
+#modal[hidden]{display:none}
+#modal .box{background:#fff;border-radius:16px;padding:22px;width:100%;max-width:560px}
+#modal h2{margin-bottom:4px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#161616;color:#fff;padding:14px 22px;border-radius:12px;z-index:30;max-width:92vw;font-weight:600}
+#toast.err{background:var(--rot)}
+#toast[hidden]{display:none}
+
+@media (max-width:640px){
+  body{font-size:17px}
+  th.opt,td.opt{display:none}
+  .aktuell .name{font-size:26px}
+  .gross-zahl{font-size:52px}
+}
+
+.schalter{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+button.sw{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:84px;padding:0 20px;border:3px solid var(--linie);background:#fff;border-radius:14px;cursor:pointer;font-size:20px;font-weight:700;text-align:left}
+button.sw b{font-size:15px;letter-spacing:1.5px;padding:6px 12px;border-radius:8px;background:#e9e4db;color:#666}
+button.sw.an{background:#fff1e3;border-color:var(--akzent)}
+button.sw.an b{background:var(--gruen);color:#fff}
+
+a.b{border-radius:12px;padding:0 20px;min-height:52px;font-weight:700;background:#e9e4db}
+a.b:hover{background:#ded8cc}
+a.b.klein{min-height:40px;padding:0 14px;font-size:16px}
+
+#login{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+#login[hidden]{display:none}
+#login .box{background:#fff;border-radius:16px;padding:26px;max-width:420px}
+header a.zurueck{color:#bbb;text-decoration:none;font-size:15px}
+header a.zurueck:hover{color:#fff}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><a class="zurueck" href="index.html" title="Zurück zum Gateway">‹ Gateway</a><b id="evName">Zeitnahme</b><span id="conn" class="conn" title="Verbindung zum Gateway"></span></div>
+  <nav id="tabs">
+    <button data-tab="fahrer"><i>1</i> Fahrer</button>
+    <button data-tab="zug"><i>2</i> Wettkampf</button>
+    <button data-tab="rang"><i>3</i> Rangliste</button>
+    <button data-tab="sendung"><i>4</i> Sendung</button>
+    <button data-tab="sponsoren"><i>5</i> Sponsoren</button>
+    <button data-tab="mehr"><i>6</i> Einstellungen</button>
+  </nav>
+</header>
+<main id="view"></main>
+<div id="modal" hidden><div class="box" id="modalBox"></div></div>
+<div id="toast" hidden></div>
+<div id="login" hidden><div class="box"><h2>Anmeldung nötig</h2><p>Bitte zuerst im Gateway anmelden und diese Seite danach neu laden.</p><a class="b pri" style="padding:0 20px" href="index.html">Zum Gateway</a></div></div>
+<script>
+'use strict';
+/* TPF Zeitnahme - Bedienoberflaeche. Alles wird vom Server berechnet, hier nur Anzeige + Eingabe. */
+var S = null;                                   // letzter Serverstand
+var ui = { tab: 'fahrer', klasse: 'alle', weite: '', bw: null, gespeichertFuer: null, dirty: false };
+var $ = function (id) { return document.getElementById(id); };
+var API = 'api.php?action=';
+// Alle Anfragen: Schutz-Header des Gateways; bei 401 (nicht angemeldet) Hinweis statt Fehlern
+function gw(action, init) {
+  init = init || {};
+  init.headers = Object.assign({ 'X-GW-Request': '1' }, init.headers || {});
+  return fetch(API + action, init).then(function (r) {
+    if (r.status === 401) { $('login').hidden = false; return new Promise(function () {}); }
+    return r;
+  });
+}
+function postJson(action, obj) { return gw(action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj || {}) }).then(function (r) { return r.json(); }); }
+
+function esc(s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function fmt(w) { return (w === null || w === undefined) ? '' : Number(w).toFixed(2).replace('.', ','); }
+function klasseOf(id) { return S.klassen.filter(function (k) { return k.id === id; })[0]; }
+function starterOf(id) { return S.starter.filter(function (s) { return s.id === id; })[0]; }
+function ergOf(x, lauf) { return lauf > 0 ? ((x.stechen || [])[lauf - 1] || null) : (x.ergebnis || null); }
+function aktLauf(kid) { return S.aktuell.klasseId === kid ? (S.aktuell.lauf || 0) : 0; }
+function stechenText(x) {
+  var t = (x.stechen || []).filter(function (e) { return e && e.status === 'ok'; }).map(function (e) { return fmt(e.weite); });
+  return t.length ? 'Stechen ' + t.join(' · ') + ' m' : '';
+}
+function tag(s) { return s && s.aufsteigerVon ? ' <span class="badge fp" title="Startet zusätzlich in dieser Klasse">Aufsteiger aus ' + esc(s.vonKlasse) + '</span>' : ''; }
+function inKlasse(kid) { return S.starter.filter(function (s) { return s.klasseId === kid; }).sort(function (a, b) { return a.reihe - b.reihe || a.id - b.id; }); }
+
+// ------------------------------------------------------------ Server
+function toast(msg, fehler) {
+  var t = $('toast'); t.textContent = msg; t.className = fehler ? 'err' : ''; t.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(function () { t.hidden = true; }, fehler ? 5000 : 2200);
+}
+function act(obj, okMsg, leise) {
+  return postJson('zeit_aktion', obj)
+    .then(function (j) {
+      if (!j.ok) { toast(j.fehler || j.error || 'Fehler', true); return j; }
+      if (j.grafikFehler) toast('Gespeichert, aber die Grafik hat die Änderung nicht bekommen: ' + j.grafikFehler, true);
+      else if (okMsg) toast(okMsg);
+      return refresh(!leise).then(function () { return j; });
+    })
+    .catch(function () { toast('Server nicht erreichbar.', true); return { ok: false }; });
+}
+function refresh(force) {
+  return gw('zeit_state', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (s) {
+    $('conn').className = 'conn ok';
+    var neu = !S || s.rev !== S.rev || JSON.stringify(s.gfx) !== JSON.stringify(S.gfx);
+    S = s;
+    if (neu || force) render(force);
+  }).catch(function () { $('conn').className = 'conn bad'; });
+}
+function editing() { var a = document.activeElement; return a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && $('view').contains(a); }
+
+// ------------------------------------------------------------ Rendern
+function render(force) {
+  if (!S) return;
+  if (!force && editing()) { ui.dirty = true; return; }
+  ui.dirty = false;
+  $('evName').textContent = S.event.name;
+  Array.prototype.forEach.call($('tabs').children, function (b) { b.classList.toggle('on', b.getAttribute('data-tab') === ui.tab); });
+  var v = { fahrer: viewFahrer, zug: viewZug, rang: viewRang, sendung: viewSendung, sponsoren: viewSponsoren, mehr: viewMehr }[ui.tab]();
+  $('view').innerHTML = v;
+}
+
+function chips(mitAlle) {
+  var h = '<div class="chips">';
+  if (mitAlle) h += '<button class="chip' + (ui.klasse === 'alle' ? ' on' : '') + '" data-act="klasse" data-id="alle">Alle<small>' + S.starter.length + '</small></button>';
+  S.klassen.forEach(function (k) {
+    h += '<button class="chip' + (ui.klasse === k.id ? ' on' : '') + '" data-act="klasse" data-id="' + k.id + '">' + esc(k.name) + '<small>' + inKlasse(k.id).length + '</small></button>';
+  });
+  return h;
+}
+
+// ---- 1. Fahrer
+function viewFahrer() {
+  if (ui.klasse !== 'alle' && !klasseOf(ui.klasse)) ui.klasse = 'alle';
+  var h = '<div class="row" style="margin-bottom:14px"><h2 style="margin:0">Fahrer &amp; Startliste</h2><span class="spacer"></span>' +
+    '<button class="b pri gross" data-act="neuerFahrer">+ Fahrer anmelden</button></div>';
+  h += chips(true) + '<button class="chip" data-act="neueKlasse">+ Klasse</button></div>';
+
+  var liste = ui.klasse === 'alle' ? S.starter.slice().sort(function (a, b) { return a.klasseId - b.klasseId || a.reihe - b.reihe; }) : inKlasse(ui.klasse);
+  if (!S.klassen.length) {
+    return h + '<div class="card leer"><b>Noch keine Klassen angelegt</b>Tippe oben auf „+ Klasse“, zum Beispiel „4,5t-Klasse“. Oder lade in „Drucken &amp; Mehr“ Beispieldaten zum Ausprobieren.</div>';
+  }
+  if (!liste.length) {
+    h += '<div class="card leer"><b>Noch keine Fahrer</b>Tippe auf „+ Fahrer anmelden“ oder füge eine Liste aus Excel ein.<br><br><button class="b" data-act="import">Liste aus Excel einfügen</button></div>';
+    return h;
+  }
+  h += '<div class="card"><table><tr>' + (ui.klasse !== 'alle' ? '<th>Reihe</th>' : '') + '<th>Nr.</th><th>Fahrer</th><th class="opt">Traktor</th><th class="opt">Typ</th>' +
+       (ui.klasse === 'alle' ? '<th class="opt">Klasse</th>' : '') + '<th></th></tr>';
+  liste.forEach(function (s, i) {
+    var k = klasseOf(s.klasseId);
+    h += '<tr>' + (ui.klasse !== 'alle' ? '<td class="nr">' + (i + 1) + '</td>' : '') +
+         '<td class="nr">' + s.startnr + '</td><td><b>' + esc(s.name) + '</b>' + tag(s) + '</td><td class="opt">' + esc(s.traktor) + '</td><td class="opt">' + esc(s.modell) + '</td>' +
+         (ui.klasse === 'alle' ? '<td class="opt">' + esc(k ? k.name : '') + '</td>' : '') +
+         '<td class="akt">' + (ui.klasse !== 'alle' ? '<button class="mini" data-act="auf" data-id="' + s.id + '" title="nach oben">▲</button> <button class="mini" data-act="ab" data-id="' + s.id + '" title="nach unten">▼</button> ' : '') +
+         '<button class="mini" data-act="bearbeiten" data-id="' + s.id + '" title="ändern">✎</button> <button class="mini" data-act="loeschen" data-id="' + s.id + '" title="löschen">✕</button></td></tr>';
+  });
+  h += '</table></div><div class="row">';
+  h += '<button class="b" data-act="import">Liste aus Excel einfügen</button>';
+  if (ui.klasse !== 'alle') h += '<button class="b" data-act="auslosen">Reihenfolge auslosen</button><button class="b" data-act="klasseBearb">Klasse umbenennen</button>';
+  return h + '</div>';
+}
+
+// ---- 2. Wettkampf
+function viewZug() {
+  if (!S.klassen.length) return '<div class="card leer"><b>Noch keine Fahrer</b>Lege zuerst im Reiter „1 Fahrer“ Klassen und Fahrer an.</div>';
+  var kid = S.aktuell.klasseId && klasseOf(S.aktuell.klasseId) ? S.aktuell.klasseId : S.klassen[0].id;
+  var s = S.aktuell.starterId ? starterOf(S.aktuell.starterId) : null;
+  if (s && s.klasseId !== kid) s = null;
+  var rk = S.ranglisten[kid], lauf = aktLauf(kid);
+  if (lauf > rk.stechenLaeufe.length) lauf = 0;
+  var liste = inKlasse(kid);
+  if (lauf > 0) { var ids = rk.stechenLaeufe[lauf - 1].ids; liste = liste.filter(function (x) { return ids.indexOf(x.id) >= 0; }); }
+  var h = '<h2>Wettkampf</h2><div class="chips">';
+  S.klassen.forEach(function (k) { h += '<button class="chip' + (k.id === kid ? ' on' : '') + '" data-act="zugKlasse" data-id="' + k.id + '">' + esc(k.name) + '<small>' + inKlasse(k.id).length + '</small></button>'; });
+  h += '</div>';
+
+  // Laeufe: Hauptlauf und (falls noetig) Stechen 1, 2, ...
+  if (rk.stechenLaeufe.length) {
+    h += '<div class="chips"><button class="chip' + (lauf === 0 ? ' on' : '') + '" data-act="lauf" data-id="0" data-k="' + kid + '">Hauptlauf</button>';
+    rk.stechenLaeufe.forEach(function (l) {
+      h += '<button class="chip' + (lauf === l.nr ? ' on' : '') + '" data-act="lauf" data-id="' + l.nr + '" data-k="' + kid + '">Stechen ' + l.nr + '<small>' + (l.offen ? l.offen + ' offen' : 'fertig') + '</small></button>';
+    });
+    h += '</div>';
+  }
+  if (rk.stechenWartend.length) {
+    var nm = rk.stechenWartend.map(function (w) { return 'Stechen ' + w.nr + ': ' + w.ids.map(function (i) { return esc(starterOf(i).name); }).join(', '); }).join(' &nbsp;|&nbsp; ');
+    var w0 = rk.stechenWartend[0].nr;
+    h += '<div class="hinweis"><b>Stechen nötig!</b> ' + nm + (lauf === w0 ? '' : ' <button class="b klein" style="margin-left:10px" data-act="lauf" data-id="' + w0 + '" data-k="' + kid + '">Zu Stechen ' + w0 + '</button>') + '</div>';
+  }
+  var kk = klasseOf(kid), dg = kk.durchgang || 1;
+  h += '<div class="row" style="margin-bottom:12px"><span class="badge ' + (dg > 1 ? 'na' : 'offen') + '" style="font-size:16px">Durchgang ' + dg + '</span>' +
+       '<span class="muted">' + (dg > 1 ? 'Frühere Weiten sind gespeichert, zählen aber nicht mehr.' : '') + '</span><span class="spacer"></span>' +
+       '<button class="b klein" data-act="dgDlg" data-id="' + kid + '">Bremswagen angepasst – alle ziehen neu</button></div>';
+  var offen = liste.filter(function (x) { return !ergOf(x, lauf); });
+  if (!s) {
+    h += '<div class="card"><div class="row"><div><b style="font-size:22px">Kein Fahrer ausgewählt</b><div class="muted">Tippe in der Liste auf den Fahrer, der als Nächstes zieht.</div></div><span class="spacer"></span>' +
+         (offen.length ? '<button class="b pri gross" data-act="starte" data-id="' + offen[0].id + '">Los: ' + offen[0].startnr + ' ' + esc(offen[0].name) + ' →</button>' : '') + '</div></div>';
+  } else {
+    var e = ergOf(s, lauf);
+    if (ui.weite === '' && e && e.status === 'ok') ui.weite = fmt(e.weite);
+    var bw = ui.bw !== null ? ui.bw : (e ? e.bremswagen : S.live.bremswagen);
+    h += '<div class="card"><div class="aktuell"><div class="nr">' + s.startnr + '</div><div><div class="name">' + esc(s.name) + '</div><div class="tr">' + esc(s.traktor) + (s.modell ? ' · ' + esc(s.modell) : '') + '</div></div></div></div>';
+
+    if (e) {
+      var txt = e.status === 'ok' ? 'Gespeichert: ' + fmt(e.weite) + ' m' : (e.status === 'dq' ? 'Gespeichert: disqualifiziert' : 'Gespeichert: nicht angetreten');
+      var nx = liste.filter(function (x) { return !ergOf(x, lauf) && x.id !== s.id; });
+      nx = nx.filter(function (x) { return x.reihe > s.reihe; }).concat(nx.filter(function (x) { return x.reihe < s.reihe; }));
+      h += '<div class="okbox">✔ ' + txt + (e.status === 'ok' && e.weite >= S.event.fullPull ? ' – FULL PULL!' : '') + ' <span style="font-weight:500">(steht jetzt in der Grafik)</span></div>';
+      if (nx.length) h += '<div class="row" style="margin-bottom:14px"><button class="b pri gross" data-act="starte" data-id="' + nx[0].id + '">Nächster Fahrer: ' + nx[0].startnr + ' ' + esc(nx[0].name) + ' →</button></div>';
+      else h += '<div class="card"><b>Alle Fahrer dieser Klasse sind durch.</b> Siegerehrung: In der Grafik „Siegerehrung“ einblenden.</div>';
+    }
+
+    h += '<div class="schritte">';
+    h += '<div class="card schritt"><h3>Bremswagen</h3><div class="row"><input type="text" inputmode="decimal" id="bw" value="' + esc(bw) + '" placeholder="z.B. 14,8" style="max-width:160px"><b>Tonnen</b></div>' +
+         '<div class="muted" style="margin-top:8px">' + (lauf > 0 ? 'Im Stechen ist das Gewicht höher – bitte eintragen.' : 'Optional – erscheint in der Grafik.') + '</div></div>';
+
+    h += '<div class="card schritt"><h3>Laufende Weite (optional)</h3><div class="gross-zahl" id="liveZahl">' + Math.floor(S.live.distanz) + '<small>m</small></div>' +
+         '<div class="row" style="margin-top:12px"><button class="b" data-act="live" data-d="-1">−1</button><button class="b" data-act="live" data-d="1">+1 m</button><button class="b" data-act="live" data-d="5">+5 m</button><button class="b rot klein" data-act="liveNull">0</button></div></div>';
+
+    h += '<div class="card schritt"><h3>Offizielle Weite</h3><input type="text" inputmode="decimal" id="weite" class="weite-input" value="' + esc(ui.weite) + '" placeholder="z.B. 68,95">' +
+         '<div class="row" style="margin-top:12px"><button class="b gruen gross" data-act="speichern" style="flex:1">✔ Speichern</button></div>' +
+         '<div class="row" style="margin-top:10px"><button class="b rot klein" data-act="dq">Disqualifiziert</button><button class="b klein" data-act="na">Nicht angetreten</button>' +
+         (e ? '<button class="b klein" data-act="ergLoeschen">Ergebnis löschen</button>' : '') + '</div></div>';
+    h += '</div>';
+  }
+
+  h += '<h3>' + (lauf > 0 ? 'Fahrer im Stechen ' + lauf : 'Fahrer in dieser Klasse') + '</h3><div class="card"><table><tr><th>Nr.</th><th>Fahrer</th><th class="opt">Traktor</th><th class="opt">Typ</th><th class="r">Ergebnis</th></tr>';
+  liste.forEach(function (x) {
+    var b = '<span class="badge offen">offen</span>', xe = ergOf(x, lauf);
+    if (xe) b = xe.status === 'ok' ? '<b>' + fmt(xe.weite) + ' m</b>' : (xe.status === 'dq' ? '<span class="badge dq">DQ</span>' : '<span class="badge na">nicht angetreten</span>');
+    h += '<tr class="klick' + (s && s.id === x.id ? ' jetzt' : '') + '" data-act="starte" data-id="' + x.id + '"><td class="nr">' + x.startnr + '</td><td><b>' + esc(x.name) + '</b>' + tag(x) + '</td><td class="opt">' + esc(x.traktor) + '</td><td class="opt">' + esc(x.modell) + '</td><td class="r">' + b + '</td></tr>';
+  });
+  return h + '</table></div>';
+}
+
+// ---- 3. Rangliste
+function viewRang() {
+  if (!S.klassen.length) return '<div class="card leer"><b>Noch keine Ergebnisse</b>Sobald Fahrer gezogen sind, erscheint hier die Rangliste.</div>';
+  if (ui.klasse === 'alle' || !klasseOf(ui.klasse)) ui.klasse = S.klassen[0].id;
+  var h = '<h2>Rangliste</h2>' + chips(false) + '</div>';
+  var r = S.ranglisten[ui.klasse];
+
+  if (r.stechenWartend.length) {
+    var w0 = r.stechenWartend[0];
+    h += '<div class="hinweis"><b>Stechen nötig!</b> Gleiche Weite beim Full Pull: ' + w0.ids.map(function (i) { return esc(starterOf(i).name); }).join(' und ') +
+         '. <button class="b klein" style="margin-left:10px" data-act="zumStechen" data-id="' + w0.nr + '" data-k="' + ui.klasse + '">Zum Stechen ' + w0.nr + ' →</button></div>';
+  }
+  h += '<div class="card"><table><tr><th>Platz</th><th>Nr.</th><th>Fahrer</th><th class="opt">Traktor</th><th class="opt">Typ</th><th class="r">Weite</th></tr>';
+  r.rows.forEach(function (x) {
+    var s = starterOf(x.starterId), w;
+    if (x.status === 'ok') w = '<b>' + fmt(x.weite) + ' m</b>' + (x.fullPull ? ' <span class="fpmark">' + (stechenText(s) || 'Full Pull') + '</span>' : '');
+    else if (x.status === 'dq') w = '<span class="badge dq">DQ</span>';
+    else if (x.status === 'na') w = '<span class="badge na">nicht angetreten</span>';
+    else w = '<span class="badge offen">offen</span>';
+    h += '<tr><td class="platz">' + (x.platz || '') + '</td><td class="nr">' + s.startnr + '</td><td><b>' + esc(s.name) + '</b>' + tag(s) + '</td><td class="opt">' + esc(s.traktor) + '</td><td class="opt">' + esc(s.modell) + '</td><td class="r">' + w + (x.platz === 1 && x.status === 'ok' && S.klassen.length > 1 ? ' <button class="b klein" style="margin-left:8px" data-act="aufDlg" data-id="' + s.id + '">↗ Höhere Klasse</button>' : '') + '</td></tr>';
+  });
+  h += '</table></div>';
+
+  h += '<div class="muted">Diese Rangliste steht automatisch in der Grafik (Rangliste, Podest).</div>';
+  return h;
+}
+
+// ---- 4. Drucken & Mehr
+function viewMehr() {
+  var h = '<h2>Einstellungen &amp; Mehr</h2>';
+  h += '<div class="card"><b>Druck, Excel und Zuschauerseite</b><div class="muted">Startliste und Ergebnisse drucken, Excel-Dateien laden und speichern und die Ergebnisseite für Handys folgen in einem späteren Schritt. Fahrer und Sponsoren lassen sich bis dahin über „Liste einfügen“ aus Excel übernehmen.</div></div>';
+  h += '<h3>Einstellungen</h3><div class="card"><div class="schritte">' +
+       '<div><label>Name der Veranstaltung</label><input type="text" id="setName" value="' + esc(S.event.name) + '"></div>' +
+       '<div><label>Kürzel (in der Grafik)</label><input type="text" id="setKurz" value="' + esc(S.event.kurz) + '"></div>' +
+       '<div><label>Full Pull ab (Meter)</label><input type="text" inputmode="decimal" id="setFp" value="' + esc(String(S.event.fullPull).replace('.', ',')) + '"></div></div>' +
+       '<div class="row" style="margin-top:14px"><button class="b pri" data-act="setSpeichern">Einstellungen speichern</button></div></div>';
+
+  h += '<h3>Zum Ausprobieren / Neustart</h3><div class="card"><div class="row"><button class="b" data-act="demo">Beispieldaten laden</button><button class="b rot" data-act="reset">Alles löschen (neue Veranstaltung)</button></div></div>';
+  h += '<div class="muted" style="margin-top:14px">Alle Daten werden laufend automatisch gesichert (in der Datenbank des Gateways, die letzten 60 Stände).</div>';
+  return h;
+}
+
+// ---- 4. Sendung (Einblendungen im Sendebild)
+var SCHALTER = [
+  ['Immer da', [['bug', 'Logo'], ['sponsors', 'Sponsorenbalken']]],
+  ['Während des Zuges', [['puller', 'Starter + Weite'], ['next', 'Als Nächstes']]],
+  ['Zwischendurch', [['ranking', 'Rangliste'], ['klasse', 'Klassenansage'], ['sieger', 'Siegerehrung'], ['pause', 'Sponsor bei Rückfahrt'], ['slomo', 'Zeitlupe']]]
+];
+function viewSendung() {
+  var sd = S.sendung, g = S.gfx || {}, h = '<h2>Sendung</h2>';
+  h += '<div class="card"><div class="row"><div><b style="font-size:20px">Grafikpaket im Sendebild</b><div class="muted">' +
+    (!g.caspar ? 'CasparCG läuft nicht – bitte im Gateway unter „Grafik (CasparCG)“ starten.' :
+      (g.live ? 'Eingeblendet (Ebene ' + g.layer + '). Alle Änderungen hier gehen sofort ins Bild.' : 'Nicht eingeblendet. Die Schalter unten wirken erst, wenn das Paket eingeblendet ist.')) +
+    '</div></div><span class="spacer"></span>' +
+    (g.live ? '<button class="b gross" data-act="gfxStop">Grafik ausblenden</button>' : '<button class="b pri gross" data-act="gfxStart"' + (g.caspar ? '' : ' disabled') + '>Grafik einblenden</button>') +
+    '</div></div>';
+  h += '<div class="muted" style="margin-bottom:6px">Tippen = ein / aus. Das Sendebild folgt nach ca. einer halben Sekunde.</div>';
+  SCHALTER.forEach(function (g) {
+    h += '<h3>' + g[0] + '</h3><div class="schalter">';
+    g[1].forEach(function (x) {
+      var an = sd.show[x[0]];
+      h += '<button class="sw' + (an ? ' an' : '') + '" data-act="sw" data-k="' + x[0] + '"><span>' + x[1] + '</span><b>' + (an ? 'AN' : 'AUS') + '</b></button>';
+    });
+    h += '</div>';
+  });
+  h += '<div class="row" style="margin-top:14px"><button class="b" data-act="swLeeren">Alles ausblenden <span class="muted" style="font-weight:400">(Logo + Sponsor bleiben)</span></button></div>';
+
+  var kopt = '<option value="">Alle Fahrer</option>' + S.klassen.map(function (k) { return '<option value="' + esc(k.name) + '">Alle Fahrer der ' + esc(k.name) + '</option>'; }).join('');
+  var an = sd.show.aufruf, bb = sd.show.bauchbinde;
+  h += '<h3>Durchsage</h3><div class="card"><div class="muted" style="margin-bottom:6px">Aktuell: „' + esc(sd.aufruf.text) + '“</div>' +
+       '<div class="schritte"><div><label>Wer?</label><select id="auWer">' + kopt + '</select></div>' +
+       '<div><label>Was?</label><select id="auWas"><option>bitte zum Wiegen</option><option>bitte zum Start</option><option>bitte zur Fahrerbesprechung</option><option>bitte zur Siegerehrung</option></select></div></div>' +
+       '<label>… oder eigener Text <span class="muted" style="font-weight:400">(ersetzt die Auswahl)</span></label><input type="text" id="auFrei" autocomplete="off">' +
+       '<div class="row" style="margin-top:14px"><button class="b pri gross" data-act="auAn">' + (an ? 'Aktualisieren' : 'Durchsage einblenden') + '</button>' +
+       (an ? '<button class="b gross" data-act="sw" data-k="aufruf">Ausblenden</button>' : '') + '</div></div>';
+
+  h += '<h3>Bauchbinde (Interview)</h3><div class="card">' +
+       '<div class="schritte"><div><label>Name</label><input type="text" id="bbName" autocomplete="off" value="' + esc(sd.bb.name) + '"></div>' +
+       '<div><label>Funktion / Zusatz</label><input type="text" id="bbFn" autocomplete="off" placeholder="z.B. Sieger 4,5t-Klasse" value="' + esc(sd.bb.funktion) + '"></div>' +
+       '<div><label>Kopfzeile</label><input type="text" id="bbLab" autocomplete="off" value="' + esc(sd.bb.label) + '"></div></div>' +
+       '<div class="row" style="margin-top:14px"><button class="b pri gross" data-act="bbAn">' + (bb ? 'Aktualisieren' : 'Bauchbinde einblenden') + '</button>' +
+       (bb ? '<button class="b gross" data-act="sw" data-k="bauchbinde">Ausblenden</button>' : '') + '</div></div>';
+  h += '<div class="muted" style="margin-top:18px">Welcher Sponsor wo erscheint, stellst du im Reiter „5 Sponsoren“ ein.</div>';
+  return h;
+}
+
+
+// ---- 5. Sponsoren
+var PLAETZE = [['slomo', 'Zeitlupe (Trenner + Marker)'], ['fullPull', '„… präsentiert den FULL PULL“'], ['klasse', 'Klassenansage'], ['ranking', 'Rangliste'], ['sieger', 'Siegerehrung'], ['bb', 'Bauchbinde']];
+function sponsorOf(i) { return S.sponsoren.filter(function (x) { return x.id === i; })[0]; }
+function viewSponsoren() {
+  var sd = S.sendung, h = '<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Sponsoren</h2><span class="spacer"></span>' +
+    '<button class="b pri gross" data-act="spNeu">+ Sponsor anlegen</button></div>';
+  if (!S.sponsoren.length) return h + '<div class="card leer"><b>Noch keine Sponsoren</b>Lege den ersten Sponsor an oder lade eine Excel-Liste.</div>';
+  h += '<div class="card"><table><tr><th>Logo</th><th>Sponsor</th><th class="opt">Spruch</th><th class="opt">Paket</th><th>Im Balken</th><th></th></tr>';
+  S.sponsoren.forEach(function (x) {
+    var im = sd.balken.indexOf(x.id) >= 0;
+    h += '<tr><td style="width:110px">' + (x.logo ? '<img src="' + x.logo + '" alt="" style="max-width:90px;max-height:44px;display:block">' : '<span class="muted">–</span>') + '</td>' +
+         '<td><b>' + esc(x.name) + '</b>' + (x.logo ? '<div class="muted" style="font-size:14px">' + ({ logo: 'nur Logo', beides: 'Logo + Name', text: 'nur Name' }[x.zeige || 'logo']) + '</div>' : '') + '</td><td class="opt">' + esc(x.claim) + '</td><td class="opt">' + esc(x.paket) + '</td>' +
+         '<td><button class="b klein' + (im ? ' gruen' : '') + '" data-act="balkenTog" data-id="' + x.id + '">' + (im ? 'ja' : 'nein') + '</button></td>' +
+         '<td class="akt"><button class="mini" data-act="spBearb" data-id="' + x.id + '" title="Bearbeiten">✎</button></td></tr>';
+  });
+  h += '</table></div>';
+  h += '<h3>Wer erscheint wo?</h3><div class="card"><div class="muted" style="margin-bottom:8px">Pro Einblendung ein Sponsor. Der Sponsorenbalken unten zeigt abwechselnd alle Sponsoren mit „ja“ in der Spalte „Im Balken“.</div><div class="schritte">';
+  PLAETZE.forEach(function (f) {
+    h += '<div><label>' + f[1] + '</label><select data-sp="' + f[0] + '"><option value="">– keiner –</option>' +
+         S.sponsoren.map(function (x) { return '<option value="' + x.id + '"' + (sd.sp[f[0]] === x.id ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></div>';
+  });
+  return h + '</div></div>';
+}
+function dlgSponsor(x) {
+  ui.logoNeu = undefined;
+  modal('<h2>' + (x ? 'Sponsor ändern' : 'Sponsor anlegen') + '</h2>' +
+    '<label>Name</label><input type="text" name="name" value="' + esc(x ? x.name : '') + '" autocomplete="off">' +
+    '<label>Spruch <span class="muted" style="font-weight:400">(optional, z.B. „Ihr Partner vor Ort“)</span></label><input type="text" name="claim" value="' + esc(x ? x.claim : '') + '" autocomplete="off">' +
+    '<label>Paket <span class="muted" style="font-weight:400">(optional, nur für dich)</span></label><input type="text" name="paket" value="' + esc(x ? x.paket : '') + '" autocomplete="off">' +
+    '<label>Logo <span class="muted" style="font-weight:400">(optional: PNG, JPG oder SVG)</span></label>' +
+    '<div class="row"><div id="logoBox" style="min-width:140px;min-height:56px;background:#eee;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:6px">' +
+      (x && x.logo ? '<img src="' + x.logo + '" style="max-width:200px;max-height:70px">' : '<span class="muted">kein Logo</span>') + '</div>' +
+    '<button class="b klein" data-act="logoWahl">Datei wählen</button>' + (x && x.logo ? '<button class="b klein rot" data-act="logoWeg">Entfernen</button>' : '') + '</div>' +
+    '<label>Was erscheint in der Grafik?</label><select name="zeige">' +
+      [['logo', 'Nur das Logo'], ['beides', 'Logo und Name'], ['text', 'Nur der Name']].map(function (o) {
+        var cur = x && x.zeige ? x.zeige : 'logo';
+        return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+      }).join('') + '</select><div class="muted" style="margin-top:4px">Gilt nur, wenn ein Logo hochgeladen ist.</div>' +
+    '<div class="row" style="margin-top:20px"><button class="b pri gross" data-act="spOk" data-id="' + (x ? x.id : '') + '">' + (x ? 'Speichern' : 'Anlegen') + '</button>' +
+    (x ? '<button class="b rot" data-act="spLoesch" data-id="' + x.id + '">Löschen</button>' : '') + '<button class="b" data-act="zu">Abbrechen</button></div>');
+}
+// Logo verkleinern (max. 500 x 200 Pixel), damit die Datei klein bleibt
+function logoLaden(file, fertig) {
+  if (!file) return;
+  var r = new FileReader();
+  r.onload = function () {
+    if (/svg/.test(file.type)) { fertig(r.result); return; }
+    var im = new Image();
+    im.onload = function () {
+      var s = Math.min(1, 500 / im.width, 200 / im.height), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(im.width * s)); c.height = Math.max(1, Math.round(im.height * s));
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      fertig(c.toDataURL('image/png'));
+    };
+    im.onerror = function () { toast('Das Bild konnte nicht gelesen werden.', true); };
+    im.src = r.result;
+  };
+  r.readAsDataURL(file);
+}
+// ------------------------------------------------------------ Dialoge
+function modal(html) { $('modalBox').innerHTML = html; $('modal').hidden = false; var f = $('modalBox').querySelector('input,textarea,select'); if (f) f.focus(); }
+function schliessen() { $('modal').hidden = true; $('modalBox').innerHTML = ''; }
+function val(name) { var e = $('modalBox').querySelector('[name="' + name + '"]'); return e ? e.value : ''; }
+
+
+function dlgDurchgang(kid) {
+  var k = klasseOf(kid), n = inKlasse(kid).filter(function (x) { return x.ergebnis; }).length;
+  modal('<h2>Neuer Durchgang</h2><div class="muted">Klasse: <b>' + esc(k.name) + '</b>. Alle Fahrer ziehen nochmal. Die bisherigen Weiten (' + n + ') bleiben als Protokoll gespeichert, zählen aber nicht mehr für die Rangliste.</div>' +
+    '<label>Neues Bremswagengewicht (Tonnen)</label><input type="text" inputmode="decimal" name="bw" value="' + esc(S.live.bremswagen) + '" placeholder="z.B. 10,5">' +
+    '<label>Grund <span class="muted" style="font-weight:400">(optional)</span></label><input type="text" name="grund" placeholder="z.B. Bremswagen zu schwer" autocomplete="off">' +
+    '<div class="row" style="margin-top:20px"><button class="b pri gross" data-act="dgOk" data-id="' + kid + '">Neuen Durchgang starten</button><button class="b" data-act="zu">Abbrechen</button></div>');
+}
+function dlgAufsteiger(sid) {
+  var s = starterOf(sid), idx = S.klassen.map(function (k) { return k.id; }).indexOf(s.klasseId);
+  var opt = S.klassen.filter(function (k) { return k.id !== s.klasseId; }).map(function (k) {
+    var gewaehlt = S.klassen[idx + 1] ? k.id === S.klassen[idx + 1].id : false;
+    return '<option value="' + k.id + '"' + (gewaehlt ? ' selected' : '') + '>' + esc(k.name) + '</option>';
+  }).join('');
+  modal('<h2>In höherer Klasse starten</h2><div class="muted"><b>' + esc(s.name) + '</b> wird zusätzlich in der gewählten Klasse angemeldet (hinten angehängt, mit eigener Wertung). Die Position lässt sich danach im Reiter „Fahrer“ mit ▲▼ ändern.</div>' +
+    '<label>Klasse</label><select name="klasseId">' + opt + '</select>' +
+    '<div class="row" style="margin-top:20px"><button class="b pri gross" data-act="aufOk" data-id="' + sid + '">Anmelden</button><button class="b" data-act="zu">Abbrechen</button></div>');
+}
+
+function dlgFahrer(s) {
+  var opt = S.klassen.map(function (k) { return '<option value="' + k.id + '"' + ((s ? s.klasseId : (ui.klasse !== 'alle' ? ui.klasse : S.klassen[0].id)) === k.id ? ' selected' : '') + '>' + esc(k.name) + '</option>'; }).join('');
+  modal('<h2>' + (s ? 'Fahrer ändern' : 'Fahrer anmelden') + '</h2>' +
+    '<label>Name des Fahrers</label><input type="text" name="name" value="' + esc(s ? s.name : '') + '" autocomplete="off">' +
+    '<label>Traktor-Name <span class="muted" style="font-weight:400">(Spitzname, z.B. Red Thunder)</span></label><input type="text" name="traktor" value="' + esc(s ? s.traktor : '') + '" autocomplete="off">' +
+    '<label>Traktor-Typ <span class="muted" style="font-weight:400">(Marke und Modell, z.B. John Deere 4870)</span></label><input type="text" name="modell" value="' + esc(s ? s.modell || '' : '') + '" autocomplete="off">' +
+    '<label>Klasse</label><select name="klasseId">' + opt + '</select>' +
+    '<label>Startnummer <span class="muted" style="font-weight:400">(leer lassen = automatisch)</span></label><input type="text" inputmode="numeric" name="startnr" value="' + (s ? s.startnr : '') + '">' +
+    '<div class="row" style="margin-top:20px"><button class="b pri gross" data-act="fahrerOk" data-id="' + (s ? s.id : '') + '">' + (s ? 'Speichern' : 'Anmelden') + '</button>' +
+    (s ? '' : '<button class="b" data-act="fahrerOkNochmal">Anmelden + nächster</button>') + '<button class="b" data-act="zu">Abbrechen</button></div>');
+}
+function dlgKlasse(k) {
+  modal('<h2>' + (k ? 'Klasse umbenennen' : 'Neue Klasse') + '</h2><label>Name</label><input type="text" name="name" value="' + esc(k ? k.name : '') + '" placeholder="z.B. 4,5t-Klasse" autocomplete="off">' +
+    '<div class="row" style="margin-top:20px"><button class="b pri gross" data-act="klasseOk" data-id="' + (k ? k.id : '') + '">Speichern</button>' +
+    (k ? '<button class="b rot" data-act="klasseLoesch" data-id="' + k.id + '">Klasse löschen</button>' : '') + '<button class="b" data-act="zu">Abbrechen</button></div>');
+}
+function dlgImport() {
+  modal('<h2>Liste aus Excel einfügen</h2><div class="muted">Markiere in Excel die Zellen (Spalten: <b>Name, Traktor, Typ, Klasse</b> – oder mit Startnummer vorne), kopiere sie und füge sie hier ein.</div>' +
+    '<label>Hier einfügen</label><textarea name="text" placeholder="Hans Müller&#9;Red Thunder&#9;4,5t-Klasse"></textarea>' +
+    '<div class="row" style="margin-top:16px"><button class="b pri gross" data-act="importOk">Übernehmen</button><button class="b" data-act="zu">Abbrechen</button></div>');
+}
+
+// ------------------------------------------------------------ Klicks
+document.addEventListener('click', function (ev) {
+  var t = ev.target.closest('[data-act],[data-tab]');
+  if (!t) return;
+  var tab = t.getAttribute('data-tab');
+  if (tab) { ui.tab = tab; location.hash = tab; ui.dirty = false; if (document.activeElement) document.activeElement.blur(); render(); window.scrollTo(0, 0); return; }
+  var a = t.getAttribute('data-act'), i = parseInt(t.getAttribute('data-id'), 10);
+  var kid = S && S.aktuell.klasseId;
+
+  switch (a) {
+    case 'gfxStart': case 'gfxStop':
+      postJson(a === 'gfxStart' ? 'zeit_gfx_start' : 'zeit_gfx_stop', {}).then(function (j) {
+        if (j.error) { toast(j.error, true); return; }
+        toast(a === 'gfxStart' ? 'Grafik ist eingeblendet' : 'Grafik wird ausgeblendet');
+        return refresh(true);
+      }).catch(function () { toast('Server nicht erreichbar.', true); });
+      break;
+    case 'sw': { var k = t.getAttribute('data-k'), o = {}; o[k] = !S.sendung.show[k]; act({ typ: 'sendung', schalter: o }, null, false); break; }
+    case 'swLeeren': act({ typ: 'sendung', leeren: true }, 'Alles ausgeblendet'); break;
+    case 'auAn': {
+      var frei = $('auFrei').value.trim(), wer = $('auWer').value, was = $('auWas').value;
+      var txt = frei || ((wer ? 'Alle Fahrer der ' + wer : 'Alle Fahrer') + ' ' + was);
+      act({ typ: 'sendung', aufruf: { text: txt }, schalter: { aufruf: true } }, 'Durchsage ist im Bild');
+      break;
+    }
+    case 'bbAn': {
+      if (!$('bbName').value.trim()) { toast('Bitte einen Namen eingeben.', true); break; }
+      act({ typ: 'sendung', bb: { name: $('bbName').value, funktion: $('bbFn').value, label: $('bbLab').value }, schalter: { bauchbinde: true } }, 'Bauchbinde ist im Bild');
+      break;
+    }
+    case 'lauf': ui.weite = ''; ui.bw = null; act({ typ: 'waehleLauf', klasseId: parseInt(t.getAttribute('data-k'), 10), lauf: i }); break;
+    case 'zumStechen': ui.weite = ''; ui.bw = null; act({ typ: 'waehleLauf', klasseId: parseInt(t.getAttribute('data-k'), 10), lauf: i }).then(function () { ui.tab = 'zug'; location.hash = 'zug'; render(true); window.scrollTo(0, 0); }); break;
+    case 'spNeu': dlgSponsor(); break;
+    case 'spBearb': dlgSponsor(sponsorOf(i)); break;
+    case 'logoWahl': { var fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.onchange = function () { logoLaden(fi.files[0], function (d) { ui.logoNeu = d; $('logoBox').innerHTML = '<img src="' + d + '" style="max-width:200px;max-height:70px">'; }); }; fi.click(); break; }
+    case 'logoWeg': ui.logoNeu = ''; $('logoBox').innerHTML = '<span class="muted">kein Logo</span>'; break;
+    case 'spOk': {
+      var o = { name: val('name'), claim: val('claim'), paket: val('paket'), zeige: val('zeige') };
+      if (ui.logoNeu !== undefined) o.logo = ui.logoNeu;
+      if (i) { o.typ = 'sponsorAendern'; o.id = i; } else o.typ = 'sponsorNeu';
+      act(o, 'Sponsor gespeichert').then(function (j) { if (j.ok) schliessen(); });
+      break;
+    }
+    case 'spLoesch': if (confirm('Sponsor „' + sponsorOf(i).name + '“ wirklich löschen? Er verschwindet aus allen Einblendungen.')) act({ typ: 'sponsorLoeschen', id: i }, 'Sponsor gelöscht').then(function (j) { if (j.ok) schliessen(); }); break;
+    case 'balkenTog': {
+      var bl = S.sendung.balken.slice(), ix = bl.indexOf(i);
+      if (ix >= 0) bl.splice(ix, 1); else bl.push(i);
+      act({ typ: 'sendung', balken: bl }, null, false); break;
+    }
+    case 'dgDlg': dlgDurchgang(i); break;
+    case 'dgOk': act({ typ: 'neuerDurchgang', klasseId: i, bremswagen: val('bw'), grund: val('grund') }, 'Neuer Durchgang gestartet').then(function (j) { if (j.ok) { ui.weite = ''; ui.bw = null; schliessen(); } }); break;
+    case 'aufDlg': dlgAufsteiger(i); break;
+    case 'aufOk': act({ typ: 'aufsteiger', starterId: i, klasseId: parseInt(val('klasseId'), 10) }, 'In höherer Klasse angemeldet').then(function (j) { if (j.ok) schliessen(); }); break;
+    case 'klasse': ui.klasse = t.getAttribute('data-id') === 'alle' ? 'alle' : i; render(); break;
+    case 'neuerFahrer': if (!S.klassen.length) { toast('Lege zuerst eine Klasse an.', true); dlgKlasse(); } else dlgFahrer(); break;
+    case 'neueKlasse': dlgKlasse(); break;
+    case 'klasseBearb': dlgKlasse(klasseOf(ui.klasse)); break;
+    case 'import': dlgImport(); break;
+    case 'zu': schliessen(); break;
+    case 'fahrerOk': case 'fahrerOkNochmal': {
+      var obj = { name: val('name'), traktor: val('traktor'), modell: val('modell'), klasseId: parseInt(val('klasseId'), 10), startnr: val('startnr') };
+      var neu = !t.getAttribute('data-id');
+      obj.typ = neu ? 'starterNeu' : 'starterAendern'; if (!neu) obj.id = i;
+      act(obj, neu ? 'Fahrer angemeldet' : 'Gespeichert').then(function (j) {
+        if (!j.ok) return;
+        if (a === 'fahrerOkNochmal') { var kl = obj.klasseId; ui.klasse = kl; dlgFahrer(); $('modalBox').querySelector('[name="klasseId"]').value = kl; } else schliessen();
+      });
+      break;
+    }
+    case 'klasseOk': {
+      var nm = val('name');
+      act(t.getAttribute('data-id') ? { typ: 'klasseAendern', id: i, name: nm } : { typ: 'klasseNeu', name: nm }, 'Gespeichert').then(function (j) { if (j.ok) { if (j.id) ui.klasse = j.id; schliessen(); render(); } });
+      break;
+    }
+    case 'klasseLoesch': if (confirm('Klasse wirklich löschen?')) act({ typ: 'klasseLoeschen', id: i }).then(function (j) { if (j.ok) { ui.klasse = 'alle'; schliessen(); } }); break;
+    case 'importOk': act({ typ: 'importieren', text: val('text') }).then(function (j) {
+      if (!j.ok) return; schliessen();
+      toast(j.neu + ' Fahrer übernommen' + (j.fehler && j.fehler.length ? ' – ' + j.fehler.length + ' Zeile(n) nicht übernommen' : ''), j.fehler && j.fehler.length > 0);
+      if (j.fehler && j.fehler.length) alert('Nicht übernommen:\n\n' + j.fehler.join('\n'));
+    }); break;
+    case 'bearbeiten': dlgFahrer(starterOf(i)); break;
+    case 'loeschen': if (confirm('„' + starterOf(i).name + '“ wirklich löschen?')) act({ typ: 'starterLoeschen', id: i }); break;
+    case 'auf': act({ typ: 'verschieben', id: i, richtung: -1 }); break;
+    case 'ab': act({ typ: 'verschieben', id: i, richtung: 1 }); break;
+    case 'auslosen': if (confirm('Die Reihenfolge dieser Klasse neu auslosen?')) act({ typ: 'auslosen', klasseId: ui.klasse }, 'Reihenfolge ausgelost'); break;
+
+    case 'zugKlasse': ui.weite = ''; ui.bw = null; act({ typ: 'waehleKlasse', klasseId: i }); break;
+    case 'starte': ui.weite = ''; ui.bw = null; act({ typ: 'waehleStarter', starterId: i }); window.scrollTo(0, 0); break;
+    case 'live': act({ typ: 'live', delta: parseFloat(t.getAttribute('data-d')) }); break;
+    case 'liveNull': act({ typ: 'live', distanz: 0 }); break;
+    case 'speichern': speichern('ok'); break;
+    case 'dq': speichern('dq'); break;
+    case 'na': speichern('na'); break;
+    case 'ergLoeschen': if (confirm('Ergebnis dieses Fahrers löschen?')) { ui.weite = ''; act({ typ: 'ergebnisLoeschen', starterId: S.aktuell.starterId, lauf: S.aktuell.lauf || 0 }, 'Ergebnis gelöscht'); } break;
+
+    case 'setSpeichern': act({ typ: 'einstellungen', name: $('setName').value, kurz: $('setKurz').value, fullPull: $('setFp').value }, 'Gespeichert'); break;
+    case 'demo': act({ typ: 'demo' }, 'Beispieldaten geladen'); break;
+    case 'reset': {
+      var w = prompt('ACHTUNG: Alle Fahrer und Ergebnisse werden gelöscht (eine Sicherung bleibt erhalten).\n\nZum Bestätigen JA eingeben:');
+      if (w) act({ typ: 'zuruecksetzen', bestaetigung: w.trim().toUpperCase() }, 'Zurückgesetzt'); break;
+    }
+  }
+});
+
+function speichern(status) {
+  var id = S.aktuell.starterId; if (!id) return;
+  var bw = $('bw') ? $('bw').value : '';
+  var s = starterOf(id), lauf = aktLauf(s.klasseId);
+  var o = { typ: 'ergebnis', starterId: id, status: status, bremswagen: bw, lauf: lauf };
+  if (status === 'ok') {
+    o.weite = $('weite').value;
+    if (!o.weite.trim()) { toast('Bitte die offizielle Weite eintragen.', true); $('weite').focus(); return; }
+  }
+  if (ergOf(s, lauf) && !confirm('Für ' + s.name + ' gibt es schon ein Ergebnis. Überschreiben?')) return;
+  ui.weite = ''; ui.bw = null;
+  act(o);
+}
+
+// Eingaben merken (damit sie ein Neuzeichnen ueberleben) und Stechen speichern
+document.addEventListener('input', function (ev) {
+  if (ev.target.id === 'weite') ui.weite = ev.target.value;
+  if (ev.target.id === 'bw') { ui.bw = ev.target.value; }
+});
+document.addEventListener('change', function (ev) {
+  var t = ev.target;
+  if (t.hasAttribute && t.hasAttribute('data-sp')) { var so = {}; so[t.getAttribute('data-sp')] = t.value; act({ typ: 'sendung', sp: so }, null, true); }
+  if (t.id === 'bw') act({ typ: 'live', bremswagen: t.value }, null, true);
+});
+document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Enter' && ev.target.id === 'weite') speichern('ok');
+  if (ev.key === 'Enter' && $('modal').hidden === false && ev.target.tagName === 'INPUT') { var b = $('modalBox').querySelector('.pri'); if (b) b.click(); }
+  if (ev.key === 'Escape') schliessen();
+});
+document.addEventListener('focusout', function () { setTimeout(function () { if (ui.dirty && !editing()) render(); }, 50); });
+$('modal').addEventListener('mousedown', function (e) { if (e.target === $('modal')) schliessen(); });
+
+// ------------------------------------------------------------ Start
+var h0 = (location.hash || '').replace('#', '');
+if (['fahrer', 'zug', 'rang', 'sendung', 'sponsoren', 'mehr'].indexOf(h0) >= 0) ui.tab = h0;
+refresh(true).then(function () {
+  if (S && !S.klassen.length && ui.tab === 'fahrer') render();
+});
+setInterval(refresh, 2000);
+
+</script>
+</body>
+</html>
