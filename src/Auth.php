@@ -89,8 +89,9 @@ class Auth
 
         if (!self::isLoopback()) {
             // Gegen Cross-Site-Anfragen: ein eigener Header ist per Browser nur von der eigenen Seite moeglich.
-            // Vorschau-Bilder (<img>) koennen keinen Header senden und sind nur lesend.
-            if ($action !== 'preview_image' && ($_SERVER['HTTP_X_GW_REQUEST'] ?? '') !== '1') {
+            // Vorschau-Bilder (<img>) und die Vorschau-Seite einer Grafikvorlage (<iframe>, "gfx_file") koennen keinen Header
+            // senden und sind nur lesend; die Anmeldung wird weiter geprueft (Cookie SameSite=Strict).
+            if ($action !== 'preview_image' && $action !== 'gfx_file' && ($_SERVER['HTTP_X_GW_REQUEST'] ?? '') !== '1') {
                 self::deny(403, 'Ungueltige Anfrage');
             }
         }
