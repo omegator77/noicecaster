@@ -1013,7 +1013,7 @@
     setText('startnr', d.startnr);
     setText('fahrer',  d.fahrer);
     setText('traktor', d.traktor);
-    setText('modell', d.modell ? ' · ' + d.modell : '');
+    if (d.modell !== undefined) setText('modell', d.modell ? ' · ' + d.modell : '');   // nur bei Aenderung (Updates enthalten nur geaenderte Felder)
     setText('klasse2', d.klasse);
     if (d.modus !== undefined) setModus(d.modus);
     if (d.distanz !== undefined) setDistanz(d.distanz);
