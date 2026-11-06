@@ -15,6 +15,7 @@ require_once __DIR__ . '/../src/TextLibrary.php';
 require_once __DIR__ . '/../src/CasparManager.php';
 require_once __DIR__ . '/../src/GraphicsLibrary.php';
 require_once __DIR__ . '/../src/GraphicsEntries.php';
+require_once __DIR__ . '/../src/Zeitnahme.php';
 
 header('Content-Type: application/json');
 
@@ -244,6 +245,30 @@ try {
                 $result = $entries->import(is_array($data['items'] ?? null) ? $data['items'] : []);
             }
             echo json_encode(['success' => true] + $result);
+            break;
+
+        case 'zeit_state':
+            echo json_encode((new Zeitnahme($db->pdo()))->zustand(), JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+            break;
+
+        case 'zeit_grafik':
+            echo json_encode((new Zeitnahme($db->pdo()))->grafik(), JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+            break;
+
+        case 'zeit_aktion':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            try {
+                $result = (new Zeitnahme($db->pdo()))->aktion(is_array($data) ? $data : []);
+                echo json_encode(['ok' => true] + $result, JSON_UNESCAPED_UNICODE);
+            } catch (ZeitFehler $e) {
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            }
             break;
 
         case 'gfx_file':
