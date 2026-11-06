@@ -15,6 +15,7 @@
     {"id": "sl", "name": "Trenner", "trigger": "sl_trigger"}
   ],
   "fields": [
+    {"key": "anim", "label": "Animation", "type": "select", "default": "normal", "options": [["normal", "normal"], ["fast", "schnell"], ["off", "aus (sofort)"]]},
     {"key": "tc_on", "group": "tc", "label": "Sichtbar", "type": "bool", "default": false},
     {"key": "tc_title", "group": "tc", "label": "Titel", "type": "text", "max": 60, "default": "Titel"},
     {"key": "tc_subtitle", "group": "tc", "label": "Untertitel", "type": "text", "max": 100, "default": "Untertitel"},

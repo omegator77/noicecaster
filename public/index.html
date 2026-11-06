@@ -999,7 +999,7 @@
           Achtung: <span x-text="gfxSingleLayerCount()"></span> einzelne Grafik-Ebenen sind gleichzeitig aktiv. Ohne Grafikkarte hält CasparCG in Echtzeit nur eine Ebene (bei zwei etwa 83&nbsp;%, bei vier etwa 58&nbsp;%). Die Vorlage „Szene“ hat alle Elemente in einer Ebene.
         </div>
 
-        <div class="form-row" style="grid-template-columns: 2fr 120px auto;">
+        <div class="form-row" style="grid-template-columns: 2fr 110px 150px auto;">
           <div>
             <label>Vorlage</label>
             <select x-model="gfx.tplId" @change="gfxSelect(gfx.tplId)">
@@ -1010,8 +1010,17 @@
             <label>Ebene (1–99)</label>
             <input type="number" min="1" max="99" step="1" x-model.number="gfx.layer">
           </div>
+          <div x-show="gfxHasAnim()">
+            <label>Animation</label>
+            <select x-model="gfx.vals[gfx.tplId].anim" @change="gfxSetAnim()">
+              <option value="normal">normal</option>
+              <option value="fast">schnell</option>
+              <option value="off">aus (sofort)</option>
+            </select>
+          </div>
           <div style="align-self: end; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            <button type="button" class="btn-secondary" :disabled="gfx.busy" @click="gfxClear()">Alles leeren</button>
+            <button type="button" class="btn-secondary" :disabled="gfx.busy || !gfxLiveList().length" @click="gfxHideAll()" title="Alles mit Animation ausblenden; die Szene bleibt geladen">Alles ausblenden</button>
+            <button type="button" class="btn-secondary" :disabled="gfx.busy" @click="gfxClear()" title="Sofort alles entfernen (ohne Animation); die Seite wird danach neu geladen">Alles leeren</button>
           </div>
         </div>
         <div class="hint" x-show="gfxTpl()" x-text="gfxTpl() && gfxTpl().description"></div>
@@ -4247,6 +4256,7 @@ function app() {
       this.gfx.layer = t.default_layer;
       this.gfx.focus = '';
       this.gfxPrevReady = false;
+      this.gfxPreloadIfEmpty();
     },
 
     gfxCasparPorts() {
@@ -4275,7 +4285,50 @@ function app() {
     },
 
     async gfxStart() {
-      await this.gfxRun(async () => { await this.gfxApi('caspar_start', {}); }, 'CasparCG gestartet.');
+      await this.gfxRun(async () => {
+        await this.gfxApi('caspar_start', {});
+        // Szene gleich unsichtbar vorladen, damit das erste "Ein" nicht erst die Seite laden muss
+        const t = this.gfxTpl();
+        if (t && t.scene) await this.gfxEnsureScene();
+      }, 'CasparCG gestartet.');
+    },
+
+    // Beim Wechsel auf eine Szene: vorladen, wenn die Ebene leer ist (nie etwas Eingeblendetes ersetzen)
+    gfxPreloadIfEmpty() {
+      const t = this.gfxTpl();
+      if (!this.gfx.status.running || !t || !t.scene || this.gfxLayerState(this.gfx.layer)) return;
+      this.gfxRun(async () => { await this.gfxEnsureScene(); });
+    },
+
+    gfxHasAnim() {
+      const t = this.gfxTpl();
+      return !!(t && t.fields.some(f => f.key === 'anim') && this.gfx.vals[t.id]);
+    },
+
+    // Animationstempo der Szene aendern: wirkt sofort auf die geladene Szene und in der Vorschau
+    async gfxSetAnim() {
+      this.gfxPreviewSoon();
+      if (!this.gfxLayerHas(this.gfx.layer)) return;
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_update', { layer: this.gfx.layer, fields: { anim: this.gfx.vals[this.gfx.tplId].anim } });
+      });
+    },
+
+    // Alle eingeblendeten Elemente mit ihrer Animation ausblenden; Szenen bleiben geladen
+    async gfxHideAll() {
+      await this.gfxRun(async () => {
+        for (const l of this.gfxLiveList()) {
+          const st = this.gfxLayerState(l.layer);
+          const t = st ? this.gfx.templates.find(x => x.id === st.template) : null;
+          if (t && t.scene) {
+            const off = {};
+            (t.groups || []).forEach(g => { if (g.toggle) off[g.toggle] = false; });
+            await this.gfxApi('gfx_update', { layer: l.layer, fields: off });
+          } else {
+            await this.gfxApi('gfx_out', { layer: l.layer });
+          }
+        }
+      });
     },
 
     async gfxStopServer() {
@@ -4392,8 +4445,12 @@ function app() {
     },
 
     async gfxClear() {
-      if (!confirm('Alle Grafik-Ebenen sofort leeren?')) return;
-      await this.gfxRun(async () => { await this.gfxApi('gfx_clear', {}); });
+      if (!confirm('Alle Grafik-Ebenen sofort leeren (ohne Animation)? Die Szene wird danach neu geladen.')) return;
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_clear', {});
+        const t = this.gfxTpl();
+        if (t && t.scene) await this.gfxEnsureScene(); // gleich wieder unsichtbar vorladen
+      });
     },
 
     // ---- Vorschau ----

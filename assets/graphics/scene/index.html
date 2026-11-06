@@ -6,7 +6,7 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 .t{position:absolute;color:#fff;font-weight:700;white-space:nowrap}
 
 /* ---- Vollbild-Titelkarte (tc) ---- */
-#tc{position:absolute;left:0;top:0;width:1920px;height:1080px;background:#0d0d0d;opacity:0;transition:opacity .5s ease}
+#tc{position:absolute;left:0;top:0;width:1920px;height:1080px;background:#0d0d0d;opacity:0;transition:opacity calc(.5s * var(--a, 1)) ease}
 #tc.on{opacity:1}
 #tc_in{position:absolute;left:160px;right:160px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
 #tc[data-align="left"] #tc_in{align-items:flex-start;text-align:left}
@@ -16,7 +16,7 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 #tc_sub{color:#dcdcdc;font-size:60px;line-height:72px;white-space:nowrap;transform-origin:center center}
 
 /* ---- Spielstand (sb) ---- */
-#sb{position:absolute;width:1100px;height:150px;opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .4s ease}
+#sb{position:absolute;width:1100px;height:150px;opacity:0;transition:transform calc(.5s * var(--a, 1)) cubic-bezier(.2,.8,.2,1),opacity calc(.4s * var(--a, 1)) ease}
 #sb[data-pos="top-center"]{left:380px;top:50px;transform:translateY(-250px)}
 #sb[data-pos="top-left"]{left:60px;top:50px;transform:translateY(-250px)}
 #sb[data-pos="bottom-center"]{left:380px;bottom:60px;transform:translateY(250px)}
@@ -27,7 +27,7 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 #sb .n{position:absolute;top:50px;height:100px;line-height:100px;font-size:54px;font-weight:700;color:#fff;white-space:nowrap}
 #sb_n1{left:46px;width:380px;text-align:left}
 #sb_n2{left:674px;width:380px;text-align:right}
-#sb .s{position:absolute;top:50px;width:110px;height:100px;line-height:100px;text-align:center;font-size:80px;font-weight:700;color:#fff;background:#262626;transition:transform .25s ease}
+#sb .s{position:absolute;top:50px;width:110px;height:100px;line-height:100px;text-align:center;font-size:80px;font-weight:700;color:#fff;background:#262626;transition:transform calc(.25s * var(--a, 1)) ease}
 #sb_s1{left:430px}
 #sb_s2{left:560px}
 #sb .s.bump{transform:scale(1.18)}
@@ -37,7 +37,7 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 #sb_clock{position:absolute;left:810px;top:0;width:290px;height:46px;line-height:46px;text-align:center;font-size:34px;font-weight:700;color:#ffd24a;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 /* ---- Uhr (ck) ---- */
-#ck{position:absolute;width:380px;height:150px;opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .4s ease}
+#ck{position:absolute;width:380px;height:150px;opacity:0;transition:transform calc(.5s * var(--a, 1)) cubic-bezier(.2,.8,.2,1),opacity calc(.4s * var(--a, 1)) ease}
 #ck[data-pos="top-right"]{right:60px;top:70px;transform:translateY(-250px)}
 #ck[data-pos="top-left"]{left:80px;top:70px;transform:translateY(-250px)}
 #ck[data-pos="bottom-right"]{right:60px;bottom:70px;transform:translateY(250px)}
@@ -50,7 +50,7 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 #ck_time.done{color:#ff4040}
 
 /* ---- Namenseinblendung (np) ---- */
-#np{position:absolute;height:96px;opacity:0;transition:transform .55s cubic-bezier(.2,.8,.2,1),opacity .45s ease}
+#np{position:absolute;height:96px;opacity:0;transition:transform calc(.55s * var(--a, 1)) cubic-bezier(.2,.8,.2,1),opacity calc(.45s * var(--a, 1)) ease}
 #np[data-pos="bottom-left"]{left:90px;bottom:100px;transform:translateX(-900px)}
 #np[data-pos="bottom-right"]{right:90px;bottom:100px;transform:translateX(900px)}
 #np[data-pos="top-left"]{left:90px;top:100px;transform:translateX(-900px)}
@@ -62,7 +62,7 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 #np_t{position:relative;display:block;margin-left:76px;margin-right:60px;line-height:96px;font-size:56px;font-weight:700;color:#fff;white-space:nowrap;transform-origin:left center}
 
 /* ---- Bauchbinde (lt) ---- */
-#lt{position:absolute;width:1500px;height:200px;opacity:0;transition:transform .6s cubic-bezier(.2,.8,.2,1),opacity .5s ease}
+#lt{position:absolute;width:1500px;height:200px;opacity:0;transition:transform calc(.6s * var(--a, 1)) cubic-bezier(.2,.8,.2,1),opacity calc(.5s * var(--a, 1)) ease}
 #lt[data-pos="bottom-left"]{left:90px;bottom:90px;transform:translateX(-1700px)}
 #lt[data-pos="bottom-right"]{right:90px;bottom:90px;transform:translateX(1700px)}
 #lt[data-pos="top-left"]{left:90px;top:90px;transform:translateX(-1700px)}
@@ -73,21 +73,21 @@ html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transpa
 #lt .cap{position:absolute;left:1295px;top:20px;width:110px;height:130px;transform:skewX(-25deg);background:#000}
 #lt_tab{position:absolute;left:450px;top:128px;width:640px;height:56px;transform:skewX(-25deg)}
 #lt .line{position:absolute;height:3px}
-#lt .t{transform-origin:left center;opacity:0;transition:opacity .4s ease .25s}
+#lt .t{transform-origin:left center;opacity:0;transition:opacity calc(.4s * var(--a, 1)) ease calc(.25s * var(--a, 1))}
 #lt.on .t{opacity:1}
 #lt_l1{left:150px;top:36px;font-size:74px;line-height:90px}
 #lt_l2{left:520px;top:128px;width:480px;font-size:34px;line-height:56px;text-align:center}
 
 /* ---- Trenner (sl), liegt ueber allem ---- */
 #sl{position:absolute;left:0;top:430px;width:1920px;height:220px;overflow:hidden}
-#sl_band{position:absolute;left:100px;top:0;width:1720px;height:220px;background:#e0a000;transform:translateX(-2100px) skewX(-25deg);transition:transform .55s cubic-bezier(.2,.8,.2,1)}
+#sl_band{position:absolute;left:100px;top:0;width:1720px;height:220px;background:#e0a000;transform:translateX(-2100px) skewX(-25deg);transition:transform calc(.55s * var(--a, 1)) cubic-bezier(.2,.8,.2,1)}
 #sl_band.on{transform:translateX(0) skewX(-25deg)}
-#sl_band.out{transform:translateX(2100px) skewX(-25deg);transition:transform .6s cubic-bezier(.6,0,.8,.4)}
+#sl_band.out{transform:translateX(2100px) skewX(-25deg);transition:transform calc(.6s * var(--a, 1)) cubic-bezier(.6,0,.8,.4)}
 #sl_band .e1{position:absolute;left:0;top:0;width:1720px;height:14px;background:#fff}
 #sl_band .e2{position:absolute;left:0;bottom:0;width:1720px;height:14px;background:#fff}
-#sl_t{position:absolute;left:0;top:0;width:1920px;height:220px;text-align:center;line-height:220px;font-size:132px;font-weight:700;font-style:italic;letter-spacing:6px;color:#101010;white-space:nowrap;opacity:0;transition:opacity .35s ease .2s}
+#sl_t{position:absolute;left:0;top:0;width:1920px;height:220px;text-align:center;line-height:220px;font-size:132px;font-weight:700;font-style:italic;letter-spacing:6px;color:#101010;white-space:nowrap;opacity:0;transition:opacity calc(.35s * var(--a, 1)) ease calc(.2s * var(--a, 1))}
 #sl_t.on{opacity:1}
-#sl_t.out{opacity:0;transition:opacity .2s ease}
+#sl_t.out{opacity:0;transition:opacity calc(.2s * var(--a, 1)) ease}
 </style></head><body>
 
 <div id="tc" data-align="center"><div id="tc_in"><div id="tc_title"></div><div id="tc_line"></div><div id="tc_sub"></div></div></div>
@@ -230,7 +230,11 @@ reg('sl', function (c) {
   }
 });
 
-window.update = function (d) { route(parse(d)); };
+// Animationstempo fuer die ganze Szene: normal (1), schnell (0,4), aus (0 = Elemente erscheinen sofort)
+function setAnim(v) {
+  document.documentElement.style.setProperty('--a', String(v === 'fast' ? 0.4 : (v === 'off' ? 0 : 1)));
+}
+window.update = function (d) { var o = parse(d); if (o.anim !== undefined) setAnim(o.anim); route(o); };
 window.play = function () {};
 window.stop = function () { ['tc', 'sb', 'ck', 'np', 'lt'].forEach(function (id) { show(id, false); }); slHide(); };
 window.next = function () {};
