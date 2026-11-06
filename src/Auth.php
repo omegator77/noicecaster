@@ -72,6 +72,12 @@ class Auth
         }
         self::startSession();
         $t = $_SESSION['login_time'] ?? 0;
+        // Die Sitzungsdatei sofort wieder freigeben: PHP sperrt sie, solange die Anfrage laeuft, und eine langsame Anfrage
+        // (Signalpruefung, Netzwerk, Firewall) haette sonst alle anderen Anfragen derselben Anmeldung aufgehalten, auch einen
+        // Klick in der Oberflaeche. Hier wird die Sitzung nur gelesen; geschrieben wird nur beim Anmelden und Abmelden.
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
         // Sessions vor einer Passwortaenderung und abgelaufene Sessions sind ungueltig
         return $t > ($cfg['updated'] ?? 0) && (time() - $t) < self::SESSION_LIFETIME;
     }

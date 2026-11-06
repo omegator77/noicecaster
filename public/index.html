@@ -4168,7 +4168,19 @@ function app() {
       let data = null;
       try { data = await res.json(); } catch (e) { throw new Error('Unerwartete Antwort des Gateways'); }
       if (data && data.error) throw new Error(data.error);
+      this.gfxApplyResult(action, data);
       return data;
+    },
+
+    // Zustand sofort aus der Antwort uebernehmen (nicht erst auf den naechsten Statusabruf warten)
+    gfxApplyResult(action, r) {
+      if (!r || !r.success) return;
+      let g = this.gfx.status && this.gfx.status.graphics;
+      if (!g || Array.isArray(g)) { g = {}; this.gfx.status.graphics = g; }
+      if (action === 'gfx_take' && r.layer) g[String(r.layer)] = { template: r.template, fields: r.fields || {}, since: Math.floor(Date.now() / 1000) };
+      else if (action === 'gfx_update' && r.layer && g[String(r.layer)]) g[String(r.layer)].fields = r.fields || {};
+      else if (action === 'gfx_out' && r.layer) delete g[String(r.layer)];
+      else if (action === 'gfx_clear') { if (r.layer) delete g[String(r.layer)]; else for (const k of Object.keys(g)) delete g[k]; }
     },
 
     gfxSay(msg, ok) {
@@ -4245,13 +4257,14 @@ function app() {
       this.gfx.busy = true;
       try {
         await fn();
-        await this.gfxRefresh(false);
         if (okMsg) this.gfxSay(okMsg, true); else this.gfx.msg = '';
       } catch (e) {
         this.gfxSay(e.message, false);
       } finally {
         this.gfx.busy = false;
       }
+      // Den Status im Hintergrund nachziehen: die Knoepfe sind schon wieder frei, der Zustand kam aus der Antwort
+      this.gfxRefresh(false);
     },
 
     async gfxSaveSettings() {
@@ -4330,8 +4343,7 @@ function app() {
     async gfxEnsureScene() {
       const st = this.gfxLayerState(this.gfx.layer);
       if (!st || st.template !== this.gfx.tplId) {
-        await this.gfxApi('gfx_take', { template: this.gfx.tplId, layer: this.gfx.layer, fields: {} });
-        await this.gfxRefresh(false);
+        await this.gfxApi('gfx_take', { template: this.gfx.tplId, layer: this.gfx.layer, fields: {} }); // Zustand kommt aus der Antwort
       }
     },
 

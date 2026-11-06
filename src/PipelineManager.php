@@ -2499,6 +2499,27 @@ class PipelineManager
         TestSignal::start($device, $mode, strtoupper($systemLabel) . ', ANSCHLUSS ' . ($device + 1) . ', 16 TOENE');
     }
 
+    /** Startet scripts/probe_refresh.php losgeloest, wenn nicht schon eine Pruefung dieses Anschlusses laeuft. */
+    private static function startProbeRefresh(int $deviceNumber, string $connection, string $lockFile): void
+    {
+        $lock = @fopen($lockFile, 'c');
+        if ($lock === false) {
+            return;
+        }
+        $free = flock($lock, LOCK_EX | LOCK_NB);
+        if ($free) {
+            flock($lock, LOCK_UN);
+        }
+        fclose($lock);
+        if (!$free) {
+            return; // laeuft schon
+        }
+        $php = str_contains(basename(PHP_BINARY), 'fpm') ? 'php' : PHP_BINARY; // unter FPM ist PHP_BINARY nicht die Kommandozeilen-Version
+        $cmd = 'nohup ' . escapeshellarg($php) . ' ' . escapeshellarg(__DIR__ . '/../scripts/probe_refresh.php') . ' '
+            . (int)$deviceNumber . ' ' . escapeshellarg($connection) . ' > /dev/null 2>&1 &';
+        shell_exec($cmd);
+    }
+
     public function probeDecklinkSignal(int $deviceNumber, string $connection, bool $fresh = false): array
     {
         if ($deviceNumber < 0 || $deviceNumber > 3) {
@@ -2522,6 +2543,16 @@ class PipelineManager
                     return $c['result'];
                 }
             }
+        }
+        if (!$fresh) {
+            // Nie einen der wenigen PHP-Arbeitsprozesse fuer die Probe festhalten (bis zu 6 s, auf einem ausgelasteten Rechner
+            // wartet sonst jeder andere Klick hinter den Proben): die Auffrischung laeuft im Hintergrund, die Oberflaeche
+            // bekommt sofort das letzte Ergebnis (beim allerersten Abruf "Pruefung laeuft gerade").
+            self::startProbeRefresh($deviceNumber, $connection, $lockFile);
+            if ($cached !== null) {
+                return $cached['result'];
+            }
+            return ['signal' => false, 'width' => null, 'height' => null, 'framerate' => null, 'error' => 'Pruefung laeuft gerade'];
         }
         $lock = @fopen($lockFile, 'c');
         if ($lock !== false && !flock($lock, LOCK_EX | LOCK_NB)) {
