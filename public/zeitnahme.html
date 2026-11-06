@@ -219,6 +219,9 @@ function viewFahrer() {
   var h = '<div class="row" style="margin-bottom:14px"><h2 style="margin:0">Fahrer &amp; Startliste</h2><span class="spacer"></span>' +
     '<button class="b pri gross" data-act="neuerFahrer">+ Fahrer anmelden</button></div>';
   h += chips(true) + '<button class="chip" data-act="neueKlasse">+ Klasse</button></div>';
+  h += '<div class="row" style="margin:-4px 0 14px"><button class="b klein" data-act="excelLaden" data-was="fahrer">Excel-Datei laden</button>' +
+       '<a class="b klein" href="api.php?action=zeit_export&was=startliste">Als Excel speichern</a>' +
+       '<span class="muted">Spalten: Name, Traktor, Typ, Klasse (optional Startnr)</span></div>';
 
   var liste = ui.klasse === 'alle' ? S.starter.slice().sort(function (a, b) { return a.klasseId - b.klasseId || a.reihe - b.reihe; }) : inKlasse(ui.klasse);
   if (!S.klassen.length) {
@@ -347,7 +350,23 @@ function viewRang() {
 // ---- 4. Drucken & Mehr
 function viewMehr() {
   var h = '<h2>Einstellungen &amp; Mehr</h2>';
-  h += '<div class="card"><b>Druck, Excel und Zuschauerseite</b><div class="muted">Startliste und Ergebnisse drucken, Excel-Dateien laden und speichern und die Ergebnisseite für Handys folgen in einem späteren Schritt. Fahrer und Sponsoren lassen sich bis dahin über „Liste einfügen“ aus Excel übernehmen.</div></div>';
+  var base = new URL('api.php?action=', location.href).href;
+  h += '<div class="schritte">';
+  h += '<div class="card"><h3 style="margin-top:0">Ausdrucken</h3><div class="links">' +
+       '<a class="b" href="api.php?action=zeit_druck&was=startliste" target="_blank">Startliste</a>' +
+       '<a class="b" href="api.php?action=zeit_druck&was=ergebnis" target="_blank">Alle Ergebnisse</a>' +
+       '<a class="b" href="api.php?action=zeit_export&was=ergebnisse">Ergebnisse als Excel</a></div>' +
+       '<div class="muted">Öffnet eine Druckseite. Dort „Drucken“ antippen – oder als PDF speichern.</div></div>';
+  h += '<div class="card"><h3 style="margin-top:0">Für die Zuschauer</h3><div class="muted">Handys im selben Netz öffnen:</div>' +
+       '<div class="url" style="margin:8px 0">' + esc(base + 'zeit_ergebnisse') + '</div>' +
+       '<div class="muted">Die Seite aktualisiert sich selbst alle 15 Sekunden und braucht keine Anmeldung.</div></div>';
+  h += '<div class="card"><h3 style="margin-top:0">Für die Website</h3><div class="links"><a class="b" href="api.php?action=zeit_export_html">Ergebnisse als Datei speichern</a></div>' +
+       '<div class="muted">Eine fertige HTML-Datei, die man auf eine Webseite hochladen kann.</div></div>';
+  h += '<div class="card"><h3 style="margin-top:0">Messsystem</h3><div class="muted">Meldet die laufende Weite per Link (Meter, Komma oder Punkt):</div>' +
+       '<div class="url" style="margin:8px 0" id="liveUrl">…</div><div class="muted">Optional mit Bremswagen: …&amp;bremswagen=14,8. Der Schlüssel gehört nur dem Messsystem.</div>' +
+       '<div class="row" style="margin-top:10px"><button class="b klein" data-act="keyNeu">Neuen Schlüssel erzeugen</button></div></div>';
+  h += '</div>';
+  setTimeout(ladeKey, 0);
   h += '<h3>Einstellungen</h3><div class="card"><div class="schritte">' +
        '<div><label>Name der Veranstaltung</label><input type="text" id="setName" value="' + esc(S.event.name) + '"></div>' +
        '<div><label>Kürzel (in der Grafik)</label><input type="text" id="setKurz" value="' + esc(S.event.kurz) + '"></div>' +
@@ -355,7 +374,8 @@ function viewMehr() {
        '<div class="row" style="margin-top:14px"><button class="b pri" data-act="setSpeichern">Einstellungen speichern</button></div></div>';
 
   h += '<h3>Zum Ausprobieren / Neustart</h3><div class="card"><div class="row"><button class="b" data-act="demo">Beispieldaten laden</button><button class="b rot" data-act="reset">Alles löschen (neue Veranstaltung)</button></div></div>';
-  h += '<div class="muted" style="margin-top:14px">Alle Daten werden laufend automatisch gesichert (in der Datenbank des Gateways, die letzten 60 Stände).</div>';
+  h += '<h3>Sicherung</h3><div class="card"><div class="row"><a class="b" href="api.php?action=zeit_backup_download">Sicherung herunterladen</a>' +
+       '<span class="muted">Alle Daten werden laufend automatisch gesichert (in der Datenbank des Gateways, die letzten 60 Stände).</span></div></div>';
   return h;
 }
 
@@ -410,6 +430,9 @@ function sponsorOf(i) { return S.sponsoren.filter(function (x) { return x.id ===
 function viewSponsoren() {
   var sd = S.sendung, h = '<div class="row" style="margin-bottom:6px"><h2 style="margin:0">Sponsoren</h2><span class="spacer"></span>' +
     '<button class="b pri gross" data-act="spNeu">+ Sponsor anlegen</button></div>';
+  h += '<div class="row" style="margin-bottom:14px"><button class="b klein" data-act="excelLaden" data-was="sponsoren">Excel-Datei laden</button>' +
+       '<a class="b klein" href="api.php?action=zeit_export&was=sponsoren">Als Excel speichern</a>' +
+       '<span class="muted">Spalten: Name, Spruch, Paket</span></div>';
   if (!S.sponsoren.length) return h + '<div class="card leer"><b>Noch keine Sponsoren</b>Lege den ersten Sponsor an oder lade eine Excel-Liste.</div>';
   h += '<div class="card"><table><tr><th>Logo</th><th>Sponsor</th><th class="opt">Spruch</th><th class="opt">Paket</th><th>Im Balken</th><th></th></tr>';
   S.sponsoren.forEach(function (x) {
@@ -463,6 +486,22 @@ function logoLaden(file, fertig) {
   };
   r.readAsDataURL(file);
 }
+function ladeKey(k) {
+  var set = function (key) { var e = $('liveUrl'); if (e) e.textContent = new URL('api.php?action=zeit_live&key=' + key + '&distanz=', location.href).href + '37'; };
+  if (k) set(k); else gw('zeit_key').then(function (r) { return r.json(); }).then(function (j) { set(j.key); });
+}
+function dateiHoch(file, was) {
+  if (!file) return;
+  gw('zeit_excel&was=' + was + '&name=' + encodeURIComponent(file.name), { method: 'POST', body: file })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j.ok) { toast(j.fehler || 'Fehler', true); return; }
+      var t = (j.neu || 0) + ' neu' + (j.aktualisiert ? ', ' + j.aktualisiert + ' aktualisiert' : '') + (j.fehler && j.fehler.length ? ' – ' + j.fehler.length + ' Zeilen übersprungen' : '');
+      toast('Excel geladen: ' + t, j.fehler && j.fehler.length > 0);
+      return refresh(true);
+    }).catch(function () { toast('Server nicht erreichbar.', true); });
+}
+
 // ------------------------------------------------------------ Dialoge
 function modal(html) { $('modalBox').innerHTML = html; $('modal').hidden = false; var f = $('modalBox').querySelector('input,textarea,select'); if (f) f.focus(); }
 function schliessen() { $('modal').hidden = true; $('modalBox').innerHTML = ''; }
@@ -526,6 +565,8 @@ document.addEventListener('click', function (ev) {
         return refresh(true);
       }).catch(function () { toast('Server nicht erreichbar.', true); });
       break;
+    case 'excelLaden': { var fx = document.createElement('input'); fx.type = 'file'; fx.accept = '.xlsx,.csv,.txt'; var was = t.getAttribute('data-was'); fx.onchange = function () { dateiHoch(fx.files[0], was); }; fx.click(); break; }
+    case 'keyNeu': if (confirm('Neuen Schlüssel erzeugen? Das Messsystem muss dann den neuen Link bekommen.')) gw('zeit_key', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) { ladeKey(j.key); toast('Neuer Schlüssel ist gesetzt'); }); break;
     case 'sw': { var k = t.getAttribute('data-k'), o = {}; o[k] = !S.sendung.show[k]; act({ typ: 'sendung', schalter: o }, null, false); break; }
     case 'swLeeren': act({ typ: 'sendung', leeren: true }, 'Alles ausgeblendet'); break;
     case 'auAn': {

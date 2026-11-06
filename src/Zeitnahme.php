@@ -119,4 +119,25 @@ class Zeitnahme
     {
         return $this->pdo->query('SELECT id, created_at, grund, rev FROM zeit_backup ORDER BY id DESC')->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    // ----- Zugangsschluessel fuer das Messsystem (Weite per Link melden) -------------------------------------------------
+
+    private static function keyPath(): string
+    {
+        return __DIR__ . '/../data/zeit_key.txt';
+    }
+
+    /** Schluessel lesen; wird beim ersten Aufruf (oder mit $neu) erzeugt. */
+    public static function schluessel(bool $neu = false): string
+    {
+        $k = trim((string)@file_get_contents(self::keyPath()));
+        if ($neu || $k === '') {
+            $k = bin2hex(random_bytes(12));
+            $tmp = self::keyPath() . '.tmp';
+            @file_put_contents($tmp, $k, LOCK_EX);
+            @chmod($tmp, 0600);
+            @rename($tmp, self::keyPath());
+        }
+        return $k;
+    }
 }

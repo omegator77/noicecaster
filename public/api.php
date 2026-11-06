@@ -17,6 +17,7 @@ require_once __DIR__ . '/../src/GraphicsLibrary.php';
 require_once __DIR__ . '/../src/GraphicsEntries.php';
 require_once __DIR__ . '/../src/Zeitnahme.php';
 require_once __DIR__ . '/../src/ZeitGrafik.php';
+require_once __DIR__ . '/../src/ZeitnahmeSeiten.php';
 
 header('Content-Type: application/json');
 
@@ -276,6 +277,115 @@ try {
             } catch (ZeitFehler $e) {
                 http_response_code(400);
                 echo json_encode(['ok' => false, 'fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            }
+            break;
+
+        case 'zeit_druck':
+        case 'zeit_export_html':
+        case 'zeit_ergebnisse':
+            $D = (new Zeitnahme($db->pdo()))->dokument();
+            $kl = (int)($_GET['klasse'] ?? 0) ?: null;
+            header('Content-Type: text/html; charset=utf-8');
+            header('Cache-Control: no-store');
+            header('X-Content-Type-Options: nosniff');
+            if ($action === 'zeit_ergebnisse') {
+                echo ZeitnahmeSeiten::ergebnis($D, $kl, true, 15, 'api.php?action=zeit_ergebnisse');
+            } elseif ($action === 'zeit_export_html') {
+                header('Content-Disposition: attachment; filename="ergebnisse.html"');
+                echo ZeitnahmeSeiten::ergebnis($D, null, false);
+            } elseif (($_GET['was'] ?? '') === 'startliste') {
+                echo ZeitnahmeSeiten::startliste($D);
+            } else {
+                echo ZeitnahmeSeiten::ergebnis($D, $kl, false);
+            }
+            break;
+
+        case 'zeit_export':
+            $D = (new Zeitnahme($db->pdo()))->dokument();
+            $was = (string)($_GET['was'] ?? '');
+            $files = ['startliste' => 'excelStartliste', 'ergebnisse' => 'excelErgebnisse', 'sponsoren' => 'excelSponsoren'];
+            if (!isset($files[$was])) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Unbekannte Datei']);
+                break;
+            }
+            header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            header('Content-Disposition: attachment; filename="' . $was . '.xlsx"');
+            header('Cache-Control: no-store');
+            echo ZeitnahmeSeiten::{$files[$was]}($D);
+            break;
+
+        case 'zeit_backup_download':
+            header('Content-Type: application/json; charset=utf-8');
+            header('Content-Disposition: attachment; filename="zeitnahme-' . date('Y-m-d-H-i') . '.json"');
+            echo json_encode((new Zeitnahme($db->pdo()))->dokument(), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_PRESERVE_ZERO_FRACTION);
+            break;
+
+        case 'zeit_excel':
+            // Datei hochladen: ?was=fahrer|sponsoren&name=datei.xlsx (Inhalt der Datei im Body)
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            try {
+                $body = (string)file_get_contents('php://input');
+                if (strlen($body) > 8000000) {
+                    throw new ZeitFehler('Die Datei ist zu gross.');
+                }
+                $was = (string)($_GET['was'] ?? '');
+                $zeilen = ZeitnahmeSeiten::dateiZeilen($body, (string)($_GET['name'] ?? ''));
+                $zeit = new Zeitnahme($db->pdo());
+                if ($was === 'fahrer') {
+                    $r = $zeit->aktion(['typ' => 'importieren', 'text' => ZeitnahmeSeiten::fahrerZuText($zeilen)]);
+                } elseif ($was === 'sponsoren') {
+                    $r = $zeit->aktion(['typ' => 'sponsorenImportieren', 'text' => implode("\n", array_map(fn($z) => implode("\t", $z), $zeilen))]);
+                } else {
+                    throw new ZeitFehler('Unbekannter Import.');
+                }
+                try {
+                    ZeitGrafik::push($zeit);
+                } catch (Throwable $ge) {
+                }
+                echo json_encode(['ok' => true] + $r, JSON_UNESCAPED_UNICODE);
+            } catch (ZeitFehler $e) {
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            }
+            break;
+
+        case 'zeit_live':
+            // Fuer ein Messsystem: ?key=...&distanz=37&bremswagen=14 (laufende Weite in der Grafik)
+            if (!hash_equals(Zeitnahme::schluessel(), (string)($_GET['key'] ?? ''))) {
+                http_response_code(403);
+                echo json_encode(['ok' => false, 'fehler' => 'Zugangsschluessel falsch']);
+                break;
+            }
+            try {
+                $a = ['typ' => 'live'];
+                foreach (['distanz', 'bremswagen'] as $f) {
+                    if (isset($_GET[$f])) {
+                        $a[$f] = (string)$_GET[$f];
+                    }
+                }
+                $zeit = new Zeitnahme($db->pdo());
+                $zeit->aktion($a);
+                try {
+                    ZeitGrafik::push($zeit);
+                } catch (Throwable $ge) {
+                }
+                echo json_encode(['ok' => true]);
+            } catch (ZeitFehler $e) {
+                http_response_code(400);
+                echo json_encode(['ok' => false, 'fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            }
+            break;
+
+        case 'zeit_key':
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                echo json_encode(['key' => Zeitnahme::schluessel(true)]);
+            } else {
+                echo json_encode(['key' => Zeitnahme::schluessel()]);
             }
             break;
 

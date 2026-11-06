@@ -82,6 +82,12 @@ class Auth
         return $t > ($cfg['updated'] ?? 0) && (time() - $t) < self::SESSION_LIFETIME;
     }
 
+    /** Nur lesende Aktionen, die per Link oder Bild aufgerufen werden und keinen eigenen Header senden koennen (die Anmeldung wird geprueft). */
+    private const OHNE_HEADER = ['preview_image', 'gfx_file', 'zeit_druck', 'zeit_export', 'zeit_export_html', 'zeit_backup_download'];
+
+    /** Ohne Anmeldung erreichbar: Ergebnisseite fuer Zuschauer (nur lesend) und Messsystem (eigener Zugangsschluessel, in api.php geprueft). */
+    private const OEFFENTLICH = ['zeit_ergebnisse', 'zeit_live'];
+
     /** Wird oben in api.php aufgerufen; beendet die Anfrage bei Bedarf. */
     public static function handle(): void
     {
@@ -91,7 +97,7 @@ class Auth
             // Gegen Cross-Site-Anfragen: ein eigener Header ist per Browser nur von der eigenen Seite moeglich.
             // Vorschau-Bilder (<img>) und die Vorschau-Seite einer Grafikvorlage (<iframe>, "gfx_file") koennen keinen Header
             // senden und sind nur lesend; die Anmeldung wird weiter geprueft (Cookie SameSite=Strict).
-            if ($action !== 'preview_image' && $action !== 'gfx_file' && ($_SERVER['HTTP_X_GW_REQUEST'] ?? '') !== '1') {
+            if (!in_array($action, self::OHNE_HEADER, true) && !in_array($action, self::OEFFENTLICH, true) && ($_SERVER['HTTP_X_GW_REQUEST'] ?? '') !== '1') {
                 self::deny(403, 'Ungueltige Anfrage');
             }
         }
@@ -115,7 +121,7 @@ class Auth
                 exit;
         }
 
-        if (self::isLoopback() || !self::isConfigured()) {
+        if (self::isLoopback() || !self::isConfigured() || in_array($action, self::OEFFENTLICH, true)) {
             return;
         }
         if (!self::isLoggedIn()) {

@@ -1188,7 +1188,7 @@ final class ZeitnahmeLogic
     }
 
     /** Stechen-Weiten fuer die Grafik (nur wer im Full Pull ist und tatsaechlich im Stechen war). */
-    private static function stechenListe(array $st, array $row): array
+    public static function stechenListe(array $st, array $row): array
     {
         if (!$row['fullPull']) {
             return [];

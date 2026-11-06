@@ -49,3 +49,5 @@ data/lowerthird_*.json
 data/overlay_*.json
 data/zeit_push.json
 data/zeit_push.json.tmp
+data/zeit_key.txt
+data/zeit_key.txt.tmp
