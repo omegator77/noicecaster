@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Namenseinblendung</title>
+<style>
+/* Leichtbau-Regel: nur Transparenz und Verschiebung animieren, keine Unschaerfe, keine Schatten, keine Filter. */
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:"Liberation Sans Narrow","Liberation Sans",Arial,sans-serif}
+.box{position:absolute;height:96px;opacity:0;transition:transform .55s cubic-bezier(.2,.8,.2,1),opacity .45s ease}
+.pos-bottom-left{left:90px;bottom:100px;transform:translateX(-900px)}
+.pos-bottom-right{right:90px;bottom:100px;transform:translateX(900px)}
+.pos-top-left{left:90px;top:100px;transform:translateX(-900px)}
+.pos-top-right{right:90px;top:100px;transform:translateX(900px)}
+.box.on{opacity:1;transform:none}
+.bar{position:absolute;left:0;top:0;width:22px;height:96px;transform:skewX(-20deg)}
+.bg{position:absolute;left:30px;top:0;height:96px;right:0;transform:skewX(-20deg);background:#141414}
+#t{position:relative;display:block;margin-left:76px;margin-right:60px;line-height:96px;font-size:56px;font-weight:700;color:#fff;white-space:nowrap;transform-origin:left center}
+#wrap{position:relative;display:inline-block;height:96px;min-width:300px}
+</style></head><body>
+<div class="box pos-bottom-left" id="box"><div id="wrap"><div class="bg"></div><div class="bar" id="bar"></div><span id="t"></span></div></div>
+<script>
+var playing = false, hasData = false, box = document.getElementById('box');
+function parse(d) { try { if (typeof d === 'string') d = JSON.parse(d); if (d && typeof d.b64 === 'string') d = JSON.parse(decodeURIComponent(escape(atob(d.b64)))); } catch (e) { return {}; } return d || {}; }
+function apply(o) {
+  if (o.text !== undefined) { var t = document.getElementById('t'); t.textContent = o.text; t.style.transform = ''; var w = t.offsetWidth; if (w > 1300) t.style.transform = 'scaleX(' + (1300 / w) + ')'; }
+  if (o.color) document.getElementById('bar').style.background = o.color;
+  if (o.position) box.className = 'box pos-' + o.position + (box.classList.contains('on') ? ' on' : '');
+  hasData = true; refresh();
+}
+function refresh() { if (playing && hasData) box.classList.add('on'); else box.classList.remove('on'); }
+window.update = function (d) { apply(parse(d)); };
+window.play = function () { playing = true; refresh(); };
+window.stop = function () { playing = false; refresh(); };
+window.next = function () {};
+</script></body></html>

@@ -1,0 +1,14 @@
+{
+  "id": "nameplate",
+  "name": "Namenseinblendung (1 Zeile)",
+  "category": "Einblendung",
+  "description": "Kompakte einzeilige Einblendung mit Akzentstreifen, zum Beispiel für einen Namen oder einen kurzen Hinweis.",
+  "default_layer": 22,
+  "out_ms": 600,
+  "fields": [
+    {"key": "text", "label": "Text", "type": "text", "max": 60, "default": "Name Nachname"},
+    {"key": "color", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "position", "label": "Position", "type": "select", "default": "bottom-left",
+     "options": [["bottom-left", "Unten links"], ["bottom-right", "Unten rechts"], ["top-left", "Oben links"], ["top-right", "Oben rechts"]]}
+  ]
+}

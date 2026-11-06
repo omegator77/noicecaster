@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Trenner</title>
+<style>
+/* Leichtbau-Regel: nur Verschiebung und Transparenz animieren, keine Unschaerfe, keine Schatten, keine Filter. */
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:"Liberation Sans Narrow","Liberation Sans",Arial,sans-serif}
+.wrap{position:absolute;left:0;top:430px;width:1920px;height:220px;overflow:hidden}
+.band{position:absolute;left:100px;top:0;width:1720px;height:220px;background:#e0a000;transform:translateX(-2100px) skewX(-25deg);transition:transform .55s cubic-bezier(.2,.8,.2,1)}
+.band.on{transform:translateX(0) skewX(-25deg)}
+.band.out{transform:translateX(2100px) skewX(-25deg);transition:transform .6s cubic-bezier(.6,0,.8,.4)}
+.edge{position:absolute;left:0;top:0;width:1720px;height:14px;background:#fff}
+.edge2{position:absolute;left:0;bottom:0;width:1720px;height:14px;background:#fff}
+#t{position:absolute;left:0;top:0;width:1920px;height:220px;text-align:center;line-height:220px;font-size:132px;font-weight:700;font-style:italic;letter-spacing:6px;color:#101010;white-space:nowrap;opacity:0;transition:opacity .35s ease .2s}
+#t.on{opacity:1}
+#t.out{opacity:0;transition:opacity .2s ease}
+</style></head><body>
+<div class="wrap"><div class="band" id="band"><div class="edge"></div><div class="edge2"></div></div><div id="t"></div></div>
+<script>
+var playing = false, hasData = false, hold = 0, timer = null, band = document.getElementById('band'), t = document.getElementById('t');
+function parse(d) { try { if (typeof d === 'string') d = JSON.parse(d); if (d && typeof d.b64 === 'string') d = JSON.parse(decodeURIComponent(escape(atob(d.b64)))); } catch (e) { return {}; } return d || {}; }
+function fit() { t.style.transform = ''; var w = t.scrollWidth; if (w > 1800) t.style.transform = 'scaleX(' + (1800 / w) + ')'; }
+function apply(o) {
+  if (o.text !== undefined) { t.textContent = o.text; }
+  if (o.color) band.style.background = o.color;
+  if (o.textcolor) t.style.color = o.textcolor;
+  if (o.hold !== undefined) hold = Number(o.hold) || 0;
+  hasData = true; refresh();
+}
+function show() {
+  band.className = 'band on'; t.className = 'on';
+  if (timer) clearTimeout(timer);
+  if (hold > 0) timer = setTimeout(hide, hold * 1000);
+}
+function hide() {
+  if (timer) { clearTimeout(timer); timer = null; }
+  band.className = 'band out'; t.className = 'out';
+  setTimeout(function () { band.className = 'band'; t.className = ''; }, 700);
+}
+function refresh() { /* Anzeigen nur ueber play() */ }
+window.update = function (d) { apply(parse(d)); };
+window.play = function () { playing = true; if (hasData) show(); else setTimeout(show, 50); };
+window.stop = function () { playing = false; hide(); };
+window.next = function () {};
+</script></body></html>

@@ -16,6 +16,14 @@ Weboberfläche bedient.
 - **Mehrere DeckLink-Anschlüsse/Sub-Devices** mit eigenen Profilen und Audiokanalzahlen
 - **Grafik:** Bauchbinden mit animiertem Ein- und Ausflug (eigene SVG-Vorlagen hochladbar),
   Text-Einblendung, Textbibliothek, **Key & Fill** auf zwei SDI-Ausgängen für den Bildmischer
+- **Grafik mit CasparCG:** Der Reiter „Grafik (CasparCG)" steuert einen von der Oberfläche
+  gestarteten CasparCG-Server (Key & Fill und Videoausgang über DeckLink-Anschlüsse mit der
+  Rolle „CasparCG"). Universelle HTML-Vorlagen (Szene mit allen Elementen in einer Ebene,
+  Bauchbinde, Namenseinblendung, Titelkarte, Uhr/Countdown/Stoppuhr, Trenner, Spielstand)
+  mit automatischer Eingabemaske, Vorschau und Bibliothek gespeicherter Einträge. Ohne
+  Grafikkarte hält CasparCG nur eine Grafikebene in Echtzeit, deshalb ist die Szene empfohlen.
+  Installation: `sh deploy/install-casparcg.sh` (nur Ubuntu 26.04), der Steuerport 5250 darf
+  von außen nicht erreichbar sein.
 - **Betrieb:** Presets, Testsignal, Live-Statistik (Bitrate, Verbindung, System),
   Netzwerkkonfiguration mit Bestätigung, Firewall-Verwaltung, zeitgesteuerter Neustart,
   Login mit Sperre nach Fehlversuchen

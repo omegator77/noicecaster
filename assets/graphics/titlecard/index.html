@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Vollbild-Titelkarte</title>
+<style>
+/* Leichtbau-Regel: nur Transparenz animieren, keine Unschaerfe, keine Schatten, keine Filter. */
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:"Liberation Sans Narrow","Liberation Sans",Arial,sans-serif}
+#card{position:absolute;left:0;top:0;width:1920px;height:1080px;background:#0d0d0d;opacity:0;transition:opacity .5s ease}
+#card.on{opacity:1}
+#inner{position:absolute;left:160px;right:160px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}
+#inner.left{align-items:flex-start;text-align:left}
+#title{color:#fff;font-weight:700;font-size:132px;line-height:150px;max-width:1600px;white-space:nowrap;transform-origin:center center}
+#inner.left #title{transform-origin:left center}
+#line{width:260px;height:8px;margin:34px 0;background:#1fa012;transform:skewX(-25deg)}
+#sub{color:#dcdcdc;font-size:60px;line-height:72px;max-width:1600px;white-space:nowrap;transform-origin:center center}
+#inner.left #sub{transform-origin:left center}
+</style></head><body>
+<div id="card"><div id="inner"><div id="title"></div><div id="line"></div><div id="sub"></div></div></div>
+<script>
+var playing = false, hasData = false, card = document.getElementById('card');
+function parse(d) { try { if (typeof d === 'string') d = JSON.parse(d); if (d && typeof d.b64 === 'string') d = JSON.parse(decodeURIComponent(escape(atob(d.b64)))); } catch (e) { return {}; } return d || {}; }
+function fit(el, maxW) { el.style.transform = ''; var w = el.scrollWidth; if (w > maxW) el.style.transform = 'scaleX(' + (maxW / w) + ')'; }
+function apply(o) {
+  if (o.title !== undefined) { var a = document.getElementById('title'); a.textContent = o.title; fit(a, 1600); }
+  if (o.subtitle !== undefined) { var b = document.getElementById('sub'); b.textContent = o.subtitle; fit(b, 1600); }
+  if (o.bg) card.style.background = o.bg;
+  if (o.accent) document.getElementById('line').style.background = o.accent;
+  if (o.align) document.getElementById('inner').className = o.align === 'left' ? 'left' : '';
+  hasData = true; refresh();
+}
+function refresh() { if (playing && hasData) card.classList.add('on'); else card.classList.remove('on'); }
+window.update = function (d) { apply(parse(d)); };
+window.play = function () { playing = true; refresh(); };
+window.stop = function () { playing = false; refresh(); };
+window.next = function () {};
+</script></body></html>

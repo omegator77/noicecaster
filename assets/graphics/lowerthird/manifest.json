@@ -1,0 +1,15 @@
+{
+  "id": "lowerthird",
+  "name": "Bauchbinde (2 Zeilen)",
+  "category": "Einblendung",
+  "description": "Schräges schwarzes Band mit Hauptzeile und farbiger Lasche für die zweite Zeile.",
+  "default_layer": 20,
+  "out_ms": 700,
+  "fields": [
+    {"key": "line1", "label": "Hauptzeile", "type": "text", "max": 60, "default": "Name Nachname"},
+    {"key": "line2", "label": "Zweite Zeile (Lasche)", "type": "text", "max": 40, "default": "Funktion"},
+    {"key": "color", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "position", "label": "Position", "type": "select", "default": "bottom-left",
+     "options": [["bottom-left", "Unten links"], ["bottom-right", "Unten rechts"], ["top-left", "Oben links"], ["top-right", "Oben rechts"]]}
+  ]
+}

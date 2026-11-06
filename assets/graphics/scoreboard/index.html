@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Spielstand</title>
+<style>
+/* Leichtbau-Regel: nur Transparenz und Verschiebung animieren, keine Unschaerfe, keine Schatten, keine Filter. */
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:"Liberation Sans Narrow","Liberation Sans",Arial,sans-serif}
+.box{position:absolute;width:1100px;height:150px;opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .4s ease}
+.pos-top-center{left:410px;top:50px;transform:translateY(-250px)}
+.pos-top-left{left:60px;top:50px;transform:translateY(-250px)}
+.pos-bottom-center{left:410px;bottom:60px;transform:translateY(250px)}
+.box.on{opacity:1;transform:none}
+.row{position:absolute;left:0;top:50px;width:1100px;height:100px;background:#141414}
+.c1{position:absolute;left:0;top:50px;width:26px;height:100px}
+.c2{position:absolute;left:1074px;top:50px;width:26px;height:100px}
+.n{position:absolute;top:50px;height:100px;line-height:100px;font-size:54px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden}
+#n1{left:46px;width:380px;text-align:left}
+#n2{left:674px;width:380px;text-align:right}
+.s{position:absolute;top:50px;width:110px;height:100px;line-height:100px;text-align:center;font-size:80px;font-weight:700;color:#fff;background:#262626;transition:transform .25s ease}
+#s1{left:430px}
+#s2{left:560px}
+.s.bump{transform:scale(1.18)}
+#sep{position:absolute;left:540px;top:50px;width:20px;height:100px;line-height:96px;text-align:center;font-size:60px;color:#fff;font-weight:700}
+#label{position:absolute;left:0;top:0;width:1100px;height:46px;line-height:46px;text-align:center;font-size:30px;font-weight:700;letter-spacing:3px;color:#fff;white-space:nowrap}
+#lbg{position:absolute;left:300px;top:0;width:500px;height:46px;background:#262626}
+#clock{position:absolute;left:810px;top:0;width:290px;height:46px;line-height:46px;text-align:center;font-size:34px;font-weight:700;color:#ffd24a;font-variant-numeric:tabular-nums;white-space:nowrap}
+</style></head><body>
+<div class="box pos-top-center" id="box">
+  <div id="lbg"></div><div id="label"></div><div id="clock"></div>
+  <div class="row"></div><div class="c1" id="c1"></div><div class="c2" id="c2"></div>
+  <div class="n" id="n1"></div><div class="s" id="s1">0</div><div id="sep">:</div><div class="s" id="s2">0</div><div class="n" id="n2"></div>
+</div>
+<script>
+var playing = false, hasData = false, box = document.getElementById('box'), last = {s1: null, s2: null};
+function parse(d) { try { if (typeof d === 'string') d = JSON.parse(d); if (d && typeof d.b64 === 'string') d = JSON.parse(decodeURIComponent(escape(atob(d.b64)))); } catch (e) { return {}; } return d || {}; }
+function fit(el, maxW) { el.style.fontSize = ''; el.style.transform = ''; var w = el.scrollWidth; if (w > maxW) el.style.transform = 'scaleX(' + (maxW / w) + ')'; el.style.transformOrigin = el.id === 'n2' ? 'right center' : 'left center'; }
+function setScore(id, v) {
+  var el = document.getElementById(id), txt = String(Math.round(Number(v) || 0));
+  if (last[id] !== null && last[id] !== txt) { el.classList.add('bump'); setTimeout(function () { el.classList.remove('bump'); }, 280); }
+  last[id] = txt; el.textContent = txt;
+}
+function apply(o) {
+  if (o.name1 !== undefined) { var a = document.getElementById('n1'); a.textContent = o.name1; fit(a, 372); }
+  if (o.name2 !== undefined) { var b = document.getElementById('n2'); b.textContent = o.name2; fit(b, 372); }
+  if (o.score1 !== undefined) setScore('s1', o.score1);
+  if (o.score2 !== undefined) setScore('s2', o.score2);
+  if (o.color1) document.getElementById('c1').style.background = o.color1;
+  if (o.color2) document.getElementById('c2').style.background = o.color2;
+  if (o.label !== undefined) { document.getElementById('label').textContent = o.label; document.getElementById('lbg').style.display = o.label ? 'block' : 'none'; }
+  if (o.clock !== undefined) { document.getElementById('clock').textContent = o.clock; }
+  if (o.position) box.className = 'box pos-' + o.position + (box.classList.contains('on') ? ' on' : '');
+  hasData = true; refresh();
+}
+function refresh() { if (playing && hasData) box.classList.add('on'); else box.classList.remove('on'); }
+window.update = function (d) { apply(parse(d)); };
+window.play = function () { playing = true; refresh(); };
+window.stop = function () { playing = false; refresh(); };
+window.next = function () {};
+</script></body></html>

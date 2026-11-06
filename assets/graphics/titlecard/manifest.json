@@ -1,0 +1,15 @@
+{
+  "id": "titlecard",
+  "name": "Vollbild-Titelkarte",
+  "category": "Vollbild",
+  "description": "Ganzer Bildschirm mit Titel und Untertitel auf einfarbigem Hintergrund, zum Beispiel für Pausen, Ansagen oder Übergänge.",
+  "default_layer": 5,
+  "out_ms": 600,
+  "fields": [
+    {"key": "title", "label": "Titel", "type": "text", "max": 60, "default": "Titel"},
+    {"key": "subtitle", "label": "Untertitel", "type": "text", "max": 100, "default": "Untertitel"},
+    {"key": "bg", "label": "Hintergrund", "type": "color", "default": "#0d0d0d"},
+    {"key": "accent", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "align", "label": "Ausrichtung", "type": "select", "default": "center", "options": [["center", "Mittig"], ["left", "Links"]]}
+  ]
+}

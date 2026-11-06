@@ -131,6 +131,19 @@
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   label { font-size: 0.8rem; color: #9ca3af; display: block; margin-bottom: 0.25rem; }
   .hint { font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem; }
+  /* Grafik (CasparCG) */
+  .gfx-prev-frame { position: relative; width: 480px; height: 270px; max-width: 100%; overflow: hidden; border: 1px solid #2a2e37; border-radius: 6px;
+    background: repeating-conic-gradient(#2a2e37 0% 25%, #1b1e25 0% 50%) 50% / 24px 24px; }
+  .gfx-prev-frame iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform: scale(0.25); transform-origin: 0 0; pointer-events: none; background: transparent; }
+  .gfx-fields input[type="color"] { height: 2.1rem; padding: 2px; cursor: pointer; }
+  .gfx-unit { border: 1px solid #2a2e37; border-radius: 8px; padding: 0.6rem 0.75rem; margin-top: 0.6rem; background: #14171d; }
+  .gfx-unit.gfx-live { border-color: #16a34a; }
+  .gfx-unit-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; }
+  .gfx-unit-head strong { color: #e4e6eb; font-size: 0.95rem; }
+  .gfx-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.6rem 0.75rem; margin-top: 0.6rem; }
+  .gfx-check { display: flex; align-items: center; gap: 0.5rem; color: #e4e6eb; font-size: 0.85rem; cursor: pointer; margin-top: 1.3rem; }
+  .gfx-pill { display: inline-block; padding: 0.05rem 0.5rem; border-radius: 999px; font-size: 0.72rem; background: #3f3f46; color: #a1a1aa; }
+  .gfx-pill.on { background: #14532d; color: #86efac; }
   input, select {
     width: 100%;
     padding: 0.5rem;
@@ -365,7 +378,7 @@
   }).catch(() => {});
 })();
 </script>
-<div class="container" x-data="app()" x-init="loadFiles(); loadPresets(); textlibLoad(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
+<div class="container" x-data="app()" x-init="loadFiles(); loadPresets(); textlibLoad(); gfxBoot(); pollSystemInfo(true); Promise.all([load(), loadPorts()]).then(() => { initTiles(); initSignalPolling(); pollSystemStats(); pollNetwork(); pollStats(); initPreviewTicker(); startLoadLoop(); })">
   <header class="topbar" :style="sysInfo ? '--sys-accent:' + sysInfo.self.accent : ''">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -486,10 +499,11 @@
             <span>Anschluss <span x-text="port.device_number + 1"></span></span>
           </div>
           <div>
-            <select x-model="port.role" @change="if (port.role === 'output' && port.mode === 'auto') port.mode = '1080i50'">
+            <select x-model="port.role" @change="if ((port.role === 'output' || port.role === 'caspar') && port.mode === 'auto') port.mode = '1080i50'">
               <option value="unused">Nicht verwendet</option>
               <option value="input">Eingang (SDI → SRT)</option>
               <option value="output">Ausgang (SRT → SDI)</option>
+              <option value="caspar">CasparCG (Grafik, reserviert)</option>
             </select>
           </div>
           <div>
@@ -497,7 +511,7 @@
           </div>
           <div x-show="port.role !== 'unused'">
             <select x-model="port.mode">
-              <option value="auto" :disabled="port.role === 'output'">Auto (Signal erkennen)</option>
+              <option value="auto" :disabled="port.role === 'output' || port.role === 'caspar'">Auto (Signal erkennen)</option>
               <option value="1080i50">1080i50 (Standard)</option>
               <option value="720p50">720p50 (Standard)</option>
               <option value="1080i5994">1080i59.94</option>
@@ -517,6 +531,7 @@
             </select>
           </div>
         </div>
+        <div class="hint" x-show="port.role === 'caspar'">CasparCG (Grafik): Dieser Anschluss gehört CasparCG und ist für Pipelines gesperrt. Das Format wird hier fest gewählt und von CasparCG ausgegeben.</div>
         <div class="hint" x-show="port.role === 'output'">Ausgang: Modus muss fest gewählt werden – die Karte kann beim Ausgeben nicht automatisch erkennen, welches Format erzeugt werden soll.</div>
         <div class="hint" x-show="port.role === 'input' && port.mode === 'auto'">"Auto" erkennt Auflösung/Framerate automatisch anhand des anliegenden Signals.</div>
 
@@ -919,6 +934,187 @@
       </table>
       <div class="hint" style="margin-top: 0.4rem;">Fehler und Drops sind Zähler seit dem Start des Rechners.</div>
     </div>
+  </div>
+
+  <div class="section-header" role="button" tabindex="0" :aria-expanded="!gfxCollapsed" @click="toggleGfxCollapsed()" @keydown.enter.prevent="toggleGfxCollapsed()" @keydown.space.prevent="toggleGfxCollapsed()">
+    <div class="section-header-title">
+      <h2>Grafik (CasparCG)</h2>
+      <span class="badge" :class="gfx.status.running ? 'running' : 'stopped'" x-text="gfx.status.running ? 'läuft' : 'gestoppt'"></span>
+    </div>
+    <svg class="chev" :class="{ open: !gfxCollapsed }" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8l5 5 5-5"/></svg>
+  </div>
+  <div class="card" x-show="!gfxCollapsed">
+    <div class="hint" style="margin: 0 0 0.75rem;">Grafik-Maschine mit CasparCG: Key und Fill (und ein Videoausgang) über die SDI-Anschlüsse, gesteuert von hier. Die Anschlüsse bekommen zuerst unter „SDI-Anschlüsse“ die Rolle „CasparCG“ und sind danach für Pipelines gesperrt.</div>
+
+    <template x-if="gfx.loaded && !gfx.status.installed">
+      <div class="hint" style="color: #d9a400; font-size: 0.85rem;">CasparCG ist auf diesem Rechner noch nicht installiert. Einmalig auf dem Server ausführen: <code>sh deploy/install-casparcg.sh</code></div>
+    </template>
+    <template x-if="gfx.status.installed && ((gfx.status.missing_libs || []).length || !gfx.status.xvfb)">
+      <div class="hint" style="color: #d9a400; font-size: 0.85rem;">Es fehlen Systempakete (<span x-text="((gfx.status.missing_libs || []).concat(gfx.status.xvfb ? [] : ['Xvfb'])).join(', ')"></span>). Die Installation (<code>sh deploy/install-casparcg.sh</code>) nennt den passenden <code>sudo apt install</code>-Befehl.</div>
+    </template>
+
+    <template x-if="gfx.status.installed">
+      <div>
+        <div class="form-row" style="grid-template-columns: repeat(4, 1fr);">
+          <div>
+            <label>Fill-Anschluss (Grafik)</label>
+            <select x-model="gfx.set.fill" :disabled="gfx.status.running || gfx.busy">
+              <option value="">nicht verwendet</option>
+              <template x-for="p in gfxCasparPorts()" :key="'f' + p"><option :value="String(p)" x-text="'Anschluss ' + (p + 1)"></option></template>
+            </select>
+          </div>
+          <div>
+            <label>Key-Anschluss (optional)</label>
+            <select x-model="gfx.set.key" :disabled="gfx.status.running || gfx.busy">
+              <option value="">nicht verwendet</option>
+              <template x-for="p in gfxCasparPorts()" :key="'k' + p"><option :value="String(p)" x-text="'Anschluss ' + (p + 1)"></option></template>
+            </select>
+          </div>
+          <div>
+            <label>Videoausgang (optional)</label>
+            <select x-model="gfx.set.clip" :disabled="gfx.status.running || gfx.busy">
+              <option value="">nicht verwendet</option>
+              <template x-for="p in gfxCasparPorts()" :key="'c' + p"><option :value="String(p)" x-text="'Anschluss ' + (p + 1)"></option></template>
+            </select>
+          </div>
+          <div>
+            <label class="gfx-check" style="margin-top: 1.45rem;"><input type="checkbox" style="width: auto;" x-model="gfx.set.test_screen" :disabled="gfx.status.running || gfx.busy || gfx.set.fill !== '' || gfx.set.clip !== ''"> <span>Testmodus ohne Karte</span></label>
+          </div>
+        </div>
+        <div class="hint" x-show="!gfxCasparPorts().length">Noch kein Anschluss mit der Rolle „CasparCG“. Unter „SDI-Anschlüsse“ die Rolle wählen und speichern.</div>
+        <div class="actions">
+          <button type="button" class="btn-secondary" :disabled="gfx.status.running || gfx.busy" @click="gfxSaveSettings()">Ausgänge speichern</button>
+          <button type="button" class="btn-start" x-show="!gfx.status.running" :disabled="gfx.busy" @click="gfxStart()">CasparCG starten</button>
+          <button type="button" class="btn-stop" x-show="gfx.status.running" :disabled="gfx.busy" @click="gfxStopServer()">CasparCG stoppen</button>
+          <span class="hint" style="margin: 0;" x-show="gfx.status.running && gfx.status.server_version">CasparCG <span x-text="gfx.status.server_version"></span></span>
+        </div>
+      </div>
+    </template>
+
+    <div class="hint" x-show="gfx.msg" :style="'margin-top: 0.5rem; color:' + (gfx.ok ? '#86efac' : '#fca5a5')" x-text="gfx.msg"></div>
+
+    <template x-if="gfx.status.running">
+      <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #2a2e37;">
+        <div class="hint" style="color: #d9a400; font-size: 0.82rem; margin: 0 0 0.6rem;" x-show="gfxSingleLayerCount() > 1">
+          Achtung: <span x-text="gfxSingleLayerCount()"></span> einzelne Grafik-Ebenen sind gleichzeitig aktiv. Ohne Grafikkarte hält CasparCG in Echtzeit nur eine Ebene (bei zwei etwa 83&nbsp;%, bei vier etwa 58&nbsp;%). Die Vorlage „Szene“ hat alle Elemente in einer Ebene.
+        </div>
+
+        <div class="form-row" style="grid-template-columns: 2fr 120px auto;">
+          <div>
+            <label>Vorlage</label>
+            <select x-model="gfx.tplId" @change="gfxSelect(gfx.tplId)">
+              <template x-for="t in gfx.templates" :key="t.id"><option :value="t.id" :selected="t.id === gfx.tplId" x-text="t.name + (t.scene ? ' – empfohlen' : '')"></option></template>
+            </select>
+          </div>
+          <div>
+            <label>Ebene (1–99)</label>
+            <input type="number" min="1" max="99" step="1" x-model.number="gfx.layer">
+          </div>
+          <div style="align-self: end; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button type="button" class="btn-secondary" :disabled="gfx.busy" @click="gfxClear()">Alles leeren</button>
+          </div>
+        </div>
+        <div class="hint" x-show="gfxTpl()" x-text="gfxTpl() && gfxTpl().description"></div>
+
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; margin-top: 0.6rem;">
+          <div>
+            <div class="gfx-prev-frame"><!-- Abschottung: Der Antwort-Header der Vorschau setzt "Content-Security-Policy: sandbox allow-scripts" (eigene Herkunft aufgeben, kein Zugriff auf diese Seite) --><iframe x-ref="gfxFrame" :src="gfxPreviewUrl()" title="Vorschau der Vorlage" @load="gfxPreviewLoaded()"></iframe></div>
+            <div class="hint">Vorschau (Schachbrett = transparent). Zeigt das gerade bearbeitete Element.</div>
+          </div>
+          <div style="flex: 1; min-width: 260px;">
+            <div style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 0.25rem;">Gerade eingeblendet</div>
+            <div class="hint" x-show="!gfxLiveList().length">Nichts eingeblendet.</div>
+            <table class="st-table" x-show="gfxLiveList().length">
+              <tbody>
+                <template x-for="l in gfxLiveList()" :key="l.layer">
+                  <tr>
+                    <td>Ebene <span x-text="l.layer"></span></td>
+                    <td x-text="l.name"></td>
+                    <td style="text-align: right;"><button type="button" class="btn-secondary" :disabled="gfx.busy" @click="gfxOutLayer(l.layer)">Ausblenden</button></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <template x-for="unit in gfxUnits()" :key="gfx.tplId + ':' + unit.id">
+          <div class="gfx-unit" :class="{ 'gfx-live': gfxUnitOn(unit) }" @focusin="gfxFocus(unit)">
+            <div class="gfx-unit-head">
+              <div><strong x-text="unit.name"></strong> <span class="gfx-pill" :class="{ on: gfxUnitOn(unit) }" x-show="unit.toggle" x-text="gfxUnitOn(unit) ? 'ein' : 'aus'"></span></div>
+              <div class="actions" style="margin: 0;">
+                <template x-if="unit.toggle">
+                  <span style="display: contents;">
+                    <button type="button" class="btn-start" :disabled="gfx.busy" @click="gfxUnitSet(unit, true)">Ein</button>
+                    <button type="button" class="btn-secondary" :disabled="gfx.busy || !gfxUnitOn(unit)" @click="gfxUnitApply(unit)" title="Geänderte Werte auf die laufende Einblendung anwenden">Übernehmen</button>
+                    <button type="button" class="btn-stop" :disabled="gfx.busy || !gfxUnitOn(unit)" @click="gfxUnitSet(unit, false)">Aus</button>
+                  </span>
+                </template>
+                <template x-if="unit.trigger">
+                  <button type="button" class="btn-start" :disabled="gfx.busy" @click="gfxTrigger(unit)">Auslösen</button>
+                </template>
+                <template x-if="!unit.toggle && !unit.trigger">
+                  <span style="display: contents;">
+                    <button type="button" class="btn-start" :disabled="gfx.busy" @click="gfxTakeSimple()">Einblenden</button>
+                    <button type="button" class="btn-secondary" :disabled="gfx.busy || !gfxLayerHas(gfx.layer)" @click="gfxUpdateSimple()">Übernehmen</button>
+                    <button type="button" class="btn-stop" :disabled="gfx.busy || !gfxLayerHas(gfx.layer)" @click="gfxOutLayer(gfx.layer)">Ausblenden</button>
+                  </span>
+                </template>
+                <button type="button" class="btn-secondary" @click="gfxPreviewUnit(unit)">Vorschau</button>
+              </div>
+            </div>
+
+            <div class="gfx-fields">
+              <template x-for="f in unit.fields" :key="f.key">
+                <div>
+                  <template x-if="f.type === 'bool'">
+                    <label class="gfx-check"><input type="checkbox" style="width: auto;" x-model="gfx.vals[gfx.tplId][f.key]" @change="gfxPreviewSoon(unit)"> <span x-text="f.label"></span></label>
+                  </template>
+                  <template x-if="f.type !== 'bool'">
+                    <div>
+                      <label x-text="f.label"></label>
+                      <template x-if="f.type === 'text'"><input type="text" :maxlength="f.max" spellcheck="false" x-model="gfx.vals[gfx.tplId][f.key]" @input="gfxPreviewSoon(unit)"></template>
+                      <template x-if="f.type === 'textarea'"><textarea rows="3" :maxlength="f.max" spellcheck="false" x-model="gfx.vals[gfx.tplId][f.key]" @input="gfxPreviewSoon(unit)"></textarea></template>
+                      <template x-if="f.type === 'color'"><input type="color" x-model="gfx.vals[gfx.tplId][f.key]" @input="gfxPreviewSoon(unit)"></template>
+                      <template x-if="f.type === 'number'"><input type="number" :min="f.min" :max="f.max" :step="f.step" x-model.number="gfx.vals[gfx.tplId][f.key]" @input="gfxPreviewSoon(unit)"></template>
+                      <template x-if="f.type === 'select'"><select x-model="gfx.vals[gfx.tplId][f.key]" @change="gfxPreviewSoon(unit)"><template x-for="o in f.options" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <details style="margin-top: 0.5rem;" @toggle="$event.target.open && gfxEntriesLoad(true)">
+              <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Gespeichert (<span x-text="gfxEntriesOf(unit).length"></span>)</summary>
+              <div class="actions" style="margin: 0.5rem 0;">
+                <input type="text" maxlength="60" style="max-width: 260px;" placeholder="Name, z. B. Gast 1" x-model="gfx.saveName[gfx.tplId + ':' + unit.id]">
+                <button type="button" class="btn-secondary" :disabled="gfx.busy || !String(gfx.saveName[gfx.tplId + ':' + unit.id] || '').trim()" @click="gfxEntrySave(unit)">Aktuelle Werte speichern</button>
+              </div>
+              <div class="hint" x-show="!gfxEntriesOf(unit).length">Noch nichts gespeichert. Werte oben eintragen, Namen vergeben und speichern.</div>
+              <template x-for="en in gfxEntriesOf(unit)" :key="en.id">
+                <div class="tl-item">
+                  <div style="flex: 1; min-width: 160px;">
+                    <div class="tl-name" x-text="en.name"></div>
+                    <div class="tl-prev" x-text="gfxEntryPreview(en)"></div>
+                  </div>
+                  <button type="button" class="btn-secondary" @click="gfxEntryFill(en)">Laden</button>
+                  <button type="button" class="btn-start" :disabled="gfx.busy" @click="gfxEntryShow(unit, en)" title="Laden und sofort einblenden">Einblenden</button>
+                  <button type="button" class="btn-secondary" title="nach oben" aria-label="nach oben" :disabled="gfx.busy" @click="gfxEntryMove(en, 'up')">▲</button>
+                  <button type="button" class="btn-secondary" title="nach unten" aria-label="nach unten" :disabled="gfx.busy" @click="gfxEntryMove(en, 'down')">▼</button>
+                  <button type="button" class="btn-delete" :disabled="gfx.busy" @click="gfxEntryDelete(en)">Löschen</button>
+                </div>
+              </template>
+            </details>
+          </div>
+        </template>
+
+        <div class="actions" style="margin-top: 0.75rem;">
+          <button type="button" class="btn-secondary" :disabled="!gfx.entries.length" @click="gfxEntriesExport()">Bibliothek exportieren</button>
+          <button type="button" class="btn-secondary" @click="$refs.gfxImport.click()">Bibliothek importieren …</button>
+          <input type="file" accept="application/json,.json" x-ref="gfxImport" style="display: none;" @change="gfxEntriesImport($event)">
+        </div>
+      </div>
+    </template>
   </div>
 
   <div class="section-header" role="button" tabindex="0" :aria-expanded="!presetsCollapsed" @click="togglePresetsCollapsed()" @keydown.enter.prevent="togglePresetsCollapsed()" @keydown.space.prevent="togglePresetsCollapsed()">
@@ -2772,6 +2968,16 @@ function app() {
     presetsCollapsed: (() => {
       try { const v = localStorage.getItem('presetsCollapsed'); return v === null ? true : v === '1'; } catch (e) { return true; }
     })(),
+    // Grafik (CasparCG)
+    gfxCollapsed: (() => {
+      try { const v = localStorage.getItem('gfxCollapsed'); return v === null ? true : v === '1'; } catch (e) { return true; }
+    })(),
+    gfx: { status: {}, loaded: false, templates: [], tplId: '', layer: 20, vals: {}, set: { fill: '', key: '', clip: '', test_screen: false },
+           entries: [], entriesLoaded: false, saveName: {}, focus: '', busy: false, msg: '', ok: true },
+    gfxTimer: null,
+    gfxPrevReady: false,
+    gfxPrevT: null,
+    gfxPrevTrig: 0,
     srtLinkInput: '',
     srtLinkMessage: '',
     tileSrtLinkInput: { 0: '', 1: '', 2: '', 3: '' },
@@ -3347,7 +3553,7 @@ function app() {
     },
 
     tileDirection(port) {
-      if (!port || port.role === 'unused') return null;
+      if (!port || (port.role !== 'input' && port.role !== 'output')) return null;
       return port.role === 'output' ? 'srt_to_sdi' : 'sdi_to_srt';
     },
 
@@ -3941,6 +4147,391 @@ function app() {
     },
 
     // --- Presets: komplette Anschluss-Einstellungen unter einem Namen ---
+    // ----- Grafik (CasparCG) -----
+    toggleGfxCollapsed() {
+      this.gfxCollapsed = !this.gfxCollapsed;
+      try { localStorage.setItem('gfxCollapsed', this.gfxCollapsed ? '1' : '0'); } catch (e) {}
+      if (this.gfxCollapsed) this.gfxStopPoll(); else this.gfxLoad();
+    },
+
+    gfxBoot() {
+      if (!this.gfxCollapsed) this.gfxLoad();
+    },
+
+    gfxStopPoll() {
+      if (this.gfxTimer) { clearInterval(this.gfxTimer); this.gfxTimer = null; }
+    },
+
+    async gfxApi(action, body) {
+      const opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+      const res = await fetch('api.php?action=' + action, opt);
+      let data = null;
+      try { data = await res.json(); } catch (e) { throw new Error('Unerwartete Antwort des Gateways'); }
+      if (data && data.error) throw new Error(data.error);
+      return data;
+    },
+
+    gfxSay(msg, ok) {
+      this.gfx.msg = msg;
+      this.gfx.ok = ok !== false;
+    },
+
+    async gfxLoad() {
+      try {
+        if (!this.gfx.templates.length) {
+          const d = await this.gfxApi('gfx_templates');
+          this.gfx.templates = d.templates || [];
+          for (const t of this.gfx.templates) {
+            if (!this.gfx.vals[t.id]) {
+              const o = {};
+              for (const f of t.fields) o[f.key] = f.default;
+              this.gfx.vals[t.id] = o;
+            }
+          }
+          if (!this.gfx.tplId && this.gfx.templates.length) {
+            const first = this.gfx.templates.find(t => t.scene) || this.gfx.templates[0];
+            this.gfx.tplId = first.id;
+            this.gfx.layer = first.default_layer;
+          }
+        }
+        await this.gfxRefresh(true);
+        this.gfxEntriesLoad(false);
+      } catch (e) {
+        this.gfxSay('Grafik konnte nicht geladen werden: ' + e.message, false);
+      }
+      this.gfx.loaded = true;
+      this.gfxStopPoll();
+      this.gfxTimer = setInterval(() => {
+        if (!this.gfxCollapsed && !this.gfx.busy && !document.hidden) this.gfxRefresh(false);
+      }, 4000);
+    },
+
+    async gfxRefresh(initSettings) {
+      try {
+        const st = await this.gfxApi('caspar_status');
+        this.gfx.status = st;
+        if (initSettings) {
+          const s = st.settings || {};
+          this.gfx.set = {
+            fill: s.fill === null || s.fill === undefined ? '' : String(s.fill),
+            key: s.key === null || s.key === undefined ? '' : String(s.key),
+            clip: s.clip === null || s.clip === undefined ? '' : String(s.clip),
+            test_screen: !!s.test_screen
+          };
+        }
+      } catch (e) {
+        // nicht kritisch: beim naechsten Durchlauf erneut versuchen
+      }
+    },
+
+    gfxTpl() {
+      return this.gfx.templates.find(t => t.id === this.gfx.tplId) || null;
+    },
+
+    gfxSelect(id) {
+      const t = this.gfx.templates.find(x => x.id === id);
+      if (!t) return;
+      this.gfx.tplId = id;
+      this.gfx.layer = t.default_layer;
+      this.gfx.focus = '';
+      this.gfxPrevReady = false;
+    },
+
+    gfxCasparPorts() {
+      return (this.decklinkPorts || []).filter(p => p.role === 'caspar').map(p => Number(p.device_number));
+    },
+
+    async gfxRun(fn, okMsg) {
+      this.gfx.busy = true;
+      try {
+        await fn();
+        await this.gfxRefresh(false);
+        if (okMsg) this.gfxSay(okMsg, true); else this.gfx.msg = '';
+      } catch (e) {
+        this.gfxSay(e.message, false);
+      } finally {
+        this.gfx.busy = false;
+      }
+    },
+
+    async gfxSaveSettings() {
+      const num = v => (v === '' || v === null || v === undefined) ? null : Number(v);
+      await this.gfxRun(async () => {
+        await this.gfxApi('caspar_settings', { fill: num(this.gfx.set.fill), key: num(this.gfx.set.key), clip: num(this.gfx.set.clip), test_screen: !!this.gfx.set.test_screen });
+      }, 'Ausgänge gespeichert.');
+    },
+
+    async gfxStart() {
+      await this.gfxRun(async () => { await this.gfxApi('caspar_start', {}); }, 'CasparCG gestartet.');
+    },
+
+    async gfxStopServer() {
+      const live = this.gfxLiveList().length;
+      if (live && !confirm('Es ist noch Grafik eingeblendet. CasparCG trotzdem stoppen?')) return;
+      await this.gfxRun(async () => { await this.gfxApi('caspar_stop', {}); }, 'CasparCG gestoppt.');
+    },
+
+    // ---- Einblenden und Steuern ----
+    gfxUnits() {
+      const t = this.gfxTpl();
+      if (!t) return [];
+      const ctl = new Set();
+      (t.groups || []).forEach(g => { if (g.toggle) ctl.add(g.toggle); if (g.trigger) ctl.add(g.trigger); });
+      const vis = t.fields.filter(f => !f.hidden && !ctl.has(f.key));
+      if (!(t.groups || []).length) return [{ id: '', name: t.name, toggle: null, trigger: null, fields: vis }];
+      return t.groups.map(g => ({ id: g.id, name: g.name, toggle: g.toggle || null, trigger: g.trigger || null, fields: vis.filter(f => f.group === g.id) }));
+    },
+
+    gfxUnitBody(unit) {
+      const vals = this.gfx.vals[this.gfx.tplId] || {};
+      const out = {};
+      for (const f of unit.fields) {
+        let v = vals[f.key];
+        if (f.type === 'number') v = (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) ? f.default : Number(v);
+        out[f.key] = v;
+      }
+      return out;
+    },
+
+    gfxLayerState(layer) {
+      const g = (this.gfx.status && this.gfx.status.graphics) || {};
+      return g[String(layer)] || null;
+    },
+
+    gfxLayerHas(layer) {
+      const st = this.gfxLayerState(layer);
+      return !!(st && st.template === this.gfx.tplId);
+    },
+
+    gfxUnitOn(unit) {
+      const st = this.gfxLayerState(this.gfx.layer);
+      return !!(unit.toggle && st && st.template === this.gfx.tplId && st.fields && st.fields[unit.toggle]);
+    },
+
+    gfxLiveList() {
+      const g = (this.gfx.status && this.gfx.status.graphics) || {};
+      return Object.keys(g).map(k => Number(k)).sort((a, b) => a - b).map(layer => {
+        const st = g[String(layer)];
+        const t = this.gfx.templates.find(x => x.id === st.template);
+        let name = t ? t.name : st.template;
+        if (t && t.scene) {
+          const on = (t.groups || []).filter(gr => gr.toggle && st.fields && st.fields[gr.toggle]).map(gr => gr.name);
+          name = 'Szene' + (on.length ? ': ' + on.join(', ') : ' (nichts sichtbar)');
+        }
+        return { layer, name };
+      });
+    },
+
+    gfxSingleLayerCount() {
+      const g = (this.gfx.status && this.gfx.status.graphics) || {};
+      return Object.values(g).filter(st => st.template !== 'scene').length;
+    },
+
+    async gfxEnsureScene() {
+      const st = this.gfxLayerState(this.gfx.layer);
+      if (!st || st.template !== this.gfx.tplId) {
+        await this.gfxApi('gfx_take', { template: this.gfx.tplId, layer: this.gfx.layer, fields: {} });
+        await this.gfxRefresh(false);
+      }
+    },
+
+    async gfxUnitSet(unit, on) {
+      await this.gfxRun(async () => {
+        await this.gfxEnsureScene();
+        const body = on ? Object.assign(this.gfxUnitBody(unit), { [unit.toggle]: true }) : { [unit.toggle]: false };
+        await this.gfxApi('gfx_update', { layer: this.gfx.layer, fields: body });
+      });
+    },
+
+    async gfxUnitApply(unit) {
+      await this.gfxRun(async () => {
+        await this.gfxEnsureScene();
+        await this.gfxApi('gfx_update', { layer: this.gfx.layer, fields: this.gfxUnitBody(unit) });
+      });
+    },
+
+    async gfxTrigger(unit) {
+      await this.gfxRun(async () => {
+        await this.gfxEnsureScene();
+        const st = this.gfxLayerState(this.gfx.layer);
+        const cur = Number(st && st.fields && st.fields[unit.trigger] || 0) + 1;
+        await this.gfxApi('gfx_update', { layer: this.gfx.layer, fields: Object.assign(this.gfxUnitBody(unit), { [unit.trigger]: cur }) });
+      });
+    },
+
+    async gfxTakeSimple() {
+      const unit = this.gfxUnits()[0];
+      if (!unit) return;
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_take', { template: this.gfx.tplId, layer: this.gfx.layer, fields: this.gfxUnitBody(unit) });
+      });
+    },
+
+    async gfxUpdateSimple() {
+      const unit = this.gfxUnits()[0];
+      if (!unit) return;
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_update', { layer: this.gfx.layer, fields: this.gfxUnitBody(unit) });
+      });
+    },
+
+    async gfxOutLayer(layer) {
+      await this.gfxRun(async () => { await this.gfxApi('gfx_out', { layer: layer }); });
+    },
+
+    async gfxClear() {
+      if (!confirm('Alle Grafik-Ebenen sofort leeren?')) return;
+      await this.gfxRun(async () => { await this.gfxApi('gfx_clear', {}); });
+    },
+
+    // ---- Vorschau ----
+    gfxPreviewUrl() {
+      return this.gfx.tplId ? 'api.php?action=gfx_file&id=' + encodeURIComponent(this.gfx.tplId) + '&file=index.html&preview=1' : 'about:blank';
+    },
+
+    gfxPreviewLoaded() {
+      this.gfxPrevReady = true;
+      this.gfxPreviewSend();
+    },
+
+    gfxFocus(unit) {
+      if (this.gfx.focus !== unit.id) {
+        this.gfx.focus = unit.id;
+        this.gfxPreviewSoon(unit);
+      }
+    },
+
+    gfxPreviewSoon(unit) {
+      if (this.gfxPrevT) clearTimeout(this.gfxPrevT);
+      this.gfxPrevT = setTimeout(() => this.gfxPreviewSend(unit), 150);
+    },
+
+    gfxPreviewPayload(unit) {
+      const t = this.gfxTpl();
+      const vals = Object.assign({}, this.gfx.vals[t.id]);
+      for (const f of t.fields) {
+        if (f.type === 'number' && (vals[f.key] === '' || vals[f.key] === null || vals[f.key] === undefined || Number.isNaN(Number(vals[f.key])))) vals[f.key] = f.default;
+      }
+      if (t.scene) {
+        for (const g of (t.groups || [])) {
+          if (g.toggle) vals[g.toggle] = !!unit && g.id === unit.id;
+          if (g.trigger) vals[g.trigger] = this.gfxPrevTrig;
+        }
+      }
+      return vals;
+    },
+
+    gfxPreviewSend(unit) {
+      const fr = this.$refs.gfxFrame;
+      if (!fr || !fr.contentWindow || !this.gfxPrevReady || !this.gfxTpl()) return;
+      const units = this.gfxUnits();
+      const u = unit || units.find(x => x.id === this.gfx.focus) || units[0];
+      fr.contentWindow.postMessage({ cmd: 'update', data: this.gfxPreviewPayload(u) }, '*');
+      fr.contentWindow.postMessage({ cmd: 'play' }, '*');
+    },
+
+    gfxPreviewUnit(unit) {
+      this.gfx.focus = unit.id;
+      if (unit.trigger) this.gfxPrevTrig += 1;
+      this.gfxPreviewSend(unit);
+    },
+
+    // ---- Gespeicherte Eintraege ----
+    async gfxEntriesLoad(force) {
+      if (this.gfx.entriesLoaded && !force) return;
+      try {
+        const d = await this.gfxApi('gfx_entries_list');
+        this.gfx.entries = d.entries || [];
+        this.gfx.entriesLoaded = true;
+      } catch (e) {
+        // nicht kritisch
+      }
+    },
+
+    gfxEntriesOf(unit) {
+      return this.gfx.entries.filter(e => e.template === this.gfx.tplId && e.grp === (unit.id || ''));
+    },
+
+    gfxEntryPreview(en) {
+      const t = this.gfxTpl();
+      const parts = [];
+      for (const f of (t ? t.fields : [])) {
+        if ((f.type === 'text' || f.type === 'textarea') && en.data[f.key]) parts.push(String(en.data[f.key]).replace(/\s+/g, ' '));
+      }
+      const s = parts.join(' · ');
+      return s.length > 70 ? s.slice(0, 70) + '…' : s;
+    },
+
+    async gfxEntrySave(unit) {
+      const key = this.gfx.tplId + ':' + unit.id;
+      const name = String(this.gfx.saveName[key] || '').trim();
+      if (!name) return;
+      await this.gfxRun(async () => {
+        const base = { template: this.gfx.tplId, grp: unit.id || '', name: name, data: this.gfxUnitBody(unit) };
+        let r = await this.gfxApi('gfx_entry_save', base);
+        if (r.exists) {
+          if (!confirm('„' + name + '“ gibt es schon. Überschreiben?')) return;
+          r = await this.gfxApi('gfx_entry_save', Object.assign({ overwrite: true }, base));
+        }
+        this.gfx.saveName[key] = '';
+        await this.gfxEntriesLoad(true);
+      }, 'Gespeichert.');
+    },
+
+    gfxEntryFill(en) {
+      Object.assign(this.gfx.vals[this.gfx.tplId], en.data);
+      this.gfxPreviewSoon();
+    },
+
+    async gfxEntryShow(unit, en) {
+      this.gfxEntryFill(en);
+      if (unit.toggle) await this.gfxUnitSet(unit, true);
+      else await this.gfxTakeSimple();
+    },
+
+    async gfxEntryMove(en, dir) {
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_entry_move', { id: en.id, dir: dir });
+        await this.gfxEntriesLoad(true);
+      });
+    },
+
+    async gfxEntryDelete(en) {
+      if (!confirm('„' + en.name + '“ wirklich löschen?')) return;
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_entry_delete', { id: en.id });
+        await this.gfxEntriesLoad(true);
+      });
+    },
+
+    gfxEntriesExport() {
+      const doc = { format: 'noicecaster-grafik', version: 1, exported: new Date().toISOString(),
+        items: this.gfx.entries.map(e => ({ template: e.template, grp: e.grp, name: e.name, data: e.data })) };
+      const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'noicecaster-grafik-bibliothek.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
+
+    async gfxEntriesImport(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { this.gfxSay('Die Datei ist zu groß (höchstens 2 MB).', false); return; }
+      await this.gfxRun(async () => {
+        let doc;
+        try { doc = JSON.parse(await file.text()); } catch (e) { throw new Error('Keine gültige JSON-Datei.'); }
+        if (!doc || doc.format !== 'noicecaster-grafik' || !Array.isArray(doc.items)) throw new Error('Das ist keine Grafik-Bibliothek von noicecaster.');
+        const r = await this.gfxApi('gfx_entries_import', { items: doc.items });
+        await this.gfxEntriesLoad(true);
+        this.gfxSay(r.added + ' Einträge importiert' + (r.skipped ? ', ' + r.skipped + ' übersprungen (schon vorhanden oder ungültig)' : '') + '.', true);
+      });
+    },
+
     togglePresetsCollapsed() {
       this.presetsCollapsed = !this.presetsCollapsed;
       try { localStorage.setItem('presetsCollapsed', this.presetsCollapsed ? '1' : '0'); } catch (e) {}

@@ -1,0 +1,20 @@
+{
+  "id": "scoreboard",
+  "name": "Spielstand (2 Seiten)",
+  "category": "Spielstand",
+  "description": "Spielstandanzeige für zwei Teams oder Spieler mit Namen, Punkten, einer Beschriftung (zum Beispiel Spielabschnitt) und einer Zeitangabe.",
+  "default_layer": 25,
+  "out_ms": 600,
+  "fields": [
+    {"key": "name1", "label": "Name Team 1", "type": "text", "max": 20, "default": "HEIM"},
+    {"key": "name2", "label": "Name Team 2", "type": "text", "max": 20, "default": "GAST"},
+    {"key": "score1", "label": "Punkte Team 1", "type": "number", "min": 0, "max": 999, "step": 1, "default": 0},
+    {"key": "score2", "label": "Punkte Team 2", "type": "number", "min": 0, "max": 999, "step": 1, "default": 0},
+    {"key": "color1", "label": "Farbe Team 1", "type": "color", "default": "#1f6fd0"},
+    {"key": "color2", "label": "Farbe Team 2", "type": "color", "default": "#d03a1f"},
+    {"key": "label", "label": "Beschriftung (Abschnitt)", "type": "text", "max": 24, "default": ""},
+    {"key": "clock", "label": "Zeit", "type": "text", "max": 10, "default": ""},
+    {"key": "position", "label": "Position", "type": "select", "default": "top-center",
+     "options": [["top-center", "Oben Mitte"], ["top-left", "Oben links"], ["bottom-center", "Unten Mitte"]]}
+  ]
+}

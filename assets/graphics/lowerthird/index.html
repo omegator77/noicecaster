@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Bauchbinde</title>
+<style>
+/* Leichtbau-Regel: nur Transparenz und Verschiebung animieren, keine Unschaerfe, keine Schatten, keine Filter. */
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:"Liberation Sans Narrow","Liberation Sans",Arial,sans-serif}
+#root{position:absolute;left:0;top:0;width:1920px;height:1080px}
+.box{position:absolute;width:1500px;height:200px;transition:transform .6s cubic-bezier(.2,.8,.2,1),opacity .5s ease;opacity:0}
+.pos-bottom-left{left:90px;bottom:90px;transform:translateX(-1700px)}
+.pos-bottom-right{right:90px;bottom:90px;transform:translateX(1700px)}
+.pos-top-left{left:90px;top:90px;transform:translateX(-1700px)}
+.pos-top-right{right:90px;top:90px;transform:translateX(1700px)}
+.box.on{opacity:1;transform:none}
+.band{position:absolute;left:30px;top:20px;width:1340px;height:130px;transform:skewX(-25deg);background:#141414}
+.stripe{position:absolute;left:1215px;top:20px;width:80px;height:130px;transform:skewX(-25deg);background:#c9c9c9}
+.cap{position:absolute;left:1295px;top:20px;width:110px;height:130px;transform:skewX(-25deg);background:#000}
+.tab{position:absolute;left:450px;top:128px;width:640px;height:56px;transform:skewX(-25deg)}
+.line{position:absolute;height:3px}
+.t{position:absolute;color:#fff;font-weight:700;white-space:nowrap;transform-origin:left center;opacity:0;transition:opacity .4s ease .25s}
+.box.on .t{opacity:1}
+#l1{left:150px;top:36px;font-size:74px;line-height:90px}
+#l2{left:520px;top:128px;font-size:34px;line-height:56px;text-align:center}
+</style></head><body>
+<div id="root"><div class="box pos-bottom-left" id="box">
+  <div class="line" id="ln1" style="left:150px;top:6px;width:780px"></div>
+  <div class="line" id="ln2" style="left:20px;top:176px;width:440px"></div>
+  <div class="band"></div><div class="stripe"></div><div class="cap"></div>
+  <div class="tab" id="tab"></div>
+  <div class="t" id="l1"></div><div class="t" id="l2"></div>
+</div></div>
+<script>
+var playing = false, hasData = false, box = document.getElementById('box');
+function parse(d) { try { if (typeof d === 'string') d = JSON.parse(d); if (d && typeof d.b64 === 'string') d = JSON.parse(decodeURIComponent(escape(atob(d.b64)))); } catch (e) { return {}; } return d || {}; }
+function fit(el, maxW) { el.style.transform = ''; var w = el.scrollWidth; if (w > maxW) el.style.transform = 'scaleX(' + (maxW / w) + ')'; }
+function apply(o) {
+  if (o.line1 !== undefined) { var a = document.getElementById('l1'); a.textContent = o.line1; fit(a, 1030); }
+  if (o.line2 !== undefined) { var b = document.getElementById('l2'); b.textContent = o.line2; b.style.width = '480px'; fit(b, 480); }
+  if (o.color) { document.getElementById('tab').style.background = o.color; document.getElementById('ln1').style.background = o.color; document.getElementById('ln2').style.background = o.color; }
+  if (o.position) { box.className = 'box pos-' + o.position + (box.classList.contains('on') ? ' on' : ''); }
+  hasData = true; refresh();
+}
+function refresh() { if (playing && hasData) box.classList.add('on'); else box.classList.remove('on'); }
+window.update = function (d) { apply(parse(d)); };
+window.play = function () { playing = true; refresh(); };
+window.stop = function () { playing = false; refresh(); };
+window.next = function () {};
+</script></body></html>

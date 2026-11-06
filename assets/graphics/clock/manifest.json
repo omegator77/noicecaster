@@ -1,0 +1,18 @@
+{
+  "id": "clock",
+  "name": "Uhr / Countdown / Stoppuhr",
+  "category": "Zeit",
+  "description": "Zeitanzeige, die in der Grafik selbst läuft: Uhrzeit, Countdown oder Stoppuhr. Mit „Läuft“ starten und anhalten, die Startzeit in Sekunden eintragen.",
+  "default_layer": 24,
+  "out_ms": 500,
+  "fields": [
+    {"key": "mode", "label": "Art", "type": "select", "default": "clock", "options": [["clock", "Uhrzeit"], ["countdown", "Countdown"], ["stopwatch", "Stoppuhr"]]},
+    {"key": "seconds", "label": "Startwert in Sekunden (Countdown/Stoppuhr)", "type": "number", "min": 0, "max": 359999, "step": 1, "default": 300},
+    {"key": "running", "label": "Läuft", "type": "bool", "default": false},
+    {"key": "show_seconds", "label": "Sekunden anzeigen (Uhrzeit)", "type": "bool", "default": true},
+    {"key": "label", "label": "Beschriftung", "type": "text", "max": 30, "default": ""},
+    {"key": "color", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "position", "label": "Position", "type": "select", "default": "top-right",
+     "options": [["top-right", "Oben rechts"], ["top-left", "Oben links"], ["bottom-right", "Unten rechts"], ["bottom-left", "Unten links"]]}
+  ]
+}

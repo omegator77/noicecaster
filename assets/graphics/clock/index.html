@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Uhr / Countdown / Stoppuhr</title>
+<style>
+/* Leichtbau-Regel: nur Transparenz und Verschiebung animieren, keine Unschaerfe, keine Schatten, keine Filter. */
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:"Liberation Sans Narrow","Liberation Sans",Arial,sans-serif}
+.box{position:absolute;width:420px;height:150px;opacity:0;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .4s ease}
+.pos-top-right{right:80px;top:70px;transform:translateY(-250px)}
+.pos-top-left{left:80px;top:70px;transform:translateY(-250px)}
+.pos-bottom-right{right:80px;bottom:70px;transform:translateY(250px)}
+.pos-bottom-left{left:80px;bottom:70px;transform:translateY(250px)}
+.box.on{opacity:1;transform:none}
+.bg{position:absolute;left:0;top:0;width:420px;height:150px;background:#141414}
+.acc{position:absolute;left:0;top:0;width:420px;height:10px}
+#label{position:absolute;left:0;top:18px;width:420px;text-align:center;color:#d0d0d0;font-size:30px;line-height:36px;font-weight:700;white-space:nowrap;letter-spacing:2px}
+#time{position:absolute;left:0;top:50px;width:420px;text-align:center;color:#fff;font-size:92px;line-height:96px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+#time.done{color:#ff4040}
+</style></head><body>
+<div class="box pos-top-right" id="box"><div class="bg"></div><div class="acc" id="acc"></div><div id="label"></div><div id="time">00:00</div></div>
+<script>
+var playing = false, hasData = false, box = document.getElementById('box'), timeEl = document.getElementById('time');
+var cfg = {mode: 'clock', seconds: 0, show_seconds: true};
+var running = false, base = 0, startedAt = 0, lastText = '';
+function parse(d) { try { if (typeof d === 'string') d = JSON.parse(d); if (d && typeof d.b64 === 'string') d = JSON.parse(decodeURIComponent(escape(atob(d.b64)))); } catch (e) { return {}; } return d || {}; }
+function elapsed() { return running ? base + (Date.now() - startedAt) / 1000 : base; }
+function pad(n) { return (n < 10 ? '0' : '') + n; }
+function fmt(total) { total = Math.max(0, Math.floor(total)); var h = Math.floor(total / 3600), m = Math.floor(total % 3600 / 60), s = total % 60; return (h > 0 ? h + ':' + pad(m) : pad(m)) + ':' + pad(s); }
+function text() {
+  if (cfg.mode === 'countdown') { var rest = Math.max(0, cfg.seconds - elapsed()); timeEl.className = rest <= 0 ? 'done' : ''; return fmt(Math.ceil(rest)); }
+  if (cfg.mode === 'stopwatch') { timeEl.className = ''; return fmt(cfg.seconds + elapsed()); }
+  timeEl.className = ''; var d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + (cfg.show_seconds ? ':' + pad(d.getSeconds()) : '');
+}
+function tick() { var t = text(); if (t !== lastText) { lastText = t; timeEl.textContent = t; } }
+function apply(o) {
+  var reset = (o.mode !== undefined && o.mode !== cfg.mode) || (o.seconds !== undefined && Number(o.seconds) !== cfg.seconds);
+  if (o.mode !== undefined) cfg.mode = o.mode;
+  if (o.seconds !== undefined) cfg.seconds = Number(o.seconds) || 0;
+  if (o.show_seconds !== undefined) cfg.show_seconds = !!o.show_seconds;
+  if (reset) { base = 0; startedAt = Date.now(); }
+  if (o.running !== undefined) {
+    if (o.running && !running) { running = true; startedAt = Date.now(); }
+    else if (!o.running && running) { base = elapsed(); running = false; }
+  }
+  if (o.label !== undefined) document.getElementById('label').textContent = o.label;
+  if (o.color) document.getElementById('acc').style.background = o.color;
+  if (o.position) box.className = 'box pos-' + o.position + (box.classList.contains('on') ? ' on' : '');
+  hasData = true; lastText = ''; tick(); refresh();
+}
+function refresh() { if (playing && hasData) box.classList.add('on'); else box.classList.remove('on'); }
+setInterval(tick, 200);
+window.update = function (d) { apply(parse(d)); };
+window.play = function () { playing = true; refresh(); };
+window.stop = function () { playing = false; refresh(); };
+window.next = function () {};
+</script></body></html>

@@ -35,6 +35,14 @@ data/mediamtx.yml
 data/mediamtx.yml.tmp
 data/mediamtx.pid
 
+# CasparCG (Grafik): Einstellungen, Laufzeitordner, Zustand und eigene Vorlagen
+data/caspar.json
+data/caspar.json.tmp
+data/caspar/
+data/graphics/
+data/graphics_state.json
+data/graphics_state.json.tmp
+
 # Bauchbinde: erzeugte Grafiken, Logos und Steuerdateien
 data/lowerthird/
 data/lowerthird_*.json

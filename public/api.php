@@ -12,6 +12,9 @@ require_once __DIR__ . '/../src/PeerInfo.php';
 require_once __DIR__ . '/../src/PowerManager.php';
 require_once __DIR__ . '/../src/PresetManager.php';
 require_once __DIR__ . '/../src/TextLibrary.php';
+require_once __DIR__ . '/../src/CasparManager.php';
+require_once __DIR__ . '/../src/GraphicsLibrary.php';
+require_once __DIR__ . '/../src/GraphicsEntries.php';
 
 header('Content-Type: application/json');
 
@@ -146,6 +149,127 @@ try {
 
         case 'ingest_status':
             echo json_encode(IngestManager::status($db->pdo()));
+            break;
+
+        // ----- CasparCG (Grafik) -----
+        case 'caspar_status':
+            echo json_encode(CasparManager::status($db->pdo()) + ['graphics' => GraphicsLibrary::state()]);
+            break;
+
+        case 'caspar_settings':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            echo json_encode(['success' => true, 'settings' => CasparManager::saveSettings($db->pdo(), is_array($data) ? $data : [])]);
+            break;
+
+        case 'caspar_start':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            CasparManager::start($db->pdo());
+            GraphicsLibrary::resetState();
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'caspar_stop':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            CasparManager::stop();
+            GraphicsLibrary::resetState();
+            echo json_encode(['success' => true]);
+            break;
+
+        case 'gfx_templates':
+            echo json_encode(['templates' => GraphicsLibrary::templates()]);
+            break;
+
+        case 'gfx_take':
+        case 'gfx_update':
+        case 'gfx_out':
+        case 'gfx_clear':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            $data = is_array($data) ? $data : [];
+            $fields = is_array($data['fields'] ?? null) ? $data['fields'] : [];
+            if ($action === 'gfx_take') {
+                $result = GraphicsLibrary::take((string)($data['template'] ?? ''), $data['layer'] ?? null, $fields);
+            } elseif ($action === 'gfx_update') {
+                $result = GraphicsLibrary::update($data['layer'] ?? null, $fields);
+            } elseif ($action === 'gfx_out') {
+                $result = GraphicsLibrary::out($data['layer'] ?? null);
+            } else {
+                $result = GraphicsLibrary::clear($data['layer'] ?? null);
+            }
+            echo json_encode(['success' => true] + $result);
+            break;
+
+        case 'gfx_entries_list':
+            echo json_encode(['entries' => (new GraphicsEntries($db->pdo()))->list(isset($_GET['template']) ? (string)$_GET['template'] : null)]);
+            break;
+
+        case 'gfx_entry_save':
+        case 'gfx_entry_delete':
+        case 'gfx_entry_move':
+        case 'gfx_entries_import':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            $data = is_array($data) ? $data : [];
+            $entries = new GraphicsEntries($db->pdo());
+            if ($action === 'gfx_entry_save') {
+                $result = $entries->save($data);
+            } elseif ($action === 'gfx_entry_delete') {
+                $entries->delete((int)($data['id'] ?? 0));
+                $result = [];
+            } elseif ($action === 'gfx_entry_move') {
+                $entries->move((int)($data['id'] ?? 0), (string)($data['dir'] ?? ''));
+                $result = [];
+            } else {
+                $result = $entries->import(is_array($data['items'] ?? null) ? $data['items'] : []);
+            }
+            echo json_encode(['success' => true] + $result);
+            break;
+
+        case 'gfx_file':
+            // Dateien einer Vorlage fuer die Vorschau im Browser (nur Dateien aus dem Vorlagenordner, strenge Namen)
+            $f = GraphicsLibrary::previewFile((string)($_GET['id'] ?? ''), (string)($_GET['file'] ?? 'index.html'));
+            if ($f === null) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Datei nicht gefunden']);
+                break;
+            }
+            header('Content-Type: ' . $f['mime']);
+            // Die Vorlage darf Skripte ausfuehren, aber nichts ausserhalb von sich selbst ansprechen: eigene Herkunft aufgeben
+            header("Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; img-src 'self' data:; font-src 'self' data:; media-src 'self'");
+            header('X-Content-Type-Options: nosniff');
+            header('Cache-Control: no-store');
+            if (($_GET['preview'] ?? '') === '1' && str_starts_with($f['mime'], 'text/html')) {
+                // Vorschau in der Oberflaeche: die (abgeschottete) Seite bekommt ein kleines Nachrichten-Skript, damit die
+                // Oberflaeche update()/play()/stop() der Vorlage per postMessage ausloesen kann
+                $shim = '<script>window.addEventListener("message",function(e){var m=e.data||{};try{if(m.cmd==="update"&&window.update)window.update(m.data);'
+                    . 'else if(m.cmd==="play"&&window.play)window.play();else if(m.cmd==="stop"&&window.stop)window.stop();}catch(x){}});</script>';
+                $html = (string)file_get_contents($f['path']);
+                $pos = strripos($html, '</body>');
+                echo $pos === false ? $html . $shim : substr($html, 0, $pos) . $shim . substr($html, $pos);
+                break;
+            }
+            readfile($f['path']);
             break;
 
         case 'system_info':
@@ -327,6 +451,9 @@ try {
                 $newRole = $newPort['role'] ?? 'unused';
                 if ($newRole === ($currentRoleByDevice[$deviceNumber] ?? 'unused')) {
                     continue;
+                }
+                if (CasparManager::running() && ($newRole === 'caspar' || ($currentRoleByDevice[$deviceNumber] ?? '') === 'caspar')) {
+                    throw new RuntimeException("CasparCG läuft - bitte zuerst CasparCG stoppen, bevor die Rolle von Anschluss " . ($deviceNumber + 1) . " geändert wird.");
                 }
                 foreach ($runningPipelines as $runningPipeline) {
                     $direction = $runningPipeline['pipeline_direction'] ?? 'sdi_to_srt';

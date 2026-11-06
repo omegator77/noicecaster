@@ -1,0 +1,66 @@
+{
+  "id": "scene",
+  "name": "Szene (alle Elemente in einer Ebene)",
+  "category": "Szene",
+  "scene": true,
+  "description": "Alle Grafikelemente in einer einzigen Browser-Ebene: Bauchbinde, Namenseinblendung, Spielstand, Uhr, Titelkarte und Trenner lassen sich einzeln ein- und ausblenden. Ohne Grafikkarte hält CasparCG nur eine Grafikebene in Echtzeit, deshalb ist dies die empfohlene Vorlage.",
+  "default_layer": 20,
+  "out_ms": 700,
+  "groups": [
+    {"id": "tc", "name": "Vollbild-Titelkarte", "toggle": "tc_on"},
+    {"id": "sb", "name": "Spielstand", "toggle": "sb_on"},
+    {"id": "ck", "name": "Uhr / Countdown / Stoppuhr", "toggle": "ck_on"},
+    {"id": "np", "name": "Namenseinblendung (1 Zeile)", "toggle": "np_on"},
+    {"id": "lt", "name": "Bauchbinde (2 Zeilen)", "toggle": "lt_on"},
+    {"id": "sl", "name": "Trenner", "trigger": "sl_trigger"}
+  ],
+  "fields": [
+    {"key": "tc_on", "group": "tc", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "tc_title", "group": "tc", "label": "Titel", "type": "text", "max": 60, "default": "Titel"},
+    {"key": "tc_subtitle", "group": "tc", "label": "Untertitel", "type": "text", "max": 100, "default": "Untertitel"},
+    {"key": "tc_bg", "group": "tc", "label": "Hintergrund", "type": "color", "default": "#0d0d0d"},
+    {"key": "tc_accent", "group": "tc", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "tc_align", "group": "tc", "label": "Ausrichtung", "type": "select", "default": "center", "options": [["center", "Mittig"], ["left", "Links"]]},
+
+    {"key": "sb_on", "group": "sb", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "sb_name1", "group": "sb", "label": "Name Team 1", "type": "text", "max": 20, "default": "HEIM"},
+    {"key": "sb_name2", "group": "sb", "label": "Name Team 2", "type": "text", "max": 20, "default": "GAST"},
+    {"key": "sb_score1", "group": "sb", "label": "Punkte Team 1", "type": "number", "min": 0, "max": 999, "step": 1, "default": 0},
+    {"key": "sb_score2", "group": "sb", "label": "Punkte Team 2", "type": "number", "min": 0, "max": 999, "step": 1, "default": 0},
+    {"key": "sb_color1", "group": "sb", "label": "Farbe Team 1", "type": "color", "default": "#1f6fd0"},
+    {"key": "sb_color2", "group": "sb", "label": "Farbe Team 2", "type": "color", "default": "#d03a1f"},
+    {"key": "sb_label", "group": "sb", "label": "Beschriftung (Abschnitt)", "type": "text", "max": 24, "default": ""},
+    {"key": "sb_clock", "group": "sb", "label": "Zeit", "type": "text", "max": 10, "default": ""},
+    {"key": "sb_position", "group": "sb", "label": "Position", "type": "select", "default": "top-center",
+     "options": [["top-center", "Oben Mitte"], ["top-left", "Oben links"], ["bottom-center", "Unten Mitte"]]},
+
+    {"key": "ck_on", "group": "ck", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "ck_mode", "group": "ck", "label": "Art", "type": "select", "default": "clock", "options": [["clock", "Uhrzeit"], ["countdown", "Countdown"], ["stopwatch", "Stoppuhr"]]},
+    {"key": "ck_seconds", "group": "ck", "label": "Startwert in Sekunden", "type": "number", "min": 0, "max": 359999, "step": 1, "default": 300},
+    {"key": "ck_running", "group": "ck", "label": "Läuft", "type": "bool", "default": false},
+    {"key": "ck_show_seconds", "group": "ck", "label": "Sekunden anzeigen (Uhrzeit)", "type": "bool", "default": true},
+    {"key": "ck_label", "group": "ck", "label": "Beschriftung", "type": "text", "max": 30, "default": ""},
+    {"key": "ck_color", "group": "ck", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "ck_position", "group": "ck", "label": "Position", "type": "select", "default": "top-right",
+     "options": [["top-right", "Oben rechts"], ["top-left", "Oben links"], ["bottom-right", "Unten rechts"], ["bottom-left", "Unten links"]]},
+
+    {"key": "np_on", "group": "np", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "np_text", "group": "np", "label": "Text", "type": "text", "max": 60, "default": "Name Nachname"},
+    {"key": "np_color", "group": "np", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "np_position", "group": "np", "label": "Position", "type": "select", "default": "bottom-left",
+     "options": [["bottom-left", "Unten links"], ["bottom-right", "Unten rechts"], ["top-left", "Oben links"], ["top-right", "Oben rechts"]]},
+
+    {"key": "lt_on", "group": "lt", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "lt_line1", "group": "lt", "label": "Hauptzeile", "type": "text", "max": 60, "default": "Name Nachname"},
+    {"key": "lt_line2", "group": "lt", "label": "Zweite Zeile (Lasche)", "type": "text", "max": 40, "default": "Funktion"},
+    {"key": "lt_color", "group": "lt", "label": "Akzentfarbe", "type": "color", "default": "#1fa012"},
+    {"key": "lt_position", "group": "lt", "label": "Position", "type": "select", "default": "bottom-left",
+     "options": [["bottom-left", "Unten links"], ["bottom-right", "Unten rechts"], ["top-left", "Oben links"], ["top-right", "Oben rechts"]]},
+
+    {"key": "sl_trigger", "group": "sl", "hidden": true, "label": "Auslöse-Zähler", "type": "number", "min": 0, "max": 1000000000, "step": 1, "default": 0},
+    {"key": "sl_text", "group": "sl", "label": "Schriftzug", "type": "text", "max": 30, "default": "ZEITLUPE"},
+    {"key": "sl_color", "group": "sl", "label": "Farbe", "type": "color", "default": "#e0a000"},
+    {"key": "sl_textcolor", "group": "sl", "label": "Schriftfarbe", "type": "color", "default": "#101010"},
+    {"key": "sl_hold", "group": "sl", "label": "Dauer in Sekunden", "type": "number", "min": 0.5, "max": 60, "step": 0.5, "default": 2}
+  ]
+}

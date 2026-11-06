@@ -3,7 +3,8 @@
 class DecklinkPortManager
 {
     private PDO $db;
-    private const ROLES = ['input', 'output', 'unused'];
+    // 'caspar': Anschluss gehoert CasparCG (Grafik/Playout); das Gateway kann ihn fuer Pipelines und Testbilder nicht nutzen
+    private const ROLES = ['input', 'output', 'unused', 'caspar'];
     public const MODES = [
         'auto',
         'ntsc', 'ntsc2398', 'pal', 'ntsc-p', 'pal-p',
@@ -44,7 +45,7 @@ class DecklinkPortManager
             if (!in_array($mode, self::MODES, true)) {
                 $mode = 'auto';
             }
-            if ($role === 'output' && $mode === 'auto') {
+            if (($role === 'output' || $role === 'caspar') && $mode === 'auto') {
                 // Ein Ausgang kann kein Format "automatisch erkennen" - er muss aktiv eines erzeugen
                 $mode = self::DEFAULT_OUTPUT_MODE;
             }
@@ -78,7 +79,7 @@ class DecklinkPortManager
     {
         $role = $this->getRole($deviceNumber);
         if ($role !== $expectedRole) {
-            $roleLabels = ['input' => 'Eingang', 'output' => 'Ausgang', 'unused' => 'nicht verwendet'];
+            $roleLabels = ['input' => 'Eingang', 'output' => 'Ausgang', 'unused' => 'nicht verwendet', 'caspar' => 'CasparCG (reserviert)'];
             $expectedLabel = $roleLabels[$expectedRole] ?? $expectedRole;
             $actualLabel = $roleLabels[$role] ?? $role;
             throw new RuntimeException(

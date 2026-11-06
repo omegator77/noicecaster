@@ -1,0 +1,14 @@
+{
+  "id": "slomo",
+  "name": "Trenner (z. B. Zeitlupe)",
+  "category": "Trenner",
+  "description": "Schräges Farbband läuft quer über das Bild und zeigt einen Schriftzug, zum Beispiel „Zeitlupe“ oder „Wiederholung“. Mit „Dauer“ blendet es sich nach der eingestellten Zeit selbst aus.",
+  "default_layer": 30,
+  "out_ms": 700,
+  "fields": [
+    {"key": "text", "label": "Schriftzug", "type": "text", "max": 30, "default": "ZEITLUPE"},
+    {"key": "color", "label": "Farbe", "type": "color", "default": "#e0a000"},
+    {"key": "textcolor", "label": "Schriftfarbe", "type": "color", "default": "#101010"},
+    {"key": "hold", "label": "Dauer in Sekunden (0 = bis Aus)", "type": "number", "min": 0, "max": 60, "step": 0.5, "default": 2}
+  ]
+}
