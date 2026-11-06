@@ -7,7 +7,8 @@
  */
 final class Xlsx
 {
-    private static function zip(array $dateien): string
+    /** @param array<int,array{0:string,1:string}> $dateien [Name, Inhalt] */
+    public static function zip(array $dateien): string
     {
         $teile = '';
         $zentral = '';
@@ -24,8 +25,11 @@ final class Xlsx
         return $teile . $zentral . pack('VvvvvVVv', 0x06054b50, 0, 0, $n, $n, strlen($zentral), $pos, 0);
     }
 
-    /** @return array<string,string> Name => Inhalt */
-    private static function entpacken(string $buf): array
+    /**
+     * @param int $maxGesamt Obergrenze fuer die entpackte Gesamtgroesse (Schutz vor Zip-Bomben)
+     * @return array<string,string> Name => Inhalt
+     */
+    public static function entpacken(string $buf, int $maxGesamt = 64000000): array
     {
         $e = strlen($buf) - 22;
         while ($e >= 0 && substr($buf, $e, 4) !== "PK\x05\x06") {
@@ -37,18 +41,23 @@ final class Xlsx
         $n = unpack('v', substr($buf, $e + 10, 2))[1];
         $p = unpack('V', substr($buf, $e + 16, 4))[1];
         $out = [];
+        $summe = 0;
         for ($i = 0; $i < $n; $i++) {
             if (substr($buf, $p, 4) !== "PK\x01\x02") {
                 break;
             }
             $h = unpack('vmethode/x8/Vcsize/x4/vnl/vel/vcl/x8/Voff', substr($buf, $p + 10, 36));
             $name = substr($buf, $p + 46, $h['nl']);
+            $summe += $h['csize'];
+            if ($summe > $maxGesamt) {
+                throw new ZeitFehler('Die Datei ist entpackt zu gross.');
+            }
             $l = unpack('vlnl/vlel', substr($buf, $h['off'] + 26, 4));
             $daten = substr($buf, $h['off'] + 30 + $l['lnl'] + $l['lel'], $h['csize']);
             if ($h['methode'] === 0) {
                 $out[$name] = $daten;
             } else {
-                $d = @gzinflate($daten);
+                $d = @gzinflate($daten, $maxGesamt);
                 if ($d === false) {
                     throw new ZeitFehler('Die Excel-Datei ist beschaedigt.');
                 }

@@ -391,6 +391,7 @@ function viewSendung() {
     (!g.caspar ? 'CasparCG läuft nicht – bitte im Gateway unter „Grafik (CasparCG)“ starten.' :
       (g.live ? 'Eingeblendet (Ebene ' + g.layer + '). Alle Änderungen hier gehen sofort ins Bild.' : 'Nicht eingeblendet. Die Schalter unten wirken erst, wenn das Paket eingeblendet ist.')) +
     '</div></div><span class="spacer"></span>' +
+    (!g.live && TPLS.length > 1 ? '<select id="gfxTpl" style="max-width:260px" title="Vorlage für die Grafik">' + TPLS.map(function (t) { return '<option value="' + esc(t.id) + '"' + (t.id === g.template ? ' selected' : '') + '>' + esc(t.name) + '</option>'; }).join('') + '</select>' : '') +
     (g.live ? '<button class="b gross" data-act="gfxStop">Grafik ausblenden</button>' : '<button class="b pri gross" data-act="gfxStart"' + (g.caspar ? '' : ' disabled') + '>Grafik einblenden</button>') +
     '</div></div>';
   h += '<div class="muted" style="margin-bottom:6px">Tippen = ein / aus. Das Sendebild folgt nach ca. einer halben Sekunde.</div>';
@@ -486,6 +487,15 @@ function logoLaden(file, fertig) {
   };
   r.readAsDataURL(file);
 }
+// Vorlagen, die sich fuer die Zeitnahme-Grafik eignen (alle ausser den kleinen Einzel-Vorlagen)
+var TPLS = [];
+function ladeVorlagen() {
+  gw('gfx_templates').then(function (r) { return r.json(); }).then(function (j) {
+    TPLS = (j.templates || []).filter(function (t) { return t.id === 'zeitnahme' || !t.builtin; });
+    if (S) render();
+  }).catch(function () {});
+}
+ladeVorlagen();
 function ladeKey(k) {
   var set = function (key) { var e = $('liveUrl'); if (e) e.textContent = new URL('api.php?action=zeit_live&key=' + key + '&distanz=', location.href).href + '37'; };
   if (k) set(k); else gw('zeit_key').then(function (r) { return r.json(); }).then(function (j) { set(j.key); });
@@ -559,7 +569,7 @@ document.addEventListener('click', function (ev) {
 
   switch (a) {
     case 'gfxStart': case 'gfxStop':
-      postJson(a === 'gfxStart' ? 'zeit_gfx_start' : 'zeit_gfx_stop', {}).then(function (j) {
+      postJson(a === 'gfxStart' ? 'zeit_gfx_start' : 'zeit_gfx_stop', a === 'gfxStart' && $('gfxTpl') ? { template: $('gfxTpl').value } : {}).then(function (j) {
         if (j.error) { toast(j.error, true); return; }
         toast(a === 'gfxStart' ? 'Grafik ist eingeblendet' : 'Grafik wird ausgeblendet');
         return refresh(true);

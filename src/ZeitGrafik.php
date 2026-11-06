@@ -13,12 +13,19 @@ require_once __DIR__ . '/Amcp.php';
  */
 class ZeitGrafik
 {
-    public const TEMPLATE = 'zeitnahme';
+    public const TEMPLATE = 'zeitnahme';   // Standard; gewaehlt wird in data/zeit_template.txt
     public const DEFAULT_LAYER = 20;
 
     private static function pushPath(): string
     {
         return __DIR__ . '/../data/zeit_push.json';
+    }
+
+    /** Kennung der Vorlage, die fuer die Zeitnahme eingeblendet wird (Standard: das mitgelieferte Paket). */
+    public static function template(): string
+    {
+        $t = trim((string)@file_get_contents(__DIR__ . '/../data/zeit_template.txt'));
+        return ($t !== '' && GraphicsLibrary::manifest($t) !== null) ? $t : self::TEMPLATE;
     }
 
     private static function lastLoad(): array
@@ -38,7 +45,7 @@ class ZeitGrafik
     public static function layer(): ?int
     {
         foreach (GraphicsLibrary::state() as $l => $e) {
-            if (($e['template'] ?? '') === self::TEMPLATE) {
+            if (($e['template'] ?? '') === self::template()) {
                 return (int)$l;
             }
         }
@@ -48,15 +55,22 @@ class ZeitGrafik
     public static function status(): array
     {
         $l = self::layer();
-        return ['live' => $l !== null, 'layer' => $l, 'caspar' => CasparManager::running() && CasparManager::amcpReachable()];
+        return ['live' => $l !== null, 'layer' => $l, 'template' => self::template(), 'caspar' => CasparManager::running() && CasparManager::amcpReachable()];
     }
 
     /** Paket laden und mit dem aktuellen Stand einblenden (ersetzt, was auf der Ebene liegt). */
-    public static function start(Zeitnahme $z, $layer = null): array
+    public static function start(Zeitnahme $z, $layer = null, ?string $template = null): array
     {
-        if (GraphicsLibrary::manifest(self::TEMPLATE) === null) {
-            throw new RuntimeException('Die Vorlage "zeitnahme" fehlt.');
+        if ($template !== null && $template !== '') {
+            if (GraphicsLibrary::manifest($template) === null) {
+                throw new RuntimeException('Unbekannte Vorlage.');
+            }
+            if (self::layer() !== null && $template !== self::template()) {
+                throw new RuntimeException('Bitte zuerst die Grafik ausblenden, dann die Vorlage wechseln.');
+            }
+            @file_put_contents(__DIR__ . '/../data/zeit_template.txt', $template, LOCK_EX);
         }
+        $tpl = self::template();
         if (!CasparManager::running() || !CasparManager::amcpReachable()) {
             throw new RuntimeException('CasparCG laeuft nicht.');
         }
@@ -65,9 +79,9 @@ class ZeitGrafik
             throw new RuntimeException('Ungueltige Ebene (1 bis 99).');
         }
         $data = $z->grafik();
-        Amcp::ok('CG ' . GraphicsLibrary::CHANNEL . '-' . $n . ' ADD 1 ' . Amcp::quote(self::TEMPLATE . '/index') . ' 1 ' . Amcp::quoteJson($data), 8.0);
+        Amcp::ok('CG ' . GraphicsLibrary::CHANNEL . '-' . $n . ' ADD 1 ' . Amcp::quote($tpl . '/index') . ' 1 ' . Amcp::quoteJson($data), 8.0);
         $shows = array_filter($data, fn($k) => str_starts_with((string)$k, 'show'), ARRAY_FILTER_USE_KEY);
-        GraphicsLibrary::register((int)$n, self::TEMPLATE, $shows);
+        GraphicsLibrary::register((int)$n, $tpl, $shows);
         self::lastSave(['layer' => (int)$n, 'data' => $data]);
         return ['layer' => (int)$n];
     }

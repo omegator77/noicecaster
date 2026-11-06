@@ -17,6 +17,7 @@ require_once __DIR__ . '/../src/GraphicsLibrary.php';
 require_once __DIR__ . '/../src/GraphicsEntries.php';
 require_once __DIR__ . '/../src/Zeitnahme.php';
 require_once __DIR__ . '/../src/ZeitGrafik.php';
+require_once __DIR__ . '/../src/GraphicsPackages.php';
 require_once __DIR__ . '/../src/ZeitnahmeSeiten.php';
 
 header('Content-Type: application/json');
@@ -219,6 +220,36 @@ try {
             echo json_encode(['success' => true] + $result);
             break;
 
+        case 'gfx_template_download':
+            $pk = GraphicsPackages::export((string)($_GET['id'] ?? ''));
+            header('Content-Type: application/zip');
+            header('Content-Disposition: attachment; filename="' . $pk['name'] . '"');
+            header('Cache-Control: no-store');
+            echo $pk['data'];
+            break;
+
+        case 'gfx_template_upload':
+            // Inhalt der Datei im Body; ?name=datei.zip|datei.html, optional ?id=kennung
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $res = GraphicsPackages::import((string)($_GET['name'] ?? ''), (string)file_get_contents('php://input'), isset($_GET['id']) ? (string)$_GET['id'] : null);
+            echo json_encode(['success' => true] + $res);
+            break;
+
+        case 'gfx_template_delete':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            GraphicsPackages::delete((string)($data['id'] ?? ''));
+            echo json_encode(['success' => true]);
+            break;
+
         case 'gfx_entries_list':
             echo json_encode(['entries' => (new GraphicsEntries($db->pdo()))->list(isset($_GET['template']) ? (string)$_GET['template'] : null)]);
             break;
@@ -402,7 +433,7 @@ try {
             }
             $data = json_decode(file_get_contents('php://input'), true);
             if ($action === 'zeit_gfx_start') {
-                $res = ZeitGrafik::start(new Zeitnahme($db->pdo()), is_array($data) ? ($data['layer'] ?? null) : null);
+                $res = ZeitGrafik::start(new Zeitnahme($db->pdo()), is_array($data) ? ($data['layer'] ?? null) : null, is_array($data) && isset($data['template']) ? (string)$data['template'] : null);
             } else {
                 ZeitGrafik::stop();
                 $res = [];

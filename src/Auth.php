@@ -83,7 +83,7 @@ class Auth
     }
 
     /** Nur lesende Aktionen, die per Link oder Bild aufgerufen werden und keinen eigenen Header senden koennen (die Anmeldung wird geprueft). */
-    private const OHNE_HEADER = ['preview_image', 'gfx_file', 'zeit_druck', 'zeit_export', 'zeit_export_html', 'zeit_backup_download'];
+    private const OHNE_HEADER = ['preview_image', 'gfx_file', 'zeit_druck', 'zeit_export', 'zeit_export_html', 'zeit_backup_download', 'gfx_template_download'];
 
     /** Ohne Anmeldung erreichbar: Ergebnisseite fuer Zuschauer (nur lesend) und Messsystem (eigener Zugangsschluessel, in api.php geprueft). */
     private const OEFFENTLICH = ['zeit_ergebnisse', 'zeit_live'];

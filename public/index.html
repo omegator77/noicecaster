@@ -945,6 +945,24 @@
   </div>
   <div class="card" x-show="!gfxCollapsed">
     <div style="margin: 0 0 0.75rem;"><a href="zeitnahme.html" target="_blank" class="btn" style="text-decoration: none; display: inline-block;">Zeitnahme öffnen (Traktor-Pulling)</a></div>
+    <details style="margin: 0 0 0.75rem;">
+      <summary style="cursor: pointer; color: #8b93a1; font-size: 0.85rem;">Vorlagen hochladen und herunterladen</summary>
+      <div class="hint" style="margin: 0.5rem 0;">Eine Vorlage ist eine HTML-Datei (zum Beispiel tpf-grafikpaket.html) oder eine ZIP-Datei mit <code>index.html</code>, optional <code>manifest.json</code>, Bildern und Schriften. Die Datei bestimmt den Namen der Vorlage (tpf-grafikpaket.html wird zu „tpf-grafikpaket“); gleicher Name ersetzt die frühere Fassung. Eingebaute Vorlagen lassen sich nur herunterladen.</div>
+      <div class="actions" style="margin: 0 0 0.5rem;">
+        <button type="button" class="btn-secondary" :disabled="gfx.busy" @click="$refs.gfxTplFile.click()">Vorlage hochladen …</button>
+        <input type="file" accept=".html,.htm,.zip,text/html,application/zip" x-ref="gfxTplFile" style="display: none;" @change="gfxTplUpload($event)">
+      </div>
+      <template x-for="t in gfx.templates" :key="t.id">
+        <div class="tl-item">
+          <div style="flex: 1; min-width: 160px;">
+            <div class="tl-name" x-text="t.name"></div>
+            <div class="tl-prev" x-text="t.id + (t.builtin ? ' · eingebaut' : ' · eigene')"></div>
+          </div>
+          <a class="btn-secondary" style="text-decoration: none;" :href="'api.php?action=gfx_template_download&id=' + encodeURIComponent(t.id)">Herunterladen</a>
+          <button type="button" class="btn-delete" x-show="!t.builtin" :disabled="gfx.busy" @click="gfxTplDelete(t)">Löschen</button>
+        </div>
+      </template>
+    </details>
     <div class="hint" style="margin: 0 0 0.75rem;">Grafik-Maschine mit CasparCG: Key und Fill (und ein Videoausgang) über die SDI-Anschlüsse, gesteuert von hier. Die Anschlüsse bekommen zuerst unter „SDI-Anschlüsse“ die Rolle „CasparCG“ und sind danach für Pipelines gesperrt.</div>
 
     <template x-if="gfx.loaded && !gfx.status.installed">
@@ -4191,6 +4209,46 @@ function app() {
       else if (action === 'gfx_update' && r.layer && g[String(r.layer)]) g[String(r.layer)].fields = r.fields || {};
       else if (action === 'gfx_out' && r.layer) delete g[String(r.layer)];
       else if (action === 'gfx_clear') { if (r.layer) delete g[String(r.layer)]; else for (const k of Object.keys(g)) delete g[k]; }
+    },
+
+    async gfxTemplatesReload() {
+      const d = await this.gfxApi('gfx_templates');
+      this.gfx.templates = d.templates || [];
+      for (const t of this.gfx.templates) {
+        if (!this.gfx.vals[t.id]) {
+          const o = {};
+          for (const f of t.fields) o[f.key] = f.default;
+          this.gfx.vals[t.id] = o;
+        }
+      }
+      if (!this.gfx.templates.some(t => t.id === this.gfx.tplId) && this.gfx.templates.length) {
+        const first = this.gfx.templates.find(t => t.scene) || this.gfx.templates[0];
+        this.gfx.tplId = first.id;
+      }
+    },
+
+    async gfxTplUpload(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!file) return;
+      if (file.size > 25 * 1024 * 1024) { this.gfxSay('Die Datei ist zu groß (höchstens 25 MB).', false); return; }
+      await this.gfxRun(async () => {
+        const res = await fetch('api.php?action=gfx_template_upload&name=' + encodeURIComponent(file.name), { method: 'POST', body: file });
+        let r = null;
+        try { r = await res.json(); } catch (e) { throw new Error('Unerwartete Antwort des Gateways'); }
+        if (r.error) throw new Error(r.error);
+        await this.gfxTemplatesReload();
+        this.gfxSay('Vorlage „' + r.id + '“ ' + (r.replaced ? 'ersetzt' : 'hinzugefügt') + ' (' + r.files + ' Dateien)' + (r.generated_manifest ? '. Es gab kein manifest.json, die Vorlage hat deshalb keine Eingabefelder; sie ist für die Zeitnahme-Grafik gedacht.' : '.'), true);
+      });
+    },
+
+    async gfxTplDelete(t) {
+      if (!confirm('Vorlage „' + t.name + '“ wirklich löschen?')) return;
+      await this.gfxRun(async () => {
+        await this.gfxApi('gfx_template_delete', { id: t.id });
+        await this.gfxTemplatesReload();
+        this.gfxSay('Vorlage gelöscht.', true);
+      });
     },
 
     gfxSay(msg, ok) {
