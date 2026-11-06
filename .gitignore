@@ -47,3 +47,5 @@ data/graphics_state.json.tmp
 data/lowerthird/
 data/lowerthird_*.json
 data/overlay_*.json
+data/zeit_push.json
+data/zeit_push.json.tmp
