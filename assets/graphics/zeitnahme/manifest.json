@@ -1,0 +1,35 @@
+{
+  "id": "zeitnahme",
+  "name": "Zeitnahme-Grafikpaket (Traktor-Pulling)",
+  "category": "Veranstaltung",
+  "scene": true,
+  "description": "Das Grafikpaket der Zeitnahme: Logo, Sponsorenbalken, Klassenansage, Starter mit Weite, Rangliste, Nächste Starter, Pause, Durchsage, Bauchbinde, Zeitlupe und Siegerehrung. Die Inhalte kommen automatisch aus der Zeitnahme; hier lassen sich nur die Module von Hand ein- und ausblenden. Eingeblendet wird über den Reiter Zeitnahme.",
+  "default_layer": 20,
+  "out_ms": 800,
+  "groups": [
+    {"id": "bug", "name": "Logo (oben links)", "toggle": "showBug"},
+    {"id": "sponsors", "name": "Sponsorenbalken", "toggle": "showSponsors"},
+    {"id": "klasse", "name": "Klassenansage", "toggle": "showKlasse"},
+    {"id": "puller", "name": "Starter und Weite", "toggle": "showPuller"},
+    {"id": "next", "name": "Nächste Starter", "toggle": "showNext"},
+    {"id": "ranking", "name": "Rangliste", "toggle": "showRanking"},
+    {"id": "sieger", "name": "Siegerehrung", "toggle": "showSieger"},
+    {"id": "pause", "name": "Pause (Bremswagen fährt zurück)", "toggle": "showPause"},
+    {"id": "aufruf", "name": "Durchsage", "toggle": "showAufruf"},
+    {"id": "bb", "name": "Bauchbinde (Interview)", "toggle": "showBauchbinde"},
+    {"id": "slomo", "name": "Zeitlupe (mit Trenner)", "toggle": "showSlomo"}
+  ],
+  "fields": [
+    {"key": "showBug", "group": "bug", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showSponsors", "group": "sponsors", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showKlasse", "group": "klasse", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showPuller", "group": "puller", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showNext", "group": "next", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showRanking", "group": "ranking", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showSieger", "group": "sieger", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showPause", "group": "pause", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showAufruf", "group": "aufruf", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showBauchbinde", "group": "bb", "label": "Sichtbar", "type": "bool", "default": false},
+    {"key": "showSlomo", "group": "slomo", "label": "Sichtbar", "type": "bool", "default": false}
+  ]
+}

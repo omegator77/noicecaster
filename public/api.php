@@ -16,6 +16,7 @@ require_once __DIR__ . '/../src/CasparManager.php';
 require_once __DIR__ . '/../src/GraphicsLibrary.php';
 require_once __DIR__ . '/../src/GraphicsEntries.php';
 require_once __DIR__ . '/../src/Zeitnahme.php';
+require_once __DIR__ . '/../src/ZeitGrafik.php';
 
 header('Content-Type: application/json');
 
@@ -263,12 +264,40 @@ try {
             }
             $data = json_decode(file_get_contents('php://input'), true);
             try {
-                $result = (new Zeitnahme($db->pdo()))->aktion(is_array($data) ? $data : []);
+                $zeit = new Zeitnahme($db->pdo());
+                $result = $zeit->aktion(is_array($data) ? $data : []);
+                // Ist das Grafikpaket eingeblendet, geht die Aenderung gleich mit; ein Fehler dabei verhindert die Aktion nicht
+                try {
+                    ZeitGrafik::push($zeit);
+                } catch (Throwable $ge) {
+                    $result['grafikFehler'] = $ge->getMessage();
+                }
                 echo json_encode(['ok' => true] + $result, JSON_UNESCAPED_UNICODE);
             } catch (ZeitFehler $e) {
                 http_response_code(400);
                 echo json_encode(['ok' => false, 'fehler' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
             }
+            break;
+
+        case 'zeit_gfx_status':
+            echo json_encode(ZeitGrafik::status());
+            break;
+
+        case 'zeit_gfx_start':
+        case 'zeit_gfx_stop':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                http_response_code(405);
+                echo json_encode(['error' => 'Nur per POST']);
+                break;
+            }
+            $data = json_decode(file_get_contents('php://input'), true);
+            if ($action === 'zeit_gfx_start') {
+                $res = ZeitGrafik::start(new Zeitnahme($db->pdo()), is_array($data) ? ($data['layer'] ?? null) : null);
+            } else {
+                ZeitGrafik::stop();
+                $res = [];
+            }
+            echo json_encode(['success' => true] + $res + ZeitGrafik::status());
             break;
 
         case 'gfx_file':

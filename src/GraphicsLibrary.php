@@ -253,6 +253,14 @@ class GraphicsLibrary
         @rename($tmp, self::statePath());
     }
 
+    /** Vermerken, dass eine Vorlage von anderer Stelle (zum Beispiel der Zeitnahme) eingeblendet wurde. */
+    public static function register(int $layer, string $id, array $fields): void
+    {
+        $st = self::state();
+        $st[(string)$layer] = ['template' => $id, 'fields' => $fields, 'since' => time()];
+        self::saveState($st);
+    }
+
     /** Nach einem Neustart von CasparCG ist nichts mehr eingeblendet. */
     public static function resetState(): void
     {
